@@ -1,0 +1,5 @@
+cc_binary {
+    name: "t311-aaudio-output-probe",
+    srcs: ["aaudio-output-probe.c"],
+    shared_libs: ["libaaudio"],
+}

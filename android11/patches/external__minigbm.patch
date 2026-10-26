@@ -1,0 +1,568 @@
+diff --git a/Android.bp b/Android.bp
+index 02e8e5de0f1177bc1a83522b4d5ab43aeb929750..ee53738bb949240309832f975424500a32810c73 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -129,4 +129,23 @@ cc_library_shared {
+     defaults: ["minigbm_cros_gralloc_defaults"],
+     cflags: ["-DDRV_MESON"],
+     srcs: ["cros_gralloc/gralloc0/gralloc0.cc"],
+-}
+\ No newline at end of file
++}
++
++// BEGIN SM-T311 V59 EXYNOS MINIGBM
++cc_library_shared {
++    name: "gralloc.minigbm_exynos",
++    defaults: ["minigbm_cros_gralloc_defaults"],
++    cflags: ["-DDRV_EXYNOS"],
++    include_dirs: ["external/libdrm/exynos"],
++    relative_install_path: "hw",
++    srcs: ["cros_gralloc/gralloc0/gralloc0.cc"],
++}
++// END SM-T311 V59 EXYNOS MINIGBM
++
++// SM-T311 isolated PRIME interoperability test backend. Not in PRODUCT_PACKAGES.
++cc_library_static {
++    name: "libt311_minigbm_exynos_prime_offline",
++    defaults: ["minigbm_defaults"],
++    cflags: ["-DDRV_EXYNOS"],
++    include_dirs: ["external/libdrm/exynos"],
++}
+diff --git a/cros_gralloc/cros_gralloc_buffer.cc b/cros_gralloc/cros_gralloc_buffer.cc
+index 2982505ad8b9647e6579266d2849fddc2898d240..d6d1197a8997f54e415d5bb0284a6ed20da12ddf 100644
+--- a/cros_gralloc/cros_gralloc_buffer.cc
++++ b/cros_gralloc/cros_gralloc_buffer.cc
+@@ -57,43 +57,58 @@ int32_t cros_gralloc_buffer::lock(const struct rectangle *rect, uint32_t map_fla
+ 
+ 	memset(addr, 0, DRV_MAX_PLANES * sizeof(*addr));
+ 
+-	/*
+-	 * Gralloc consumers don't support more than one kernel buffer per buffer object yet, so
+-	 * just use the first kernel buffer.
+-	 */
+-	if (drv_num_buffers_per_bo(bo_) != 1) {
+-		drv_log("Can only support one buffer per bo.\n");
+-		return -EINVAL;
+-	}
+-
+-	if (map_flags) {
+-		if (lock_data_[0]) {
+-			drv_bo_invalidate(bo_, lock_data_[0]);
+-			vaddr = lock_data_[0]->vma->addr;
+-		} else {
+-			struct rectangle r = *rect;
+-
+-			if (!r.width && !r.height && !r.x && !r.y) {
+-				/*
+-				 * Android IMapper.hal: An accessRegion of all-zeros means the
+-				 * entire buffer.
+-				 */
+-				r.width = drv_bo_get_width(bo_);
+-				r.height = drv_bo_get_height(bo_);
++	const uint32_t kernel_buffers = drv_num_buffers_per_bo(bo_);
++
++	if (map_flags && kernel_buffers > 1) {
++		/* SMT311_H27Q8_GRALLOC_MULTIPLANE_MAP */
++		struct rectangle r = *rect;
++		if (!r.width && !r.height && !r.x && !r.y) {
++			r.width = drv_bo_get_width(bo_);
++			r.height = drv_bo_get_height(bo_);
++		}
++		for (uint32_t plane = 0; plane < num_planes_; plane++) {
++			void *plane_addr;
++			if (lock_data_[plane]) {
++				drv_bo_invalidate(bo_, lock_data_[plane]);
++				plane_addr = static_cast<uint8_t *>(lock_data_[plane]->vma->addr) +
++				             drv_bo_get_plane_offset(bo_, plane);
++			} else {
++				plane_addr = drv_bo_map(bo_, &r, map_flags, &lock_data_[plane], plane);
+ 			}
+-
+-			vaddr = drv_bo_map(bo_, &r, map_flags, &lock_data_[0], 0);
++			if (plane_addr == MAP_FAILED) {
++				drv_log("SMT311_H27Q8_GRALLOC_MULTIPLANE_MAP failed plane=%u\n", plane);
++				for (uint32_t p = 0; p < plane; p++) {
++					if (lock_data_[p]) {
++						drv_bo_flush_or_unmap(bo_, lock_data_[p]);
++						lock_data_[p] = nullptr;
++					}
++				}
++				return -EFAULT;
++			}
++			addr[plane] = static_cast<uint8_t *>(plane_addr);
+ 		}
+-
+-		if (vaddr == MAP_FAILED) {
+-			drv_log("Mapping failed.\n");
+-			return -EFAULT;
++	} else {
++		if (map_flags) {
++			if (lock_data_[0]) {
++				drv_bo_invalidate(bo_, lock_data_[0]);
++				vaddr = lock_data_[0]->vma->addr;
++			} else {
++				struct rectangle r = *rect;
++				if (!r.width && !r.height && !r.x && !r.y) {
++					r.width = drv_bo_get_width(bo_);
++					r.height = drv_bo_get_height(bo_);
++				}
++				vaddr = drv_bo_map(bo_, &r, map_flags, &lock_data_[0], 0);
++			}
++			if (vaddr == MAP_FAILED) {
++				drv_log("Mapping failed.\n");
++				return -EFAULT;
++			}
+ 		}
++		for (uint32_t plane = 0; plane < num_planes_; plane++)
++			addr[plane] = static_cast<uint8_t *>(vaddr) + drv_bo_get_plane_offset(bo_, plane);
+ 	}
+ 
+-	for (uint32_t plane = 0; plane < num_planes_; plane++)
+-		addr[plane] = static_cast<uint8_t *>(vaddr) + drv_bo_get_plane_offset(bo_, plane);
+-
+ 	lockcount_++;
+ 	return 0;
+ }
+@@ -106,9 +121,12 @@ int32_t cros_gralloc_buffer::unlock()
+ 	}
+ 
+ 	if (!--lockcount_) {
+-		if (lock_data_[0]) {
+-			drv_bo_flush_or_unmap(bo_, lock_data_[0]);
+-			lock_data_[0] = nullptr;
++		/* SMT311_H27Q8_GRALLOC_MULTIPLANE_CACHE_SYNC */
++		for (uint32_t plane = 0; plane < num_planes_; plane++) {
++			if (lock_data_[plane]) {
++				drv_bo_flush_or_unmap(bo_, lock_data_[plane]);
++				lock_data_[plane] = nullptr;
++			}
+ 		}
+ 	}
+ 
+@@ -128,11 +146,15 @@ int32_t cros_gralloc_buffer::invalidate()
+ 		return -EINVAL;
+ 	}
+ 
+-	if (lock_data_[0]) {
+-		return drv_bo_invalidate(bo_, lock_data_[0]);
++	int32_t ret = 0;
++	for (uint32_t plane = 0; plane < num_planes_; plane++) {
++		if (lock_data_[plane]) {
++			int32_t plane_ret = drv_bo_invalidate(bo_, lock_data_[plane]);
++			if (!ret && plane_ret)
++				ret = plane_ret;
++		}
+ 	}
+-
+-	return 0;
++	return ret;
+ }
+ 
+ int32_t cros_gralloc_buffer::flush()
+@@ -142,11 +164,15 @@ int32_t cros_gralloc_buffer::flush()
+ 		return -EINVAL;
+ 	}
+ 
+-	if (lock_data_[0]) {
+-		return drv_bo_flush(bo_, lock_data_[0]);
++	int32_t ret = 0;
++	for (uint32_t plane = 0; plane < num_planes_; plane++) {
++		if (lock_data_[plane]) {
++			int32_t plane_ret = drv_bo_flush(bo_, lock_data_[plane]);
++			if (!ret && plane_ret)
++				ret = plane_ret;
++		}
+ 	}
+-
+-	return 0;
++	return ret;
+ }
+ 
+ int32_t cros_gralloc_buffer::get_reserved_region(void **addr, uint64_t *size)
+diff --git a/cros_gralloc/cros_gralloc_driver.cc b/cros_gralloc/cros_gralloc_driver.cc
+index e324bce49264c2cdfae9f5c22cdafdff591aecfc..e4f7d44435dbab50c241ee318402beac9c4d2047 100644
+--- a/cros_gralloc/cros_gralloc_driver.cc
++++ b/cros_gralloc/cros_gralloc_driver.cc
+@@ -161,12 +161,23 @@ int32_t cros_gralloc_driver::allocate(const struct cros_gralloc_buffer_descripto
+ 	 * removed once the ArcCodec and Wayland service have the ability to
+ 	 * send more than one fd. GL/Vulkan drivers may also have to modified.
+ 	 */
+-	if (drv_num_buffers_per_bo(bo) != 1) {
++	const uint32_t kernel_buffers = drv_num_buffers_per_bo(bo);
++	/* SMT311_Q29O: only the encoder still needs two kernel buffers.
++	 * Decoder output is intentionally single-GEM NV12. */
++	const bool smt311_nv12m_encoder =
++		resolved_format == DRM_FORMAT_NV12 &&
++		(use_flags & BO_USE_HW_VIDEO_ENCODER) &&
++		kernel_buffers == 2;
++	const bool smt311_yv12_camera_three_gem =
++		resolved_format == DRM_FORMAT_YVU420_ANDROID &&
++		(use_flags & BO_USE_CAMERA_WRITE) &&
++		kernel_buffers == 3;
++	if (kernel_buffers != 1 && !smt311_nv12m_encoder &&
++	    !smt311_yv12_camera_three_gem) {
+ 		drv_bo_destroy(bo);
+ 		drv_log("Can only support one buffer per bo.\n");
+ 		return -EINVAL;
+ 	}
+-
+ 	num_planes = drv_bo_get_num_planes(bo);
+ 	num_fds = num_planes;
+ 
+@@ -189,7 +200,7 @@ int32_t cros_gralloc_driver::allocate(const struct cros_gralloc_buffer_descripto
+ 	 * native_handle_clone() copies data based on hnd->base.numInts.
+ 	 */
+ 	num_bytes = ALIGN(num_bytes, sizeof(int));
+-	num_ints = num_bytes - sizeof(native_handle_t) - num_fds;
++	num_ints = ((num_bytes - sizeof(native_handle_t)) / sizeof(int)) - num_fds;
+ 	/*
+ 	 * Malloc is used as handles are ultimetly destroyed via free in
+ 	 * native_handle_delete().
+diff --git a/cros_gralloc/cros_gralloc_helpers.cc b/cros_gralloc/cros_gralloc_helpers.cc
+index 1e05150694d8b6ff98a06a53c507d9f77432ddb4..20958f9625fa01c3ca316a8f8b2d94510642b0ff 100644
+--- a/cros_gralloc/cros_gralloc_helpers.cc
++++ b/cros_gralloc/cros_gralloc_helpers.cc
+@@ -31,7 +31,16 @@ uint32_t cros_gralloc_convert_format(int format)
+ 	case HAL_PIXEL_FORMAT_RGBX_8888:
+ 		return DRM_FORMAT_XBGR8888;
+ 	case HAL_PIXEL_FORMAT_YCbCr_420_888:
+-		return DRM_FORMAT_FLEX_YCbCr_420_888;
++		/*
++		 * PJARCZAK CAMERA HOTFIX17: FLEX_YCbCr_420_888 -> NV12
++		 *
++		 * The SM-T311 generic minigbm backend does not resolve the FLEX
++		 * sentinel and gralloc0 reaches allocation with drv_format=9999.
++		 * This camera HAL writes through lockYCbCr(), and NV12 is already
++		 * supported by the generic backend for CAMERA_WRITE. Keep the
++		 * Android droid format flexible while using concrete NV12 backing.
++		 */
++		return DRM_FORMAT_NV12;
+ 	case HAL_PIXEL_FORMAT_YV12:
+ 		return DRM_FORMAT_YVU420_ANDROID;
+ 	/*
+diff --git a/cros_gralloc/gralloc0/gralloc0.cc b/cros_gralloc/gralloc0/gralloc0.cc
+index 170dae9b2a6819f00262c23d17c74bd68d4cc7e2..a3905fd77d35a06316a9c40c830263d280e7f00e 100644
+--- a/cros_gralloc/gralloc0/gralloc0.cc
++++ b/cros_gralloc/gralloc0/gralloc0.cc
+@@ -19,6 +19,16 @@ struct gralloc0_module {
+ 	std::mutex initialization_mutex;
+ };
+ 
++/* Mesa platform_android.c private query ABI. */
++struct cros_gralloc0_buffer_info {
++	uint32_t drm_fourcc;
++	int num_fds;
++	int fds[4];
++	uint64_t modifier;
++	uint32_t offset[4];
++	uint32_t stride[4];
++};
++
+ /* This enumeration must match the one in <gralloc_drm.h>.
+  * The functions supported by this gralloc's temporary private API are listed
+  * below. Use of these functions is highly discouraged and should only be
+@@ -31,6 +41,7 @@ enum {
+ 	GRALLOC_DRM_GET_FORMAT,
+ 	GRALLOC_DRM_GET_DIMENSIONS,
+ 	GRALLOC_DRM_GET_BACKING_STORE,
++	GRALLOC_DRM_GET_BUFFER_INFO,
+ };
+ // clang-format on
+ 
+@@ -265,6 +276,7 @@ static int gralloc0_perform(struct gralloc_module_t const *module, int op, ...)
+ 	uint32_t *out_width, *out_height, *out_stride;
+ 	uint32_t strides[DRV_MAX_PLANES] = { 0, 0, 0, 0 };
+ 	uint32_t offsets[DRV_MAX_PLANES] = { 0, 0, 0, 0 };
++	struct cros_gralloc0_buffer_info *info;
+ 	auto mod = (struct gralloc0_module const *)module;
+ 
+ 	switch (op) {
+@@ -272,6 +284,7 @@ static int gralloc0_perform(struct gralloc_module_t const *module, int op, ...)
+ 	case GRALLOC_DRM_GET_FORMAT:
+ 	case GRALLOC_DRM_GET_DIMENSIONS:
+ 	case GRALLOC_DRM_GET_BACKING_STORE:
++	case GRALLOC_DRM_GET_BUFFER_INFO:
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -316,6 +329,18 @@ static int gralloc0_perform(struct gralloc_module_t const *module, int op, ...)
+ 		out_store = va_arg(args, uint64_t *);
+ 		ret = mod->driver->get_backing_store(handle, out_store);
+ 		break;
++	case GRALLOC_DRM_GET_BUFFER_INFO:
++		info = va_arg(args, struct cros_gralloc0_buffer_info *);
++		memset(info, 0, sizeof(*info));
++		info->drm_fourcc = hnd->format;
++		info->num_fds = hnd->num_planes;
++		info->modifier = hnd->format_modifier;
++		for (uint32_t i = 0; i < hnd->num_planes; i++) {
++			info->fds[i] = hnd->fds[i];
++			info->offset[i] = hnd->offsets[i];
++			info->stride[i] = hnd->strides[i];
++		}
++		break;
+ 	default:
+ 		ret = -EINVAL;
+ 	}
+@@ -361,8 +386,12 @@ static int gralloc0_lock_async(struct gralloc_module_t const *module, buffer_han
+ 
+ 	map_flags = gralloc0_convert_map_usage(usage);
+ 	ret = mod->driver->lock(handle, fence_fd, true, &rect, map_flags, addr);
++	if (ret) {
++		*vaddr = nullptr;
++		return ret;
++	}
+ 	*vaddr = addr[0];
+-	return ret;
++	return 0;
+ }
+ 
+ static int gralloc0_unlock_async(struct gralloc_module_t const *module, buffer_handle_t handle,
+@@ -411,8 +440,10 @@ static int gralloc0_lock_async_ycbcr(struct gralloc_module_t const *module, buff
+ 
+ 	if (!map_flags) {
+ 		ret = mod->driver->resource_info(handle, strides, offsets);
+-		if (ret)
++		if (ret) {
++			module->unlock(module, handle);
+ 			return ret;
++		}
+ 
+ 		for (uint32_t plane = 0; plane < DRV_MAX_PLANES; plane++)
+ 			addr[plane] =
+diff --git a/exynos.c b/exynos.c
+index 6a801071fdffb957bc170206cbd28835704a6cb3..32245263f181fcdce000e2b59ffae9666bca96cb 100644
+--- a/exynos.c
++++ b/exynos.c
+@@ -13,24 +13,69 @@
+ #include <string.h>
+ #include <xf86drm.h>
+ #include <exynos_drm.h>
++
++/* Kernel-private flag accepted by the SMT311 Q29Y Exynos DRM patch. */
++#define SMT311_EXYNOS_BO_COHERENT (1U << 3)
++#define SMT311_EXYNOS_BO_DIAG_KMAP (1U << 4)
+ // clang-format on
+ 
+ #include "drv_priv.h"
+ #include "helpers.h"
+ #include "util.h"
+ 
+-static const uint32_t render_target_formats[] = { DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888 };
++static const uint32_t render_target_formats[] = { DRM_FORMAT_ABGR8888, DRM_FORMAT_ARGB8888,
++                                                  DRM_FORMAT_RGB565, DRM_FORMAT_XBGR8888,
++                                                  DRM_FORMAT_XRGB8888 };
++
++static const uint32_t texture_source_formats[] = { DRM_FORMAT_NV12, DRM_FORMAT_R8,
++                                                  DRM_FORMAT_YVU420_ANDROID };
+ 
+-static const uint32_t texture_source_formats[] = { DRM_FORMAT_NV12 };
++const char smt311_v124_minigbm_android_rgba_align16[] =
++	"SMT311_V124_MINIGBM_ANDROID_RGBA_ALIGN16";
++const char smt311_v127_minigbm_exynos_contiguous_dma[] =
++	"SMT311_V127_MINIGBM_EXYNOS_CONTIGUOUS_DMA";
++const char smt311_hotfix21_minigbm_exynos_nv12_single_gem[] =
++	"SMT311_HOTFIX21_MINIGBM_EXYNOS_NV12_SINGLE_GEM";
++const char smt311_hotfix23_minigbm_exynos_jpeg_private[] =
++	"SMT311_HOTFIX23_MINIGBM_EXYNOS_JPEG_R8_PRIVATE_YV12";
++const char smt311_h27q4_minigbm_nv12_mfc_encoder[] =
++	"SMT311_H27Q4_MINIGBM_NV12_MFC_ENCODER";
++const char smt311_h27q9_nv12m_odd_height_probe[] =
++	"SMT311_H27Q9_NV12M_ODD_HEIGHT_PROBE";
++const char smt311_q29y_decoder_coherent_gem[] =
++	"SMT311_Q29Y_DECODER_COHERENT_GEM";
++const char smt311_q29o_decoder_nv12_single_gem[] =
++	"SMT311_Q29O_DECODER_NV12_SINGLE_GEM";
++const char smt311_q29q_decoder_nv12_visible_wc[] =
++	"SMT311_Q29Q_DECODER_NV12_VISIBLE_WC";
++const char smt311_q33e_camera_gralloc_hw_layout[] =
++	"SMT311_Q33E_CAMERA_GRALLOC_HW_LAYOUT";
++const char smt311_q34k_camera_bgra_coherent_gem[] =
++	"SMT311_Q34K_CAMERA_BGRA_COHERENT_GEM";
++const char smt311_q34y_jpeg_blob_coherent_gem[] =
++	"SMT311_Q34Y_JPEG_BLOB_COHERENT_GEM";
+ 
+ static int exynos_init(struct driver *drv)
+ {
+ 	drv_add_combinations(drv, render_target_formats, ARRAY_SIZE(render_target_formats),
+ 			     &LINEAR_METADATA, BO_USE_RENDER_MASK);
+ 
++	/* SMT311_Q34K: camera DMA writes BGRA preview, Mali samples the same linear GEM. */
++	drv_modify_combination(drv, DRM_FORMAT_ARGB8888, &LINEAR_METADATA,
++			       BO_USE_CAMERA_WRITE);
++
+ 	drv_add_combinations(drv, texture_source_formats, ARRAY_SIZE(texture_source_formats),
+ 			     &LINEAR_METADATA, BO_USE_TEXTURE_MASK);
+ 
++	/* SMT311_Q33E: YV12 can be read or written by camera hardware. */
++	drv_modify_combination(drv, DRM_FORMAT_YVU420_ANDROID, &LINEAR_METADATA,
++			       BO_USE_CAMERA_READ | BO_USE_CAMERA_WRITE);
++
++	/* H27Q4/Q33E: linear NV12 for Codec2 and camera hardware output. */
++	drv_modify_combination(drv, DRM_FORMAT_NV12, &LINEAR_METADATA,
++			       BO_USE_HW_VIDEO_ENCODER | BO_USE_HW_VIDEO_DECODER |
++			       BO_USE_CAMERA_WRITE);
++
+ 	return drv_modify_linear_combinations(drv);
+ }
+ 
+@@ -40,18 +85,53 @@ static int exynos_bo_create(struct bo *bo, uint32_t width, uint32_t height, uint
+ 	size_t plane;
+ 
+ 	if (format == DRM_FORMAT_NV12) {
++		uint32_t y_height;
+ 		uint32_t chroma_height;
+-		/* V4L2 s5p-mfc requires width to be 16 byte aligned and height 32. */
+ 		width = ALIGN(width, 16);
+-		height = ALIGN(height, 32);
+-		chroma_height = ALIGN(height / 2, 32);
+ 		bo->meta.strides[0] = bo->meta.strides[1] = width;
+-		/* MFC v8+ requires 64 byte padding in the end of luma and chroma buffers. */
+-		bo->meta.sizes[0] = bo->meta.strides[0] * height + 64;
+-		bo->meta.sizes[1] = bo->meta.strides[1] * chroma_height + 64;
++
++		/*
++		 * SMT311_Q29Q_DECODER_NV12_VISIBLE_WC:
++		 * FIMC writes final decoder output as ordinary linear NV12 at the
++		 * visible dimensions. Do not reuse the MFC-v5 encoder padding here:
++		 * 720p is coded as 736 lines and 1080p is aligned to 1088 lines, but
++		 * FIMC capture writes visible 720/1080. Android must therefore see
++		 * UV immediately after the visible Y plane.
++		 */
++		const bool smt311_camera_write_visible =
++			(use_flags & BO_USE_CAMERA_WRITE) &&
++			!(use_flags & BO_USE_HW_VIDEO_ENCODER);
++		if ((use_flags & BO_USE_HW_VIDEO_DECODER) || smt311_camera_write_visible) {
++			y_height = height;
++			chroma_height = (height + 1) / 2;
++			bo->meta.sizes[0] = bo->meta.strides[0] * y_height;
++			bo->meta.sizes[1] = bo->meta.strides[1] * chroma_height;
++		} else {
++			/* SMT311_H27Q8_MFCV5_NV12M_LAYOUT: encoder buffers stay aligned. */
++			y_height = ALIGN(height, 16);
++			chroma_height = ALIGN((height + 1) / 2, 8);
++			bo->meta.sizes[0] = ALIGN(bo->meta.strides[0] * y_height, 2048);
++			bo->meta.sizes[1] = ALIGN(bo->meta.strides[1] * chroma_height, 2048);
++		}
+ 		bo->meta.offsets[0] = bo->meta.offsets[1] = 0;
+ 		bo->meta.total_size = bo->meta.sizes[0] + bo->meta.sizes[1];
+-	} else if (format == DRM_FORMAT_XRGB8888 || format == DRM_FORMAT_ARGB8888) {
++	} else if (format == DRM_FORMAT_YVU420_ANDROID) {
++		/* PJARCZAK CAMERA HOTFIX23: Android YV12 metadata, one backing GEM below. */
++		uint32_t stride = drv_stride_from_format(format, width, 0);
++		int meta_ret = drv_bo_from_format(bo, stride, height, format);
++		if (meta_ret)
++			return meta_ret;
++	} else if (format == DRM_FORMAT_R8) {
++		/* PJARCZAK CAMERA HOTFIX23: Camera3 JPEG/BLOB backing. */
++		bo->meta.strides[0] = drv_stride_from_format(format, width, 0);
++		bo->meta.sizes[0] = bo->meta.strides[0] * height;
++		bo->meta.offsets[0] = 0;
++		bo->meta.total_size = bo->meta.sizes[0];
++	} else if (format == DRM_FORMAT_ABGR8888 || format == DRM_FORMAT_ARGB8888 ||
++	           format == DRM_FORMAT_RGB565 || format == DRM_FORMAT_XBGR8888 ||
++	           format == DRM_FORMAT_XRGB8888) {
++		width = ALIGN(width, 16);
++		height = ALIGN(height, 16);
+ 		bo->meta.strides[0] = drv_stride_from_format(format, width, 0);
+ 		bo->meta.total_size = bo->meta.sizes[0] = height * bo->meta.strides[0];
+ 		bo->meta.offsets[0] = 0;
+@@ -62,13 +142,97 @@ static int exynos_bo_create(struct bo *bo, uint32_t width, uint32_t height, uint
+ 	}
+ 
+ 	int ret;
++
++	/* Legacy YV12 stays one-GEM; Q33E camera-written YV12 is 3-GEM. */
++	if (format == DRM_FORMAT_YVU420_ANDROID &&
++	    !(use_flags & BO_USE_CAMERA_WRITE)) {
++		struct drm_exynos_gem_create gem_create;
++
++		memset(&gem_create, 0, sizeof(gem_create));
++		gem_create.size = bo->meta.total_size;
++		gem_create.flags = EXYNOS_BO_CONTIG;
++
++		ret = drmIoctl(bo->drv->fd, DRM_IOCTL_EXYNOS_GEM_CREATE, &gem_create);
++		if (ret) {
++			drv_log("DRM_IOCTL_EXYNOS_GEM_CREATE failed (YV12 single GEM size=%zu)\n",
++				bo->meta.total_size);
++			return -errno;
++		}
++
++		for (plane = 0; plane < bo->meta.num_planes; plane++)
++			bo->handles[plane].u32 = gem_create.handle;
++		return 0;
++	}
++
++	/* SMT311_Q29O_DECODER_NV12_SINGLE_GEM:
++	 * Decoder output is consumed by Android as flexible YUV and FIMC can
++	 * write ordinary single-buffer NV12 directly. Keep Y+UV in one GEM so
++	 * C2/gralloc sees one backing store and avoids multi-DMABUF CPU mapping.
++	 * Preserve the existing CPU-only single-GEM path as well. */
++	const bool smt311_decoder_nv12_single_gem =
++		format == DRM_FORMAT_NV12 && (use_flags & BO_USE_HW_VIDEO_DECODER);
++	const bool smt311_camera_nv12_single_gem =
++		format == DRM_FORMAT_NV12 && (use_flags & BO_USE_CAMERA_WRITE) &&
++		!(use_flags & BO_USE_HW_VIDEO_ENCODER);
++	const bool smt311_cpu_nv12_single_gem =
++		format == DRM_FORMAT_NV12 &&
++		(use_flags & (BO_USE_SW_WRITE_OFTEN | BO_USE_SW_WRITE_RARELY)) &&
++		!(use_flags & ~(BO_USE_LINEAR | BO_USE_SW_MASK));
++	if (smt311_decoder_nv12_single_gem || smt311_camera_nv12_single_gem ||
++	    smt311_cpu_nv12_single_gem) {
++		struct drm_exynos_gem_create gem_create;
++
++		memset(&gem_create, 0, sizeof(gem_create));
++		gem_create.size = bo->meta.total_size;
++		/*
++		 * SMT311_Q29Y_DECODER_COHERENT_GEM:
++		 * Decoder output uses the dedicated kernel coherent flag. This keeps
++		 * CPU reads coherent with FIMC DMA without per-frame cache flushes.
++		 */
++		gem_create.flags = smt311_decoder_nv12_single_gem
++			? (EXYNOS_BO_CONTIG | SMT311_EXYNOS_BO_COHERENT | SMT311_EXYNOS_BO_DIAG_KMAP)
++			: EXYNOS_BO_CONTIG;
++
++		ret = drmIoctl(bo->drv->fd, DRM_IOCTL_EXYNOS_GEM_CREATE, &gem_create);
++		if (ret) {
++			drv_log("DRM_IOCTL_EXYNOS_GEM_CREATE failed (NV12 single GEM size=%zu flags=0x%x)\n",
++				bo->meta.total_size, gem_create.flags);
++			return -errno;
++		}
++
++		bo->handles[0].u32 = gem_create.handle;
++		bo->handles[1].u32 = gem_create.handle;
++		bo->meta.offsets[0] = 0;
++		bo->meta.offsets[1] = bo->meta.sizes[0];
++		return 0;
++	}
++
++	if (format == DRM_FORMAT_YVU420_ANDROID &&
++	    (use_flags & BO_USE_CAMERA_WRITE)) {
++		for (plane = 0; plane < bo->meta.num_planes; plane++)
++			bo->meta.offsets[plane] = 0;
++	}
++
++	const bool smt311_camera_bgra_coherent =
++		format == DRM_FORMAT_ARGB8888 && (use_flags & BO_USE_CAMERA_WRITE);
++	const bool smt311_jpeg_blob_coherent = format == DRM_FORMAT_R8;
++
+ 	for (plane = 0; plane < bo->meta.num_planes; plane++) {
+ 		size_t size = bo->meta.sizes[plane];
+ 		struct drm_exynos_gem_create gem_create;
+ 
+ 		memset(&gem_create, 0, sizeof(gem_create));
+ 		gem_create.size = size;
+-		gem_create.flags = EXYNOS_BO_NONCONTIG;
++		gem_create.flags = EXYNOS_BO_CONTIG |
++			((smt311_camera_bgra_coherent || smt311_jpeg_blob_coherent) ?
++			 SMT311_EXYNOS_BO_COHERENT : 0) |
++			(smt311_camera_bgra_coherent ? SMT311_EXYNOS_BO_DIAG_KMAP : 0);
++		if (smt311_camera_bgra_coherent)
++			drv_log("SMT311_Q34K_CAMERA_BGRA_COHERENT_ALLOC size=%zu flags=0x%x\n",
++				size, gem_create.flags);
++		if (smt311_jpeg_blob_coherent && (use_flags & BO_USE_CAMERA_WRITE))
++			drv_log("SMT311_Q34Y_JPEG_BLOB_COHERENT_ALLOC size=%zu flags=0x%x\n",
++				size, gem_create.flags);
+ 
+ 		ret = drmIoctl(bo->drv->fd, DRM_IOCTL_EXYNOS_GEM_CREATE, &gem_create);
+ 		if (ret) {

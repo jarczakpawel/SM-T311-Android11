@@ -1,0 +1,70 @@
+{
+  "stage": "G667",
+  "kind": "Source-only ext4 in-place data mutation reader/writer matrix",
+  "positives": {
+    "fallocate_wait_dio_before_invalidate": true,
+    "fallocate_lock_before_mode_dispatch": true,
+    "fallocate_zero_range_dispatch": true,
+    "fallocate_collapse_dispatch": true,
+    "fallocate_insert_dispatch": true,
+    "zero_partial_first_then_pagecache_invalidate": true,
+    "zero_uses_partial_zero_helper": true,
+    "partial_zero_calls_block_zero": true,
+    "block_zero_dispatches_normal_and_journal": true,
+    "plain_zero_locked_before_folio_unlock": true,
+    "journal_zero_locked_before_folio_unlock": true,
+    "plain_zero_releases_reference": true,
+    "journal_zero_releases_reference": true,
+    "collapse_wait_writeback_before_truncate": true,
+    "collapse_truncate_before_shift": true,
+    "insert_wait_writeback_before_truncate": true,
+    "insert_truncate_before_size_change": true,
+    "buffered_write_passes_generic_writer": true,
+    "mmap_page_mkwrite_has_invalidate_shared": true,
+    "mmap_mkwrite_locks_folio": true,
+    "mmap_mkwrite_checks_mapping_identity": true,
+    "normal_mmap_alias_guard": true,
+    "rcu_read_no_folio_lock": true,
+    "rcu_reads_usercopy_direct_without_snapshot": true,
+    "truncate_full_folios_still_removed": true,
+    "rcu_copy_has_no_invalidate_lock": true
+  },
+  "positive_pass": 26,
+  "rejected_source_mutations": {
+    "drop_partial_zero_before_invalidate": [
+      "zero_partial_first_then_pagecache_invalidate",
+      "zero_uses_partial_zero_helper"
+    ],
+    "drop_unlocked_copy_guard": [
+      "normal_mmap_alias_guard"
+    ],
+    "drop_plain_zero": [
+      "plain_zero_locked_before_folio_unlock"
+    ],
+    "drop_collapse_cache_invalidate": [
+      "collapse_wait_writeback_before_truncate",
+      "collapse_truncate_before_shift"
+    ],
+    "drop_mmap_invalidate_shared_lock": [
+      "mmap_page_mkwrite_has_invalidate_shared"
+    ]
+  },
+  "key_distinction": "A live mapped folio may be written while normal buffered or reference-free reads copy it. No atomic file read snapshot is promised for concurrent writers; this is distinct from freed-folio UAF or cross-inode data exposure.",
+  "unresolved": [
+    "The mmap writable-alias guard is checked before RCU lock, and the audit does not prove a concurrent mmap enable cannot race it.",
+    "The folio lock held by ext4 partial zeroing does not serialize the no-reference fast read's direct _copy_to_iter.",
+    "Complete ARMv7 cache alias, lifetime and weak-memory proof is absent.",
+    "G665 C XArray binary UNRUN due missing liburcu development headers."
+  ],
+  "stages": {
+    "S0": "PASS",
+    "S1": "ACTIVE",
+    "S2": "BLOCKED",
+    "S3": "BLOCKED",
+    "S4": "BLOCKED",
+    "S5": "BLOCKED",
+    "S6": "BLOCKED",
+    "S7": "PARTIAL"
+  },
+  "production_runtime_change": false
+}

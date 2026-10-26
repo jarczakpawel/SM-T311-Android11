@@ -1,0 +1,31 @@
+{
+  "stage": "G716",
+  "status": "HOST_ONLY_DO_NOT_FLASH",
+  "port_18_linustorvalds_kiryl_commits_active_tree_reverted": true,
+  "two_independent_refcounted_read_microoptimizations_retained": true,
+  "PAGE_RCU_FREE_compiled": false,
+  "SM_T311_RCU_HOT4K_EXPERIMENT_compiled": false,
+  "DEBUG_FS_preserved": true,
+  "FUSE_PASSTHROUGH_preserved": true,
+  "kernelrelease": "7.3.0-pjarczak",
+  "format": "Android boot image v0",
+  "image_size": 8388608,
+  "image_sha256": "5d275fb7977d95e9e3515ff571efe675359e0874e1f8c5aef4b9c925d19182c1",
+  "zImage_sha256": "029b6d3c21fc67b2892cde858e1fef134cfa07fe3ab9d3df4b39777617a3d8bf",
+  "vmlinux_sha256": "0017bed38b58258ec7d8bc8987ffeeaf60fca2f984f3df71c043fdfb8a325122",
+  "dtb_sha256": "6fb3e77075733d531abaa2f4c3fa1bf55c11a50f04cc5acc9838db5ea0f41bfb",
+  "ramdisk_sha256": "681d59437776b09ede48dc57e16b34697d08b7161f820673b8c84df3943bd8fd",
+  "baseline_old_G650_sha256": "2d477816fef0dbe2f41ca30747201dbe773e3dc3e710348c118226ee2999b7a3",
+  "packer_negative_controls": {
+    "bad_magic": true,
+    "bad_page_size": true,
+    "bad_ramdisk_byte": true,
+    "oversize_boot": true,
+    "too_short_kernel": true,
+    "bad_header_sha1": true
+  },
+  "current_physical_boot_sha_verified": false,
+  "current_physical_recovery_sha_verified": false,
+  "owner_attended_TWRP_recovery_verified": false,
+  "flash_authorized": false
+}

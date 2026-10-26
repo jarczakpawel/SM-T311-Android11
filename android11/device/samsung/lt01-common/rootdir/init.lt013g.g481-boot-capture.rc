@@ -1,0 +1,12 @@
+# Bounded one-shot post-boot diagnostic. Does nothing unless armed by owner in TWRP.
+# Never touches OTG, PMIC, reboot, modem, Wi-Fi ADB or existing system services.
+service vendor.t311_g481_boot_capture /system/bin/sh /data/local/tmp/G481-boot-capture.sh
+    class late_start
+    user shell
+    group shell log cache
+    seclabel u:r:shell:s0
+    disabled
+    oneshot
+
+on property:sys.boot_completed=1
+    start vendor.t311_g481_boot_capture

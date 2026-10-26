@@ -1,0 +1,7 @@
+# G685 SM-T311 — staged second runtime key check inside reader RCU critical section
+
+Kernel commits `4deda0a99` (mm/filemap.c, real herd7 LKMM, real-source test and changed-source regressions) and `61decd94a` (machine stages/plan). Existing filemap_read_rcu() checks lockless_read_key OUTSIDE RCU; after seeing ON, thread can stall and enter RCU only after an OFF transition. G685 adds a second test `unlikely(!lockless_read_enabled())` INSIDE `rcu_read_lock()`, with proper rcu_read_unlock and slowpath fallback before touching unreferenced folio.
+
+Herd7 abstract hypothetical disable-then-GP publication: old outside-only gate Sometimes 1/4, internal RCU key recheck Never 0/6. 16/16 C source checks, 8/8 changed-source mutants caught, new filemap.o compiled under actual EXPERIMENT=y/PAGE_RCU_FREE=y/DEBUG_FS=y ARM EABI5 SHA `0c97df92e8c15d5163ea91e7c54ad0ac20c7b71297c6a5b31f440dece0cdf9c1`.
+
+CAUTION: Current debugfs disable does not perform a GP itself and G683 ext4 mmap writers STILL wait GP even if runtime key OFF. G685 mitigates one modeled reader-late-entry hazard of potential future OFF optimization; NOT a physical UAF reproduction, global correctness proof, or permission to skip writer GP. Three executable source paths STAGED NOT INSTALLED relative to physical G650: mm/filemap.c, mm/page_alloc.c, mm/vma.c. S0 PASS, S1 ACTIVE, S2–S6 BLOCKED, S7 PARTIAL, S8 ACTIVE. No flash/reboot/backup/night audio/camera/phone/PIN/OTG. GitHub owner-only.

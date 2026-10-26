@@ -1,0 +1,4 @@
+# Explicit type for memfd shared-memory buffers created by camera HIDL.
+type hal_camera_default_tmpfs, file_type, mlstrustedobject;
+tmpfs_domain(hal_camera_default)
+allow cameraserver hal_camera_default_tmpfs:file { getattr map read write };

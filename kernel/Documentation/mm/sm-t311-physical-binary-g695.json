@@ -1,0 +1,361 @@
+{
+  "stage": "G695",
+  "source": "G650 physical /proc/config.gz, independent G650 source objects, current experimental ON-refused objects and release-OFF objects",
+  "physical_config": {
+    "stage": "G695",
+    "observation_date": "2026-10-21",
+    "device": "SM-T311",
+    "source": "direct passive ADB: zcat /proc/config.gz; cat /proc/version; uname -r",
+    "physical_kernelrelease": "7.3.0-pjarczak",
+    "physical_uts_version": "#9 SMP PREEMPT Tue Oct 20 18:36:31 CEST 2026",
+    "physical_compiler": "arm-linux-gnueabihf-gcc (Debian 16.2.0-3) 16.2.0",
+    "physical_config_lines": 6794,
+    "physical_uncompressed_config_bytes": 183367,
+    "physical_uncompressed_config_sha256": "ef893db0ed858fc5a03b4ca3d25a820c55bd599dc53f4fafc116de150408d496",
+    "independent_host_experiment_config_sha256": "e6ead0004554ea21cd6d00e10debb66cb751cea16a0b58581090adc0f419a60f",
+    "physical_config_to_host_experiment_diff_count": 3,
+    "physical_config_differences_from_host_experiment": [
+      {
+        "line": 14,
+        "host": "CONFIG_RUSTC_VERSION=109701",
+        "physical": "CONFIG_RUSTC_VERSION=109500"
+      },
+      {
+        "line": 15,
+        "host": "CONFIG_RUSTC_LLVM_VERSION=220108",
+        "physical": "CONFIG_RUSTC_LLVM_VERSION=210108"
+      },
+      {
+        "line": 16,
+        "host": "CONFIG_RUSTC_LLVM_MAJOR_VERSION=22",
+        "physical": "CONFIG_RUSTC_LLVM_MAJOR_VERSION=21"
+      }
+    ],
+    "enabled": [
+      "CONFIG_SM_T311_RCU_HOT4K_EXPERIMENT=y",
+      "CONFIG_PAGE_RCU_FREE=y",
+      "CONFIG_DEBUG_FS=y",
+      "CONFIG_PREEMPT_RCU=y",
+      "CONFIG_ARCH_EXYNOS4=y",
+      "CONFIG_HIGHMEM=y"
+    ],
+    "safe_interpretation": [
+      "Physical BOOT G650 has optional RCU experiment compiled into it; contrary to the standalone release-OFF host profile.",
+      "Compiled-in does not establish that live debugfs runtime static key has been turned ON.",
+      "Runtime key itself could not be read as uid=2000 shell due inaccessible debugfs; RCU vmstat counters zero do not independently prove the key state.",
+      "Reconstructed exact physical config SHA256 is reproducible by replacing the three saved Rust metadata fields in the full host experimental .config.",
+      "Baseline objects built from G650 source in exact byte-identical host experimental config, which differs from installed /proc/config.gz in just those three Rust metadata entries.",
+      "No physical BOOT dumped, no flash, no backup and no reboot."
+    ]
+  },
+  "guards": {
+    "real_6794_line_physical_config_hash_reconstructed": true,
+    "G650_host_experiment_same_dotconfig": true,
+    "all_3_built_with_same_ARM_compiler": true,
+    "physical_boot_experiment_options_enabled": true,
+    "release_off_config_excludes_experiment": true,
+    "baseline_G650_commit_grounded": true,
+    "G650_experiment_filemap_RCU_call_still_compiled": true,
+    "new_experiment_filemap_RCU_call_still_compiled": true,
+    "experiment_shmem_equals_G650_machine_words": true,
+    "experiment_shmem_EQUALS_release_machine_words": true,
+    "G650_experiment_mmap_did_NOT_GP": true,
+    "current_experiment_mmap_GP_call_PRESENT_even_key_disabled": true,
+    "normal_release_off_mmap_matches_G650_experiment": true,
+    "experiment_GP_added_11_arm_instructions": true,
+    "base_rcu_free_sync_flush_work_twice": true,
+    "new_rcu_free_sync_flush_rcu_work_once": true,
+    "experiment_setter_g692_source_failclosed": true,
+    "experiment_setter_shrunk_to_failclosed": true,
+    "physical_debugfs_runtime_key_NOT_directly_proven": true
+  },
+  "positive_guard_count": 19,
+  "modified_binary_or_metadata_inputs_rejected": {
+    "wrong_device_config_SHA": [
+      "real_6794_line_physical_config_hash_reconstructed"
+    ],
+    "wrong_build_config": [
+      "G650_host_experiment_same_dotconfig"
+    ],
+    "wrong_compiler": [
+      "all_3_built_with_same_ARM_compiler"
+    ],
+    "fictional_speedup_filemap": [
+      "G650_experiment_filemap_RCU_call_still_compiled"
+    ],
+    "erase_added_mmap_GP": [
+      "current_experiment_mmap_GP_call_PRESENT_even_key_disabled"
+    ],
+    "pretend_release_has_GP": [
+      "normal_release_off_mmap_matches_G650_experiment"
+    ],
+    "break_release_shmem": [
+      "experiment_shmem_EQUALS_release_machine_words"
+    ],
+    "reintroduce_wrong_RCU_sync": [
+      "new_rcu_free_sync_flush_rcu_work_once"
+    ],
+    "remove_fail_closed": [
+      "current_experiment_mmap_GP_call_PRESENT_even_key_disabled"
+    ]
+  },
+  "compiled_sources": {
+    "g650_experimental": {
+      "mm/filemap.o": {
+        "filemap_read": {
+          "present": true,
+          "size_bytes": 1256,
+          "instructions": 314,
+          "calls": [
+            "memset",
+            "filemap_read_rcu",
+            "filemap_read_accessed",
+            "flush_dcache_folio",
+            "copy_page_to_iter",
+            "folio_unlock",
+            "__folio_put",
+            "touch_atime",
+            "__stack_chk_fail"
+          ]
+        },
+        "filemap_read_rcu": {
+          "present": true,
+          "size_bytes": 1668,
+          "instructions": 417,
+          "calls": [
+            "__rcu_read_unlock",
+            "__rcu_read_lock",
+            "xas_load",
+            "xas_load",
+            "__kmap_local_page_prot",
+            "_copy_to_iter",
+            "kunmap_local_indexed",
+            "__rcu_read_unlock",
+            "__stack_chk_fail"
+          ]
+        },
+        "lockless_read_set": {
+          "present": true,
+          "size_bytes": 528,
+          "instructions": 132,
+          "calls": [
+            "of_machine_compatible_match",
+            "warn_slowpath_fmt",
+            "warn_slowpath_fmt",
+            "warn_slowpath_fmt",
+            "warn_slowpath_fmt",
+            "__stack_chk_fail"
+          ]
+        }
+      },
+      "mm/shmem.o": {
+        "shmem_file_read_iter": {
+          "present": true,
+          "size_bytes": 920,
+          "instructions": 230,
+          "calls": [
+            "folio_unlock",
+            "flush_dcache_folio",
+            "filemap_read_accessed",
+            "copy_page_to_iter",
+            "copy_page_to_iter",
+            "__folio_put",
+            "__folio_put",
+            "touch_atime",
+            "iov_iter_zero",
+            "__stack_chk_fail"
+          ]
+        }
+      },
+      "mm/page_alloc.o": {
+        "rcu_free_sync": {
+          "present": true,
+          "size_bytes": 96,
+          "instructions": 24,
+          "calls": [
+            "_find_next_bit_le",
+            "flush_work",
+            "flush_work"
+          ]
+        }
+      },
+      "mm/vma.o": {
+        "mmap_region": {
+          "present": true,
+          "size_bytes": 356,
+          "instructions": 89,
+          "calls": [
+            "warn_slowpath_fmt"
+          ]
+        }
+      }
+    },
+    "new_experimental_on_refused": {
+      "mm/filemap.o": {
+        "filemap_read": {
+          "present": true,
+          "size_bytes": 1256,
+          "instructions": 314,
+          "calls": [
+            "memset",
+            "filemap_read_rcu",
+            "filemap_read_accessed",
+            "flush_dcache_folio",
+            "copy_page_to_iter",
+            "folio_unlock",
+            "__folio_put",
+            "touch_atime",
+            "__stack_chk_fail"
+          ]
+        },
+        "filemap_read_rcu": {
+          "present": true,
+          "size_bytes": 1640,
+          "instructions": 410,
+          "calls": [
+            "__rcu_read_unlock",
+            "__rcu_read_lock",
+            "xas_load",
+            "xas_load",
+            "__kmap_local_page_prot",
+            "_copy_to_iter",
+            "kunmap_local_indexed",
+            "__rcu_read_unlock",
+            "__stack_chk_fail"
+          ]
+        },
+        "lockless_read_set": {
+          "present": true,
+          "size_bytes": 220,
+          "instructions": 55,
+          "calls": [
+            "warn_slowpath_fmt",
+            "warn_slowpath_fmt"
+          ]
+        }
+      },
+      "mm/shmem.o": {
+        "shmem_file_read_iter": {
+          "present": true,
+          "size_bytes": 920,
+          "instructions": 230,
+          "calls": [
+            "folio_unlock",
+            "flush_dcache_folio",
+            "filemap_read_accessed",
+            "copy_page_to_iter",
+            "copy_page_to_iter",
+            "__folio_put",
+            "__folio_put",
+            "touch_atime",
+            "iov_iter_zero",
+            "__stack_chk_fail"
+          ]
+        }
+      },
+      "mm/page_alloc.o": {
+        "rcu_free_sync": {
+          "present": true,
+          "size_bytes": 96,
+          "instructions": 24,
+          "calls": [
+            "_find_next_bit_le",
+            "flush_rcu_work",
+            "flush_work"
+          ]
+        }
+      },
+      "mm/vma.o": {
+        "mmap_region": {
+          "present": true,
+          "size_bytes": 400,
+          "instructions": 100,
+          "calls": [
+            "warn_slowpath_fmt",
+            "synchronize_rcu"
+          ]
+        }
+      }
+    },
+    "new_release_off": {
+      "mm/filemap.o": {
+        "filemap_read": {
+          "present": true,
+          "size_bytes": 1236,
+          "instructions": 309,
+          "calls": [
+            "memset",
+            "folio_mark_accessed",
+            "flush_dcache_folio",
+            "copy_page_to_iter",
+            "folio_unlock",
+            "__folio_put",
+            "touch_atime",
+            "__stack_chk_fail"
+          ]
+        },
+        "filemap_read_rcu": {
+          "present": true,
+          "size_bytes": 8,
+          "instructions": 2,
+          "calls": []
+        },
+        "lockless_read_set": {
+          "present": false
+        }
+      },
+      "mm/shmem.o": {
+        "shmem_file_read_iter": {
+          "present": true,
+          "size_bytes": 920,
+          "instructions": 230,
+          "calls": [
+            "folio_unlock",
+            "flush_dcache_folio",
+            "filemap_read_accessed",
+            "copy_page_to_iter",
+            "copy_page_to_iter",
+            "__folio_put",
+            "__folio_put",
+            "touch_atime",
+            "iov_iter_zero",
+            "__stack_chk_fail"
+          ]
+        }
+      },
+      "mm/page_alloc.o": {
+        "rcu_free_sync": {
+          "present": true,
+          "size_bytes": 4,
+          "instructions": 1,
+          "calls": []
+        }
+      },
+      "mm/vma.o": {
+        "mmap_region": {
+          "present": true,
+          "size_bytes": 356,
+          "instructions": 89,
+          "calls": [
+            "warn_slowpath_fmt"
+          ]
+        }
+      }
+    }
+  },
+  "decision": [
+    "PHYSICAL G650 has CONFIG_SM_T311_RCU_HOT4K_EXPERIMENT=y, CONFIG_PAGE_RCU_FREE=y and CONFIG_DEBUG_FS=y. Default release OFF is NOT its compiled configuration.",
+    "Direct physical config is 6794 lines; reconstruction from full experimental host .config differs only in three Rust toolchain metadata entries; SHA256 matches the running device exactly.",
+    "Compiling the G650 source under matching experimental config proves the added mmap_region -> synchronize_rcu() branch occurs only in CURRENT experimental comparator even though new G692 ON is fail-closed.",
+    "This added GP could add mmap latency if installed; no real physical runtime cost has been measured.",
+    "Current experimental setter refuses ON (G692); the physical G650 setter does not include the G692 interlock. Config y alone does NOT prove the physical key is ON; debugfs read was inaccessible as shell.",
+    "RCU-OFF source-only comparison G694 is still valid for matched host builds but MUST NOT be called physical G650 BOOT-versus-new BOOT benchmark.",
+    "No executable code change or device flash in G695."
+  ],
+  "staged_runtime_executable_paths": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

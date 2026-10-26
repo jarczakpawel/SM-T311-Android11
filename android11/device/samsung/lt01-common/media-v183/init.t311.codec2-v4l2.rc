@@ -1,0 +1,15 @@
+# SM-T311 HOTFIX26 modern V4L2 Codec2 runtime glue.
+# MFC is /dev/video6 decoder + /dev/video7 encoder on this fixed Exynos4 media graph.
+on early-boot
+    chown media media /dev/video6
+    chmod 0660 /dev/video6
+    chown media media /dev/video7
+    chmod 0660 /dev/video7
+    setprop debug.stagefright.ccodec 4
+    setprop debug.stagefright.c2-poolmask 0xfc0000
+
+on boot
+    chown media media /dev/video6
+    chmod 0660 /dev/video6
+    chown media media /dev/video7
+    chmod 0660 /dev/video7

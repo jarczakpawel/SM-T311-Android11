@@ -1,0 +1,15 @@
+--- a/meson.build
++++ b/meson.build
+@@ -271,8 +271,11 @@
+   libdrm_kw = { 'version' : '2.@0@.0'.format(patch_ver) }
+ endif
+ 
++# SM-T311: private SONAME prevents replacing Android 11's shared libdrm.so
++# used by old HWC and other services. Export the same public C API only
++# inside this separately bundled Mesa 26 graphics stack.
+ libdrm = library(
+-  'drm',
++  'drm_mesa26',
+   libdrm_files,
+   c_args : libdrm_c_args,
+   dependencies : [dep_valgrind, dep_rt],

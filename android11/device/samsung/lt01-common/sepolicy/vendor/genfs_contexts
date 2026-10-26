@@ -1,0 +1,123 @@
+# G553: PHYSICALLY RESOLVED Linux 7.3 I2C controller parents on SM-T311.
+# Previous i2c-gpio-N parents are stale from Linux 6.12; target exact paths.
+genfscon sysfs /devices/platform/i2c-13/i2c-13/13-002c/backlight/lcd-bl u:object_r:sysfs_leds:s0
+genfscon sysfs /devices/platform/i2c-10/i2c-10/10-0036/power_supply/max170xx_battery u:object_r:sysfs_batteryinfo:s0
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/max77693-charger/power_supply/max77693-charger u:object_r:sysfs_batteryinfo:s0
+genfscon sysfs /devices/platform/i2c-10/i2c-10/10-0036/power_supply/max170xx_battery/wakeup12 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/max77693-charger/power_supply/max77693-charger/wakeup18 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/wakeup/wakeup8 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/i2c-12/i2c-12/12-0060/wakeup/wakeup16 u:object_r:sysfs_wakeup:s0
+
+# LP8556 backlight used by the lt013g Light HAL.
+
+# BEGIN SM-T311 V168 GENFS
+# Runtime audit: the LP8556 is actually on i2c-13, not the old i2c-12 path.
+genfscon sysfs /devices/platform/i2c-gpio-5/i2c-13/13-002c/backlight/lcd-bl u:object_r:sysfs_leds:s0
+# END SM-T311 V168 GENFS
+
+# BEGIN SM-T311 A1 GENFS
+# Runtime-resolved on the exact SM-T311.
+genfscon sysfs /devices/platform/led-touchkeys/leds/white:kbd_backlight u:object_r:sysfs_leds:s0
+genfscon sysfs /devices/platform/soc/13000000.gpu/devfreq/13000000.gpu u:object_r:sysfs_lt013g_gpu:s0
+genfscon sysfs /devices/platform/i2c-gpio-2/i2c-10/10-0036/power_supply/max170xx_battery u:object_r:sysfs_batteryinfo:s0
+genfscon sysfs /devices/platform/soc/138d0000.i2c/i2c-7/7-0066/wakeup/wakeup1 u:object_r:sysfs_wakeup:s0
+# END SM-T311 A1 GENFS
+
+# SM-T311 2026-10-09: precisely identified AVC sources on this board.
+# Reuse existing AOSP types and grants rather than adding permissive allows.
+# MAX77693 charger type and status: health HAL (read only).
+genfscon sysfs /devices/platform/i2c-gpio-1/i2c-9/9-0066/max77693-charger/power_supply/max77693-charger u:object_r:sysfs_batteryinfo:s0
+# eMMC block statistics: storaged (sysfs_disk_stat is pre-authorized).
+genfscon sysfs /devices/platform/soc/12550000.mmc/mmc_host/mmc0/mmc0:0001/block/mmcblk0/stat u:object_r:sysfs_disk_stat:s0
+# XMM6262 wakeup-source counters: system_suspend (read only).
+genfscon sysfs /devices/virtual/misc/umts_ipc0/wakeup1 u:object_r:sysfs_wakeup:s0
+
+genfscon sysfs /devices/platform/bus-dmc/devfreq/bus-dmc u:object_r:sysfs_lt013g_devfreq:s0
+genfscon sysfs /devices/platform/bus-display/devfreq/bus-display u:object_r:sysfs_lt013g_devfreq:s0
+genfscon sysfs /devices/platform/bus-leftbus/devfreq/bus-leftbus u:object_r:sysfs_lt013g_devfreq:s0
+genfscon sysfs /devices/platform/bus-rightbus/devfreq/bus-rightbus u:object_r:sysfs_lt013g_devfreq:s0
+genfscon sysfs /devices/platform/bus-c2c/devfreq/bus-c2c u:object_r:sysfs_lt013g_devfreq:s0
+genfscon sysfs /devices/platform/i2c-gpio-2/i2c-10/10-0036/power_supply/max170xx_battery/wakeup12 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/xmm6262-modem-control/wakeup/wakeup20 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/xmm6262-modem-control/state u:object_r:sysfs_lt013g_modem_state:s0
+# G289: USB idVendor/idProduct for the stock XMM6262 HSIC modem watchdog.
+# Observed on SM-T311 as /sys/devices/platform/soc/12580000.usb/usb1/1-2.
+genfscon sysfs /devices/platform/soc/12580000.usb/usb1/1-2/idVendor u:object_r:sysfs_lt013g_modem_state:s0
+genfscon sysfs /devices/platform/soc/12580000.usb/usb1/1-2/idProduct u:object_r:sysfs_lt013g_modem_state:s0
+# XMM6262 HSIC power switch actually written by t311-cbd during modem boot.
+genfscon sysfs /devices/platform/soc/12580000.usb/ehci_power u:object_r:sysfs_lt013g_modem_state:s0
+# G739: dynamic wakeupN numbering changes at every boot and with device order.
+# Label the exact wakeup subtrees, not the whole charger or modem sysfs.
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/max77693-charger/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/max77693-charger/power_supply/max77693-charger/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/xmm6262-modem-control/wakeup u:object_r:sysfs_wakeup:s0
+
+# G731: Exact Exynos EHCI runtime PM paths used by T311 USB gadget HAL.
+# No raw regulator/HSIC PHY or parent directory permission granted.
+genfscon sysfs /devices/platform/soc/12580000.usb/power/control u:object_r:sysfs_lt013g_otg_control:s0
+genfscon sysfs /devices/platform/soc/12580000.usb/power/runtime_status u:object_r:sysfs_lt013g_otg_diag:s0
+
+genfscon sysfs /devices/platform/i2c-gpio-1/i2c-9/9-0066/max77693-charger/power_supply/max77693-charger/wakeup18 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/i2c-gpio-1/i2c-9/9-0066/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/gpio-keys/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc/13800000.serial/13800000.serial:0/13800000.serial:0.0/serial0/serial0-0/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc/138d0000.i2c/i2c-7/7-0066/s5m-rtc/rtc/rtc0/alarmtimer.0.auto/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc/138d0000.i2c/i2c-7/7-0066/s5m-rtc/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc/138d0000.i2c/i2c-7/7-0066/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc/12480000.usb/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/i2c-gpio-4/i2c-12/12-0060/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/virtual/misc/umts_ramdump0/wakeup6 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/virtual/misc/umts_rfs0/wakeup2 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/virtual/misc/umts_loopback0/wakeup7 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/virtual/misc/multipdp/wakeup3 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/virtual/misc/umts_router/wakeup4 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/virtual/misc/umts_csd/wakeup5 u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/exynos-drm/uevent u:object_r:sysfs_lt013g_graphics_uevent:s0
+genfscon sysfs /devices/platform/soc/13000000.gpu/uevent u:object_r:sysfs_lt013g_graphics_uevent:s0
+genfscon sysfs /devices/virtual/sec/gps/GPS_PWR_EN/value u:object_r:sysfs_lt013g_gps_power:s0
+genfscon proc /sys/kernel/softlockup_panic u:object_r:proc_lt013g_softlockup_panic:s0
+
+# Three real IIO sensor paths. Names resolve from /sys/bus/iio/devices.
+genfscon sysfs /devices/platform/soc/13870000.i2c/i2c-1/1-0019/iio:device0/name u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/soc/13870000.i2c/i2c-1/1-0019/iio:device0/in_accel_x_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/soc/13870000.i2c/i2c-1/1-0019/iio:device0/in_accel_y_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/soc/13870000.i2c/i2c-1/1-0019/iio:device0/in_accel_z_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-12/i2c-12/12-0060/iio:device2/name u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-12/i2c-12/12-0060/iio:device2/in_illuminance_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-12/i2c-12/12-0060/iio:device2/in_proximity_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-11/i2c-11/11-002e/iio:device3/name u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-11/i2c-11/11-002e/iio:device3/in_magn_x_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-11/i2c-11/11-002e/iio:device3/in_magn_y_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-11/i2c-11/11-002e/iio:device3/in_magn_z_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-11/i2c-11/11-002e/iio:device3/in_magn_x_scale u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-11/i2c-11/11-002e/iio:device3/in_magn_y_scale u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-11/i2c-11/11-002e/iio:device3/in_magn_z_scale u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-4/i2c-12/12-0060/iio:device2/name u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-4/i2c-12/12-0060/iio:device2/in_illuminance_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-4/i2c-12/12-0060/iio:device2/in_proximity_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-3/i2c-11/11-002e/iio:device3/name u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-3/i2c-11/11-002e/iio:device3/in_magn_x_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-3/i2c-11/11-002e/iio:device3/in_magn_y_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-3/i2c-11/11-002e/iio:device3/in_magn_z_raw u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-3/i2c-11/11-002e/iio:device3/in_magn_x_scale u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-3/i2c-11/11-002e/iio:device3/in_magn_y_scale u:object_r:sysfs_lt013g_legacy_iio:s0
+genfscon sysfs /devices/platform/i2c-gpio-3/i2c-11/11-002e/iio:device3/in_magn_z_scale u:object_r:sysfs_lt013g_legacy_iio:s0
+
+# Observed G298 t311-cbd operation of legacy OHCI power switch.
+genfscon sysfs /devices/platform/soc/12590000.usb/ohci_power u:object_r:sysfs_lt013g_modem_state:s0
+
+# G301: /sys/devices/virtual/misc/multipdp/waketime is written by rild.
+genfscon sysfs /devices/virtual/misc/multipdp/waketime u:object_r:sysfs_lt013g_modem_state:s0
+
+# G382: exact independent Samsung GNSS node. Never change platform binder/hwbinder/vndbinder.
+genfscon binder /lt013g-gps u:object_r:lt013g_gps_private_binder_device:s0
+
+# G468: MAX77693 role coordinator; only these four sysfs files.
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/max77693-charger/t311_usb_role_diag u:object_r:sysfs_lt013g_otg_diag:s0
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/max77693-charger/t311_otg_interlock u:object_r:sysfs_lt013g_otg_diag:s0
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/max77693-charger/t311_otg_host_refresh u:object_r:sysfs_lt013g_otg_control:s0
+genfscon sysfs /devices/platform/i2c-9/i2c-9/9-0066/max77693-charger/t311_otg_host_stop u:object_r:sysfs_lt013g_otg_control:s0
+genfscon sysfs /devices/platform/i2c-gpio-1/i2c-9/9-0066/max77693-charger/t311_usb_role_diag u:object_r:sysfs_lt013g_otg_diag:s0
+genfscon sysfs /devices/platform/i2c-gpio-1/i2c-9/9-0066/max77693-charger/t311_otg_interlock u:object_r:sysfs_lt013g_otg_diag:s0
+genfscon sysfs /devices/platform/i2c-gpio-1/i2c-9/9-0066/max77693-charger/t311_otg_host_refresh u:object_r:sysfs_lt013g_otg_control:s0
+genfscon sysfs /devices/platform/i2c-gpio-1/i2c-9/9-0066/max77693-charger/t311_otg_host_stop u:object_r:sysfs_lt013g_otg_control:s0

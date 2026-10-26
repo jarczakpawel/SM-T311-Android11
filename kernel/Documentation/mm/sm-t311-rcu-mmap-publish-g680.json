@@ -1,0 +1,100 @@
+{
+  "stage": "G680",
+  "type": "real Linux LKMM herd7 + bounded C source gates",
+  "source_checks": {
+    "rcu_reader_enters_before_mapping_test": true,
+    "reader_mmap_failure_unwinds_rcu": true,
+    "reader_copy_not_before_mmap_check": true,
+    "reader_disables_user_faults_during_copy": true,
+    "mmap_increments_writable_count_first": true,
+    "mmap_sync_gated_to_SM_T311_experiment": true,
+    "mmap_sync_only_if_eligible_mapping": true,
+    "mmap_unwinds_temp_counter": true,
+    "kernel_counter_positive_for_existing_shared_mmap": true,
+    "kernel_writable_map_publishes_atomic_count": true,
+    "persistent_RCU_eligibility_bit": true,
+    "ARM32_arch_needs_explicit_flush": true,
+    "slow_path_flushes_writable_alias": true,
+    "mmap_wait_not_read_fastpath": true,
+    "marker_disallows_nonext4_nonorder0": true
+  },
+  "source_checks_pass": 15,
+  "mutated_source_rejections": {
+    "reader_mmap_check_before_rcu": [
+      "rcu_reader_enters_before_mapping_test"
+    ],
+    "reader_failure_missing_rcu_unlock": [
+      "reader_mmap_failure_unwinds_rcu"
+    ],
+    "mmap_barrier_instead_of_gp": [
+      "mmap_increments_writable_count_first",
+      "mmap_wait_not_read_fastpath"
+    ],
+    "mmap_no_gp": [
+      "mmap_increments_writable_count_first",
+      "mmap_wait_not_read_fastpath"
+    ],
+    "mmap_missing_eligibility_predicate": [
+      "mmap_sync_only_if_eligible_mapping"
+    ],
+    "arch_mmap_flush_absent": [
+      "rcu_reader_enters_before_mapping_test",
+      "reader_mmap_failure_unwinds_rcu",
+      "reader_copy_not_before_mmap_check"
+    ],
+    "rcu_candidate_flag_not_persistent": [
+      "persistent_RCU_eligibility_bit"
+    ]
+  },
+  "herd7_models": {
+    "with_gp": {
+      "test": "SMT311+WritableMmapGraceG680",
+      "outcome": "Never",
+      "positive": 0,
+      "negative": 3,
+      "litmus_sha256": "f03e1b11d38e69fd5cceb30397d14d4400231bd505193d6b3f387a298b84b393",
+      "herd_normalized_stdout_sha256": "9a649aed5406380bcdcfd605fa9904cbc929e7ebb93f9206dfe3838a52768269",
+      "observation": "Observation SMT311+WritableMmapGraceG680 Never 0 3"
+    },
+    "no_gp": {
+      "test": "SMT311+WritableMmapNoGraceG680",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 3,
+      "litmus_sha256": "ef851364852f5c17eac570337ba66c33a61187c3324149ecb6b0ce42f98d5e6c",
+      "herd_normalized_stdout_sha256": "35eb1faadc68238af9e8c8406b4c31b0301a61ef5d7778c0ce9910fc866a6bbd",
+      "observation": "Observation SMT311+WritableMmapNoGraceG680 Sometimes 1 3"
+    },
+    "barrier_only": {
+      "test": "SMT311+WritableMmapBarrierNotGraceG680",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 3,
+      "litmus_sha256": "8400902df758ecbcecbd91e4adf07044aa44b9970894df3f368b90b2779a0a06",
+      "herd_normalized_stdout_sha256": "02f2fd73233c28fc649221da044b300fe051b2959c65c8b82f2c74f1962c3814",
+      "observation": "Observation SMT311+WritableMmapBarrierNotGraceG680 Sometimes 1 3"
+    },
+    "precheck_before_rcu": {
+      "test": "SMT311+WritableMmapCheckBeforeLockG680",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 3,
+      "litmus_sha256": "2d6314f2ea1e34c2455e3502d36bf470a6bf6800876da5fd6a666d8d188ba2a1",
+      "herd_normalized_stdout_sha256": "3de0144e36bade8bb3e33d4192b08845ea21f49e5944ca80285801ad7681a7c8",
+      "observation": "Observation SMT311+WritableMmapCheckBeforeLockG680 Sometimes 1 3"
+    }
+  },
+  "staged_runtime_files": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/vma.c"
+  ],
+  "performance_tradeoff": "SM-T311 shared writable mmap of RCU-tagged inode waits a synchronize_rcu() before VMA publication. Extra latency must be measured, particularly while mmap_lock is held.",
+  "limitations": [
+    "Model scalar count and publication flag, not actual VMAs, ARMv7 cache or page allocator.",
+    "RCU GP prevents only the modeled pre-check/post-publication race; no general PFN ABA safety proof.",
+    "mmap VMA clone/remap paths and other writable aliases need separate manual review.",
+    "No ARMv7 runtime ON safety proven; all staged executable files remain NOT INSTALLED.",
+    "S1 ACTIVE, S2/S3 BLOCKED, RCU default OFF."
+  ]
+}

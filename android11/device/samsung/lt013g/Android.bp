@@ -1,0 +1,9 @@
+// Generate native G620 checksum tests from the CURRENT production GPS parser.
+// The generator and source share this device module root; no ../ Soong paths.
+genrule {
+    name: "lt013g-g620-nmea-test-source",
+    srcs: ["gps-v195/gps_proxy.c"],
+    tool_files: ["tools/test_g620_nmea_frame_integrity.py"],
+    out: ["g620_nmea_frame_integrity_test.c"],
+    cmd: "python3 $(location tools/test_g620_nmea_frame_integrity.py) --emit $(out)",
+}

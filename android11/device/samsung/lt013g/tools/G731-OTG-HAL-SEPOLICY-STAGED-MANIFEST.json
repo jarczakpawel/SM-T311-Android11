@@ -1,0 +1,65 @@
+{
+  "stage": "G731",
+  "device": "Samsung SM-T311 / lt013g",
+  "date": "2026-10-21",
+  "status": "built_and_staged_only",
+  "physical_install_verified": false,
+  "boot_flash_authorized": false,
+  "install_sequence": ["vendor_sepolicy.cil", "precompiled_sepolicy", "usb_gadget_hal", "G730_boot"],
+  "source_git": {
+    "common_policy": "812d046",
+    "hardware_interfaces": "50ce5991d",
+    "kernel_G730": "43cd66fc3"
+  },
+  "staged_on_tablet": [
+    {
+      "path": "/data/local/tmp/g731-usb-gadget-hal",
+      "target": "/vendor/bin/hw/android.hardware.usb.gadget@1.1-service",
+      "size": 35032,
+      "sha256": "1011b1db80b1b6e652ab3a0998b6c4d2262bceb65cf33c5881b8a39fe5dfe"
+    },
+    {
+      "path": "/data/local/tmp/g731-vendor_sepolicy.cil",
+      "target": "/vendor/etc/selinux/vendor_sepolicy.cil",
+      "size": 146492,
+      "sha256": "a3b5dc65cbe28bca151fbfa3a0998b6c4d2262bceb65cf33c5881b8a39fe5dfe"
+    },
+    {
+      "path": "/data/local/tmp/g731-precompiled_sepolicy",
+      "target": "/vendor/etc/selinux/precompiled_sepolicy",
+      "size": 545940,
+      "sha256": "8263d8529e064a725454d4d0fee57f03c75b951fa576d770f7704b804e1515eb"
+    },
+    {
+      "path": "/data/local/tmp/BOOT-G730-OTG-EXPERIMENTAL-8MiB-DO-NOT-FLASH.img",
+      "target": "/dev/block/mmcblk0p9",
+      "size": 8388608,
+      "sha256": "e53ad50d43e8aa92beccf537b5d2c9cc955f91d8fe2ff64d76a7f174b311177b"
+    }
+  ],
+  "active_physical": {
+    "kernel_boot_p9_sha256": "dcc7aafe81bb947e9afb4c8d1c4d49bbbeb413f65164c014cb02d392ae57f9bc",
+    "recovery_p10_sha256": "f818c29f65d2082cb642cac85e27715c5255c87aac627bb542b777129d4f784f",
+    "hal_sha256": "726f705d8d624733746f9aeb3fe2020fa481ea7db67158072906da2634d38647",
+    "vendor_sepolicy_sha256": "4647245a44106bf0e4161de9bab7c52e1bb2799ecf5273c0cff27e13975462d1",
+    "precompiled_sepolicy_sha256": "ec5cc7e49014ce8954c423f0cdf76121876248f5b61680a2a6eaedd45c45a8e9"
+  },
+  "compiled": {
+    "android_hal": true,
+    "vendor_sepolicy_cil": true,
+    "precompiled_sepolicy": true,
+    "linux_7_3_arm32_G730": true,
+    "source_model_checks_G731": "17/17",
+    "source_model_checks_G730": "25/25",
+    "physical_OTG_5V_mass_storage": false
+  },
+  "platform_policy_hash_match": true,
+  "known_hw_good_reference": {
+    "old_kernel": "6.12.112-PJARCZAK",
+    "stage": "G484",
+    "external_usb_id": "24a9:205a",
+    "external_usb": "sda1 ~62.9GB enumerated, exFAT unmountable",
+    "modem_hsic_id": "1519:0020",
+    "full_detach": "BOOST off and DWC2 returned"
+  }
+}

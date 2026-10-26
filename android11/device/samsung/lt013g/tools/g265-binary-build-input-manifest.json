@@ -1,0 +1,121 @@
+{
+  "format": "sm-t311-prebuilt-inputs-v1",
+  "device": "SM-T311",
+  "release_status": "PRIVATE_LOCAL_AUDIT_NOT_PUBLIC_ASSET_LICENSE",
+  "count": 14,
+  "description": "Required non-Git inputs for reproducible SM-T311 Android11 build. Checksums alone do not confer redistributable rights. Preserve local files; identify extraction/build procedure or license before GitHub publication.",
+  "entries": [
+    {
+      "path": "device/samsung/lt01-common/known-good-v20260730/smt311-usb-v115",
+      "size_bytes": 464072,
+      "sha256": "4b9eca615e6e77cec8ca2bbee4e59f35ad4f41e56c8f573377c27ba81a46812f",
+      "provenance_group": "hardware_wlan_usb_tools",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt01-common/known-good-v20260730/wpa_supplicant",
+      "size_bytes": 1769484,
+      "sha256": "1b370440b9a4951f9b2f299fea2034cc8dd329021afa10b6f7b75e480e3f6a83",
+      "provenance_group": "hardware_wlan_usb_tools",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt01-common/prebuilt/pjarczak/mesa26/libEGL_mesa.so",
+      "size_bytes": 947204,
+      "sha256": "01a219dc07c8b5ba752d02f8fed1ea5bedd92fe45292eaa082be8fb5a8ce5611",
+      "provenance_group": "mesa_build_outputs",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt01-common/prebuilt/pjarczak/mesa26/libGLESv1_CM_mesa.so",
+      "size_bytes": 29288,
+      "sha256": "5c8471d06466ba5beb19e3cd2d74fd08fc611ddd34412c5d91a893b6381ca8c0",
+      "provenance_group": "mesa_build_outputs",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt01-common/prebuilt/pjarczak/mesa26/libGLESv2_mesa.so",
+      "size_bytes": 71508,
+      "sha256": "10206f8df94e1e36ede21ba0577503007603d4d6eeb5be1e8e7316604878554f",
+      "provenance_group": "mesa_build_outputs",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt01-common/prebuilt/pjarczak/mesa26/libdrm_mesa26.so",
+      "size_bytes": 91908,
+      "sha256": "cb86a1cab9f6b807d6f83355964a546592791f64ee3247320a087f7379485881",
+      "provenance_group": "mesa_build_outputs",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt01-common/prebuilt/pjarczak/mesa26/libgallium_dri.so",
+      "size_bytes": 18700888,
+      "sha256": "04148b6de255b5c563695a00f1517a788d1923d0ed825e5be18c1f069b20ae76",
+      "provenance_group": "mesa_build_outputs",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt013g/gps-v195/legacy-rootfs.tar",
+      "size_bytes": 33351680,
+      "sha256": "559c4ac19e3be326788a429c890e3d72d08aff5ca324ac1d40ad5a3c679b83ae",
+      "provenance_group": "legacy_gnss_firmware",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt013g/prebuilt/recovery-current.img",
+      "size_bytes": 8388608,
+      "sha256": "f818c29f65d2082cb642cac85e27715c5255c87aac627bb542b777129d4f784f",
+      "provenance_group": "existing_twrp_recovery",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt013g/radio/prebuilt/libsec-ril.so",
+      "size_bytes": 1885984,
+      "sha256": "432658fd34c966a8ed16b9548ca8d015383d26c6c732826a43363131d31e3a94",
+      "provenance_group": "legacy_modem_ril",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt013g/radio/prebuilt/libsecnativefeature.so",
+      "size_bytes": 13396,
+      "sha256": "32f5dff375f45c6423b882e97c50103e5eb3e0b7928b848a43f8d70534b0f100",
+      "provenance_group": "legacy_modem_ril",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt013g/radio/prebuilt/libstlport.so",
+      "size_bytes": 280276,
+      "sha256": "c0ca1cf2ca60ca80ac7898a036f41d71625d85c2f32b88251a79d7465d26803f",
+      "provenance_group": "legacy_modem_ril",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt013g/radio/prebuilt/libt311_cutils_compat.so",
+      "size_bytes": 4100,
+      "sha256": "b080a16607afaac0438c5b1806964c19a191605cd1959b9904d31d86108923c7",
+      "provenance_group": "legacy_modem_ril",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    },
+    {
+      "path": "device/samsung/lt013g/radio/prebuilt/t311-cbd",
+      "size_bytes": 149528,
+      "sha256": "03a5758257050aa8ccf3b3e3e46b2f8b054acb4bdb968220dc0af8f8e8adaca4",
+      "provenance_group": "legacy_modem_ril",
+      "redistribution_approved": false,
+      "source_or_extraction_provenance": "PENDING_REVIEW"
+    }
+  ]
+}

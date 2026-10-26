@@ -1,0 +1,6 @@
+cc_binary {
+    name: "t311-v4l2-smoke-v214",
+    srcs: ["t311-v4l2-smoke-v214.c"],
+    vendor: true,
+    cflags: ["-Wall", "-Werror"],
+}

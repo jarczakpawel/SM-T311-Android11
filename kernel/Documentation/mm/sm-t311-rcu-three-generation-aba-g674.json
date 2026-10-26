@@ -1,0 +1,119 @@
+{
+  "stage": "G674",
+  "classification": "SC source-linked cross-mapping three-generation race DIAGNOSTIC",
+  "source_checks": {
+    "reader_holds_rcu_before_lookup": true,
+    "reader_tag_check_before_slot_recheck": true,
+    "reader_same_pointer_recheck_not_generation": true,
+    "reader_uses_original_mapping_check": true,
+    "marker_requires_live_folio_reference": true,
+    "tagged_last_free_defers": true,
+    "unmarked_last_free_ordinary_path": true,
+    "inode_exit_sets_exiting_before_truncate": true,
+    "inode_exit_allows_tag_clear_single": true,
+    "inode_exit_allows_tag_clear_batch": true,
+    "reader_inode_specific_exception_reason": true,
+    "SMT311_single_inode_exit_preserves_tag_until_RCU": true,
+    "SMT311_batch_inode_exit_preserves_tag_until_RCU": true,
+    "mapping_exiting_not_global_rcu_exclusion": true
+  },
+  "positive_checks": 14,
+  "current_SM_T311_patched_model_witnesses": 0,
+  "upstream_inode_exit_early_clear_reference_witnesses": 11,
+  "mutated_source_negatives_rejected": {
+    "remove_early_clear_on_inode_exit": [
+      "inode_exit_allows_tag_clear_single",
+      "inode_exit_allows_tag_clear_batch"
+    ],
+    "remove_rcu_flag_precheck": [
+      "reader_tag_check_before_slot_recheck"
+    ],
+    "remove_reader_mapping_check": [
+      "reader_uses_original_mapping_check",
+      "marker_requires_live_folio_reference"
+    ],
+    "remove_deferred_allocator_free": [
+      "tagged_last_free_defers"
+    ],
+    "remove_set_exiting": [
+      "inode_exit_sets_exiting_before_truncate"
+    ],
+    "remove_SM_T311_single_tag_preservation": [
+      "SMT311_single_inode_exit_preserves_tag_until_RCU",
+      "SMT311_batch_inode_exit_preserves_tag_until_RCU"
+    ],
+    "remove_SM_T311_batch_tag_preservation": [
+      "SMT311_batch_inode_exit_preserves_tag_until_RCU"
+    ]
+  },
+  "events": {
+    "reader": [
+      "R_lock",
+      "R_xas_A",
+      "R_read_tag",
+      "R_read_isize",
+      "R_xas_reload",
+      "R_check_mapping",
+      "R_copy",
+      "R_unlock"
+    ],
+    "writer": [
+      "W_remove_A",
+      "W_free_A",
+      "W_allocate_B_other_inode",
+      "W_mark_B",
+      "W_evict_inode_B",
+      "W_clear_tag_and_remove_B",
+      "W_free_B",
+      "W_allocate_C_original_inode",
+      "W_publish_C_same_slot",
+      "W_remove_C",
+      "W_free_C"
+    ]
+  },
+  "interleavings": {
+    "SC_total": 75582,
+    "cross_generation_tag_read_before_slot_reload": 11,
+    "potential_unprotected_C_copy": 11,
+    "copy_with_locked_tag_and_slot": 0,
+    "copy_if_B_early_clear_disallowed": 0,
+    "copy_if_C_always_marked": 0
+  },
+  "first_witness": [
+    "R_lock",
+    "R_xas_A",
+    "W_remove_A",
+    "W_free_A",
+    "W_allocate_B_other_inode",
+    "W_mark_B",
+    "R_read_tag",
+    "R_read_isize",
+    "W_evict_inode_B",
+    "W_clear_tag_and_remove_B",
+    "W_free_B",
+    "W_allocate_C_original_inode",
+    "W_publish_C_same_slot",
+    "R_xas_reload",
+    "R_check_mapping",
+    "W_remove_C",
+    "W_free_C",
+    "R_copy",
+    "R_unlock"
+  ],
+  "preconditions": [
+    "Reader of inode M pins M and obtains an unmarked folio A address via XArray.",
+    "A is removed/freed (normal unmarked allocator) while reader is RCU locked.",
+    "The same physical page becomes B on DIFFERENT inode N; B acquires PG_rcu_free.",
+    "Reader sees B's marked flag, but B's inode N enters final eviction; the tag may be cleared before freeing B because no actual N inode reader exists.",
+    "Same physical address becomes new unmarked folio C for inode M, inserted into the same XArray slot; pointer and mapping checks can pass after the unrelated tag read.",
+    "C may be removed and freed without RCU deferral before the earlier speculative reader copies."
+  ],
+  "cautions": [
+    "This is a necessary-order feasibility witness, not proof allocator will reuse the page twice in this timing on Linux/ARMv7.",
+    "The source model does not emulate real XArray node memory ordering, cache coherence, RCU grace, inode refcount internals or kernel object initialization.",
+    "A real runtime UAF, wrong-byte response, exploitable fault or kernel panic has NOT been observed.",
+    "The patched path preserves the tag when N exits; source-model counterexamples disappear, not a full proof.",
+    "Do not use absence of witness in simplified control models as a correctness proof.",
+    "S2 remains BLOCKED, S3 remains BLOCKED, no-ref RCU stays DEFAULT OFF. No flash."
+  ]
+}

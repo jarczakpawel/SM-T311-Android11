@@ -1,0 +1,6 @@
+# G706 - Linux ARM32 internal page flags vs public /proc/kpageflags
+
+- Full G686 EXP + G700 RCU OFF ARM32 .config-derived enum: G686 `PG_rcu_free=20`, `PG_mlocked=21`, `__NR_PAGEFLAGS=22`; G700 `PG_rcu_free` absent, `PG_mlocked=20`, `__NR_PAGEFLAGS=21`. Real linked `pageflag_names` table 184 vs 176 bytes.
+- Public `KPF_MLOCKED=33` and `KPF_HWPOISON=19` unchanged in kernel headers; `fs/proc/page.c` remaps internal `PG_mlocked` symbolically to stable `KPF_MLOCKED`. No `KPF_RCU_FREE` public bit. FUSE real ARM32 code uses the expected shifted bit masks; user ABI mapping source supports stability but no G700 physical /proc/kpageflags test has happened.
+- Kernel G706 checker `tools/testing/selftests/smt311/rcu_pageflags_layout_g706.py`: 17/17 source/config/ELF/asm predicates PASS and 4/4 negative controls caught. No Android runtime change, new BOOT or physical flash. G700 8MiB host-only SHA256 `aec9655acc727ab01d0bde3711414f9606c58c5fdcafb6ae5c52a2d3346edc7f`, physical G650 remains.
+- S0 PASS, S1 ACTIVE, S2-S6 BLOCKED, S7 PARTIAL, S8 ACTIVE. NEXT G707 pageflag metadata bit budget & alloc tags; safe TWRP/BOOT recovery identity still outstanding. User publishes GitHub. Every next handoff/report must repeat ZROBIONE / W TOKU-BLOKADY / DALEJ / FIZYCZNIE NA TABLECIE and FULL S0-S8.

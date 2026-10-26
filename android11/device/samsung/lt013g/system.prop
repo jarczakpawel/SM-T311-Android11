@@ -1,0 +1,8 @@
+mobiledata.interfaces=rmnet0,rmnet1,pdp0,wlan0,gprs,ppp0
+ro.ril.telephony.mqanelements=5
+ro.telephony.call_ring.multiple=false
+ro.telephony.call_ring.delay=3000
+
+# BEGIN SM-T311 TELEPHONY V107
+# HIDL A11 stack uses native Samsung libril; no ro.telephony.ril_class legacy Java override.
+# END SM-T311 TELEPHONY V107

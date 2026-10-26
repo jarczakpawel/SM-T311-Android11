@@ -1,0 +1,9 @@
+# SM-T311 A1 - read-only Linux thermal-zone discovery.
+allow hal_thermal_default sysfs_thermal:dir r_dir_perms;
+allow hal_thermal_default sysfs_thermal:file r_file_perms;
+allow hal_thermal_default sysfs:lnk_file read;
+
+# G291: Samsung thermal FileWatcher needs kernel uevents and the legacy
+# /sys/devices/virtual/thermal/thermal_zone1/temp (generic sysfs label).
+allow hal_thermal_default sysfs:file r_file_perms;
+allow hal_thermal_default self:netlink_kobject_uevent_socket { create bind getattr read write setopt };

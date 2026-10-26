@@ -1,0 +1,46 @@
+C SMT311+XALockGraceABA
+
+{
+slot=1;
+generation=1;
+flag=0;
+size=4096;
+}
+
+P0(int *slot, int *generation, int *flag, int *size, spinlock_t *xa_lock)
+{
+	int r0;
+	int r1;
+	int r2;
+	int r3;
+	int r4;
+
+	rcu_read_lock();
+	r0 = READ_ONCE(*slot);
+	r1 = READ_ONCE(*flag);
+	smp_rmb();
+	r2 = READ_ONCE(*size);
+	smp_rmb();
+	r3 = READ_ONCE(*slot);
+	smp_rmb();
+	r4 = READ_ONCE(*generation);
+	rcu_read_unlock();
+}
+
+P1(int *slot, int *generation, int *flag, int *size, spinlock_t *xa_lock)
+{
+	spin_lock(xa_lock);
+	WRITE_ONCE(*slot, 0);
+	spin_unlock(xa_lock);
+	synchronize_rcu();
+	WRITE_ONCE(*flag, 0);
+	WRITE_ONCE(*generation, 2);
+	WRITE_ONCE(*size, 4096);
+	spin_lock(xa_lock);
+	WRITE_ONCE(*slot, 1);
+	spin_unlock(xa_lock);
+	smp_mb();
+	WRITE_ONCE(*flag, 1);
+}
+
+exists (0:r0=1 /\ 0:r1=1 /\ 0:r2=4096 /\ 0:r3=1 /\ 0:r4=2)

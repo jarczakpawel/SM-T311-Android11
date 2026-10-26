@@ -1,0 +1,10 @@
+# G686 — full ARM32 kernel linked from tracked SM-T311 defconfig (host-only)
+
+Kernel commits `ac9d35548` and `8cde79424`. The tracked normal `arch/arm/configs/sm_t311_android11_defconfig` keeps the optional ref-free RCU experiment OFF. The new tracked `arch/arm/configs/sm_t311_rcu_experiment_g686.fragment`, `tools/testing/selftests/smt311/build_verify_no_flash_g686.sh` and `rcu_linked_image_gate_g686.py` permit independent clean reproduction of test-only `EXPERIMENT=y`, `PAGE_RCU_FREE=y`, `DEBUG_FS=y`. The script enforces `LOCALVERSION=`, preserving the exact kernel name `7.3.0-pjarczak` rather than letting Kbuild append "+".
+
+A complete independent ARMv7 kernel compiled and linked on Debian: `vmlinux` SHA256 `c0a36fb9716c93f44ea4cbba5d370699e2e58f5bf8913baa96fdf1ee22c9786b`, `zImage` SHA256 `bea602b0cb12d2b8c096e703594211eb0627b5ba1af976dbd4ccb80255f02104`. Attestation 5/5 PASS, 7/7 deliberate bad inputs rejected; G660–G685 seventeen regression gates PASS. In-tree full-link manifest `Documentation/mm/sm-t311-rcu-linked-image-g686.json`. Optional build fragment is NOT runtime source and is audited separately from exactly three staged executable paths.
+
+**HOST ONLY**. This is not a complete Samsung BOOT/TWRP image and is NOT approved for physical flash or no-ref RCU ON. G683 waits `synchronize_rcu()` on ext4 shared-writable mmap even when runtime key OFF; full global mmap_lock lockdep, activation/drain, ARMv7 folio lifetime/cache/HighMem and actual benefit remain UNPROVEN. S0 PASS, S1 ACTIVE, S2–S6 BLOCKED, S7 PARTIAL, S8 ACTIVE. Device stays G650, no backup, TWRP reboot, audio/camera/calls/PIN/unsafe OTG action. Owner alone publishes GitHub.
+
+
+Final source audit: kernel `ab5bb883d` updates the legacy G673 18-commit lineage test to recognize the optional, tracked build-time experiment fragment separately from the three NOT-INSTALLED executable mm/ files. Fresh full host build rerun after this commit: 17/17 G660-G685 regression gates PASS, S0–S8 PASS, full-link 5/5 checks PASS and 7/7 negative controls rejected. Project S8 final ledger commit `635329e`. No new runtime code or physical deployment.

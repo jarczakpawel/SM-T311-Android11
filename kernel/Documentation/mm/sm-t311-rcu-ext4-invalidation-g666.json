@@ -1,0 +1,60 @@
+{
+  "project": "SM-T311",
+  "step": "G666",
+  "classification": "SOURCE GRAPH ONLY; S1 ACTIVE; S2 BLOCKED",
+  "positive_checks": {
+    "ext4_write_dispatches_direct": true,
+    "ext4_direct_uses_iomap": true,
+    "ext4_direct_fallback_to_buffered": true,
+    "iomap_invalidates_before_dio_submission": true,
+    "iomap_dio_invalidation_error_propagated": true,
+    "kiocb_to_filemap_invalidates": true,
+    "filemap_waits_then_invalidates": true,
+    "invalidate2_calls_folio_unmap": true,
+    "folio_unmap_under_xa_lock": true,
+    "folio_unmap_puts_last_ref_after_removal": true,
+    "remove_folio_deletes_slot": true,
+    "delete_slot_before_null_mapping": true,
+    "deletion_preserves_rcu_tag_except_eviction": true,
+    "page_allocator_defers_marked_last_free": true,
+    "punch_calls_pagecache_range_truncate": true,
+    "punch_pagecache_block_to_range": true,
+    "range_uses_truncate_inode_pages": true,
+    "truncate_full_batch_deletion": true,
+    "truncate_full_single_deletion": true,
+    "batch_deletion_reaches_page_cache_delete_batch": true,
+    "fallocate_punch_calls_ext4_hole": true,
+    "fallocate_takes_invalidate_lock": true,
+    "setattr_shrink_calls_pagecache_truncate": true,
+    "truncate_pagecache_deletes_cache": true,
+    "no_ref_reader_does_not_lock_invalidate": true
+  },
+  "positive_count": 25,
+  "rejected_mutations": {
+    "disable_iomap_prewrite_invalidation": [
+      "iomap_invalidates_before_dio_submission",
+      "iomap_dio_invalidation_error_propagated"
+    ],
+    "disable_strong_invalidate_remove": [
+      "invalidate2_calls_folio_unmap"
+    ],
+    "disable_punchhole_eviction": [
+      "punch_pagecache_block_to_range"
+    ],
+    "disable_direct_pagecache_delete": [
+      "remove_folio_deletes_slot"
+    ],
+    "disable_tagged_free_defer": [
+      "page_allocator_defers_marked_last_free"
+    ]
+  },
+  "host_xarray_g665_binary": "NOT RUN, missing liburcu-dev headers and package indices",
+  "limitations": [
+    "Source graph is only selected ext4 + iomap + MM call sites, not a complete call graph.",
+    "The no-ref RCU reader does not use filemap invalidate_lock, so that lock alone is not the lifetime proof.",
+    "iomap DIO invalidates cache before writing. A read already inside the removed folio still relies on RCU grace to avoid reuse.",
+    "Direct I/O fallback invalidate_mapping_pages is best effort, not all pages necessarily evicted.",
+    "No guaranteed safety for partial folio writes, hole edge zeroing, outstanding mmap, weak ARMv7 ordering or old unmarked ABA.",
+    "No change to production runtime sources, physical G650 stays ref-free RCU OFF."
+  ]
+}

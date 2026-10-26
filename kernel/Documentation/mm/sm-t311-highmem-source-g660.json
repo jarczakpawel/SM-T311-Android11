@@ -1,0 +1,29 @@
+{
+  "device": "Samsung SM-T311 ARMv7 Cortex-A9",
+  "source_only": true,
+  "production_boot": "G650",
+  "checks": {
+    "sm_t311_highmem_enabled": true,
+    "sm_t311_arm_smp_enabled": true,
+    "lookup_excludes_large_folios": true,
+    "lookup_excludes_highmem": true,
+    "lookup_checks_mapping_identity": true,
+    "copy_eligibility_excludes_highmem": true,
+    "copy_eligibility_excludes_large_folios": true,
+    "arm_requires_dcache_flush": true,
+    "writable_mmap_avoids_no_ref_copy": true,
+    "copy_uses_kmap_local": true,
+    "copy_within_rcu_and_pagefault_guard": true,
+    "normal_direct_map_highmem_temporary_map": true,
+    "armv7_cache_type_dispatch_present": true,
+    "arm_cache_alias_flush_paths_present": true
+  },
+  "passed": 14,
+  "total": 14,
+  "remaining": [
+    "These source guards do not prove that an unmarked recycled folio cannot alias an old speculative pointer.",
+    "ARMv7 runtime cacheid and DMA behavior are not verified by this source-only check.",
+    "No evidence here supports removing ZONE_NORMAL or writable-mmap exclusions.",
+    "S2 and S3 remain BLOCKED, so physical RCU ON and ABBA are not authorized."
+  ]
+}

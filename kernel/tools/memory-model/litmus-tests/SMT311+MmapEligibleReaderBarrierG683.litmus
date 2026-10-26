@@ -1,0 +1,47 @@
+C SMT311+MmapEligibleReaderBarrierG683
+(*
+ * P0 publishes eligibility as filemap_mark_hot.
+ * P1 sees new AS_RCU_READ and old i_mmap_writable count under RCU.
+ * P2 publishes a count then sees old AS_RCU_READ and skips GP.
+ * Full writer barriers overapproximate atomic bit/count publication.
+ *)
+{
+ eligible=0;
+ writable=0;
+ published=0;
+}
+P0(int *eligible, int *writable, int *published)
+{
+ smp_mb();
+ WRITE_ONCE(*eligible, 1);
+ smp_mb();
+}
+P1(int *eligible, int *writable, int *published)
+{
+ int r0;
+ int r1=2;
+ int r2=2;
+ r0=READ_ONCE(*eligible);
+ if (r0 == 1) {
+   smp_mb();
+   rcu_read_lock();
+   r1=READ_ONCE(*writable);
+   r2=READ_ONCE(*published);
+   rcu_read_unlock();
+ }
+}
+P2(int *eligible, int *writable, int *published)
+{
+ int r3;
+ smp_mb();
+ WRITE_ONCE(*writable, 1);
+ smp_mb();
+ r3=READ_ONCE(*eligible);
+ if (r3 == 0)
+   WRITE_ONCE(*published, 1);
+ else {
+   synchronize_rcu();
+   WRITE_ONCE(*published, 1);
+ }
+}
+exists (1:r0=1 /\ 1:r1=0 /\ 1:r2=1 /\ 2:r3=0)

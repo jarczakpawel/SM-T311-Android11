@@ -1,0 +1,803 @@
+diff --git a/src/gpu/GrDrawingManager.cpp b/src/gpu/GrDrawingManager.cpp
+index b53f0bc78582934b90d4450919988e34915a6cca..6a56db954a2bac16a9fd2a01f07e0fed45c5bf88 100644
+--- a/src/gpu/GrDrawingManager.cpp
++++ b/src/gpu/GrDrawingManager.cpp
+@@ -7,6 +7,12 @@
+ 
+ #include "src/gpu/GrDrawingManager.h"
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++#include <cutils/properties.h>
++#include <log/log.h>
++#include <utils/Timers.h>
++#endif
++
+ #include "include/gpu/GrBackendSemaphore.h"
+ #include "include/gpu/GrTexture.h"
+ #include "include/private/GrRecordingContext.h"
+@@ -222,6 +228,11 @@ GrSemaphoresSubmitted GrDrawingManager::flush(GrSurfaceProxy* proxies[], int num
+     SkASSERT(!numProxies || proxies);
+     GR_CREATE_TRACE_MARKER_CONTEXT("GrDrawingManager", "flush", fContext);
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    // G1683: diagnostic only. Preserve every Skia, GLES and buffer-age operation.
++    const bool t311Probe = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t t311Start = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     if (fFlushing || this->wasAbandoned()) {
+         if (info.fFinishedProc) {
+             info.fFinishedProc(info.fFinishedContext);
+@@ -270,6 +281,10 @@ GrSemaphoresSubmitted GrDrawingManager::flush(GrSurfaceProxy* proxies[], int num
+     // if the SkGpuDevice(s) write to them again.
+     fDAG.closeAll(fContext->priv().caps());
+     fActiveOpsTask = nullptr;
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Closed = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++    const int t311TaskCount = fDAG.numRenderTasks();
++#endif
+ 
+     fDAG.prepForFlush();
+     if (!fCpuBufferCache) {
+@@ -329,6 +344,9 @@ GrSemaphoresSubmitted GrDrawingManager::flush(GrSurfaceProxy* proxies[], int num
+     }
+ #endif
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Prepared = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     int startIndex, stopIndex;
+     bool flushed = false;
+ 
+@@ -368,6 +386,9 @@ GrSemaphoresSubmitted GrDrawingManager::flush(GrSurfaceProxy* proxies[], int num
+         }
+     }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Executed = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ #ifdef SK_DEBUG
+     for (int i = 0; i < fDAG.numRenderTasks(); ++i) {
+         // If there are any remaining opsTaskss at this point, make sure they will not survive the
+@@ -390,6 +411,9 @@ GrSemaphoresSubmitted GrDrawingManager::flush(GrSurfaceProxy* proxies[], int num
+ 
+     GrSemaphoresSubmitted result = gpu->finishFlush(proxies, numProxies, access, info,
+                                                     externalRequests);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Submitted = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ 
+     // Give the cache a chance to purge resources that become purgeable due to flushing.
+     if (flushed) {
+@@ -407,12 +431,37 @@ GrSemaphoresSubmitted GrDrawingManager::flush(GrSurfaceProxy* proxies[], int num
+     fFlushingRenderTaskIDs.reset();
+     fFlushing = false;
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    if (t311Probe) {
++        const int64_t endNs = systemTime(SYSTEM_TIME_MONOTONIC);
++        if (endNs - t311Start > 8000000LL) {
++            static unsigned int logged = 0;
++            if (logged++ < 192) {
++                ALOGI("T311_HWUI_GR_FLUSH close_us=%lld prepare_us=%lld "
++                      "execute_us=%lld finish_us=%lld post_us=%lld total_us=%lld "
++                      "tasks=%d",
++                      static_cast<long long>((t311Closed - t311Start) / 1000),
++                      static_cast<long long>((t311Prepared - t311Closed) / 1000),
++                      static_cast<long long>((t311Executed - t311Prepared) / 1000),
++                      static_cast<long long>((t311Submitted - t311Executed) / 1000),
++                      static_cast<long long>((endNs - t311Submitted) / 1000),
++                      static_cast<long long>((endNs - t311Start) / 1000),
++                      t311TaskCount);
++            }
++        }
++    }
++#endif
+     return result;
+ }
+ 
+ bool GrDrawingManager::executeRenderTasks(int startIndex, int stopIndex, GrOpFlushState* flushState,
+                                           int* numRenderTasksExecuted) {
+     SkASSERT(startIndex <= stopIndex && stopIndex <= fDAG.numRenderTasks());
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    // G1690: only add timing when the existing G1683 probe is temporarily ON.
++    const bool t311Subprobe = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t t311Begin = t311Subprobe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ 
+ #if GR_FLUSH_TIME_OP_SPEW
+     SkDebugf("Flushing opsTask: %d to %d out of [%d, %d]\n",
+@@ -436,9 +485,15 @@ bool GrDrawingManager::executeRenderTasks(int startIndex, int stopIndex, GrOpFlu
+ 
+         renderTask->prepare(flushState);
+     }
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Prepared = t311Subprobe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ 
+     // Upload all data to the GPU
+     flushState->preExecuteDraws();
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Uploaded = t311Subprobe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ 
+     // For Vulkan, if we have too many oplists to be flushed we end up allocating a lot of resources
+     // for each command buffer associated with the oplists. If this gets too large we can cause the
+@@ -462,6 +517,9 @@ bool GrDrawingManager::executeRenderTasks(int startIndex, int stopIndex, GrOpFlu
+         }
+     }
+     fOnFlushRenderTasks.reset();
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Callbacks = t311Subprobe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ 
+     // Execute the normal op lists.
+     for (int i = startIndex; i < stopIndex; ++i) {
+@@ -481,6 +539,9 @@ bool GrDrawingManager::executeRenderTasks(int startIndex, int stopIndex, GrOpFlu
+         }
+     }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Drawn = t311Subprobe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     SkASSERT(!flushState->opsRenderPass());
+     SkASSERT(fTokenTracker.nextDrawToken() == fTokenTracker.nextTokenToFlush());
+ 
+@@ -491,6 +552,26 @@ bool GrDrawingManager::executeRenderTasks(int startIndex, int stopIndex, GrOpFlu
+ 
+     fDAG.removeRenderTasks(startIndex, stopIndex);
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    if (t311Subprobe) {
++        const int64_t t311End = systemTime(SYSTEM_TIME_MONOTONIC);
++        if (t311End - t311Begin > 8000000LL) {
++            static unsigned int logged = 0;
++            if (logged++ < 192) {
++                ALOGI("T311_HWUI_GR_TASKS prepare_us=%lld upload_us=%lld "
++                      "callbacks_us=%lld draw_us=%lld cleanup_us=%lld "
++                      "total_us=%lld task_slots=%d",
++                      static_cast<long long>((t311Prepared - t311Begin) / 1000),
++                      static_cast<long long>((t311Uploaded - t311Prepared) / 1000),
++                      static_cast<long long>((t311Callbacks - t311Uploaded) / 1000),
++                      static_cast<long long>((t311Drawn - t311Callbacks) / 1000),
++                      static_cast<long long>((t311End - t311Drawn) / 1000),
++                      static_cast<long long>((t311End - t311Begin) / 1000),
++                      stopIndex - startIndex);
++            }
++        }
++    }
++#endif
+     return anyRenderTasksExecuted;
+ }
+ 
+diff --git a/src/gpu/GrOpFlushState.cpp b/src/gpu/GrOpFlushState.cpp
+index 5364bf161ed680419c4c8b68e8c0429776a8e70b..8c8081524f8a779cc1c40a0fc81e12b0d32467e1 100644
+--- a/src/gpu/GrOpFlushState.cpp
++++ b/src/gpu/GrOpFlushState.cpp
+@@ -7,6 +7,12 @@
+ 
+ #include "src/gpu/GrOpFlushState.h"
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++#include <cutils/properties.h>
++#include <log/log.h>
++#include <utils/Timers.h>
++#endif
++
+ #include "include/gpu/GrTexture.h"
+ #include "src/core/SkConvertPixels.h"
+ #include "src/gpu/GrContextPriv.h"
+@@ -34,15 +40,37 @@ const GrCaps& GrOpFlushState::caps() const {
+ void GrOpFlushState::executeDrawsAndUploadsForMeshDrawOp(
+         const GrOp* op, const SkRect& chainBounds, const GrPipeline* pipeline) {
+     SkASSERT(this->opsRenderPass());
+-
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    // G1704: bounded default-OFF diagnostic. Never reorder uploads, bind or draws.
++    const bool t311Probe = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t t311Started = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++    int64_t t311UploadNs = 0;
++    int64_t t311ProgramNs = 0;
++    int64_t t311BindNs = 0;
++    int64_t t311MeshesNs = 0;
++    int t311DrawCount = 0;
++    int t311InlineUploads = 0;
++#endif
+     while (fCurrDraw != fDraws.end() && fCurrDraw->fOp == op) {
+         GrDeferredUploadToken drawToken = fTokenTracker->nextTokenToFlush();
+         while (fCurrUpload != fInlineUploads.end() &&
+                fCurrUpload->fUploadBeforeToken == drawToken) {
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++            const int64_t t311UploadStart = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+             this->opsRenderPass()->inlineUpload(this, fCurrUpload->fUpload);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++            if (t311Probe) {
++                t311UploadNs += systemTime(SYSTEM_TIME_MONOTONIC) - t311UploadStart;
++                ++t311InlineUploads;
++            }
++#endif
+             ++fCurrUpload;
+         }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        const int64_t t311ProgramStart = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+         GrProgramInfo programInfo(this->proxy()->numSamples(),
+                                   this->proxy()->numStencilSamples(),
+                                   this->proxy()->backendFormat(),
+@@ -54,11 +82,51 @@ void GrOpFlushState::executeDrawsAndUploadsForMeshDrawOp(
+                                   fCurrDraw->fMeshCnt,
+                                   fCurrDraw->fPrimitiveType);
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        const int64_t t311BindStart = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++        if (t311Probe) {
++            t311ProgramNs += t311BindStart - t311ProgramStart;
++        }
++#endif
+         this->opsRenderPass()->bindPipeline(programInfo, chainBounds);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        const int64_t t311DrawStart = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++        if (t311Probe) {
++            t311BindNs += t311DrawStart - t311BindStart;
++        }
++#endif
+         this->opsRenderPass()->drawMeshes(programInfo, fCurrDraw->fMeshes, fCurrDraw->fMeshCnt);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        if (t311Probe) {
++            t311MeshesNs += systemTime(SYSTEM_TIME_MONOTONIC) - t311DrawStart;
++            ++t311DrawCount;
++        }
++#endif
+         fTokenTracker->flushToken();
+         ++fCurrDraw;
+     }
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    if (t311Probe) {
++        const int64_t t311Elapsed = systemTime(SYSTEM_TIME_MONOTONIC) - t311Started;
++        if (t311Elapsed > 8000000LL) {
++            static unsigned int logged = 0;
++            if (logged++ < 192) {
++                ALOGI("T311_HWUI_GL_MESH op=%s upload_us=%lld program_us=%lld "
++                      "bind_us=%lld meshes_us=%lld residual_us=%lld total_us=%lld "
++                      "draws=%d uploads=%d",
++                      op->name(),
++                      static_cast<long long>(t311UploadNs / 1000),
++                      static_cast<long long>(t311ProgramNs / 1000),
++                      static_cast<long long>(t311BindNs / 1000),
++                      static_cast<long long>(t311MeshesNs / 1000),
++                      static_cast<long long>((t311Elapsed - t311UploadNs - t311ProgramNs -
++                                              t311BindNs - t311MeshesNs) / 1000),
++                      static_cast<long long>(t311Elapsed / 1000),
++                      t311DrawCount, t311InlineUploads);
++            }
++        }
++    }
++#endif
+ }
+ 
+ void GrOpFlushState::preExecuteDraws() {
+diff --git a/src/gpu/GrOpsTask.cpp b/src/gpu/GrOpsTask.cpp
+index 7f26afc27925a91954e8b291a34466f8b910b84b..1f9eaaa37a8bf547e35ec0cd898b8b1c00a7aac1 100644
+--- a/src/gpu/GrOpsTask.cpp
++++ b/src/gpu/GrOpsTask.cpp
+@@ -7,6 +7,12 @@
+ 
+ #include "src/gpu/GrOpsTask.h"
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++#include <cutils/properties.h>
++#include <log/log.h>
++#include <utils/Timers.h>
++#endif
++
+ #include "include/private/GrRecordingContext.h"
+ #include "src/core/SkExchange.h"
+ #include "src/core/SkRectPriv.h"
+@@ -493,6 +499,14 @@ bool GrOpsTask::onExecute(GrOpFlushState* flushState) {
+         return false;
+     }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    // G1697: no changes to EGL, GLES, buffer damage or op scheduling.
++    const bool t311Probe = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t t311Started = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++    int64_t t311LongestOpNs = 0;
++    const char* t311LongestName = "none";
++    int t311OpChains = 0;
++#endif
+     SkASSERT(fTargetView.proxy());
+     GrRenderTargetProxy* proxy = fTargetView.proxy()->asRenderTargetProxy();
+     SkASSERT(proxy);
+@@ -568,6 +582,9 @@ bool GrOpsTask::onExecute(GrOpFlushState* flushState) {
+     }
+     flushState->setOpsRenderPass(renderPass);
+     renderPass->begin();
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311PassReady = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ 
+     // Draw all the generated geometry.
+     for (const auto& chain : fOpChains) {
+@@ -584,14 +601,49 @@ bool GrOpsTask::onExecute(GrOpFlushState* flushState) {
+                                       chain.dstProxyView());
+ 
+         flushState->setOpArgs(&opArgs);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        const int64_t t311OpStart = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+         chain.head()->execute(flushState, chain.bounds());
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        if (t311Probe) {
++            const int64_t t311OpNs = systemTime(SYSTEM_TIME_MONOTONIC) - t311OpStart;
++            ++t311OpChains;
++            if (t311OpNs > t311LongestOpNs) {
++                t311LongestOpNs = t311OpNs;
++                t311LongestName = chain.head()->name();
++            }
++        }
++#endif
+         flushState->setOpArgs(nullptr);
+     }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311OpsDrawn = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     renderPass->end();
+     flushState->gpu()->submit(renderPass);
+     flushState->setOpsRenderPass(nullptr);
+-
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    if (t311Probe) {
++        const int64_t t311Finished = systemTime(SYSTEM_TIME_MONOTONIC);
++        if (t311Finished - t311Started > 8000000LL) {
++            static unsigned int logged = 0;
++            if (logged++ < 192) {
++                ALOGI("T311_HWUI_GR_OPS pass_us=%lld chains_us=%lld "
++                      "submit_us=%lld total_us=%lld count=%d "
++                      "longest_us=%lld longest=%s",
++                      static_cast<long long>((t311PassReady - t311Started) / 1000),
++                      static_cast<long long>((t311OpsDrawn - t311PassReady) / 1000),
++                      static_cast<long long>((t311Finished - t311OpsDrawn) / 1000),
++                      static_cast<long long>((t311Finished - t311Started) / 1000),
++                      t311OpChains,
++                      static_cast<long long>(t311LongestOpNs / 1000),
++                      t311LongestName);
++            }
++        }
++    }
++#endif
+     return true;
+ }
+ 
+diff --git a/src/gpu/gl/GrGLGpu.cpp b/src/gpu/gl/GrGLGpu.cpp
+index b4a9b265bf9abd5b2b0902841e6a22f72de66cd2..313cbfed6966b6a201c3b33c8541fdb859a90d63 100644
+--- a/src/gpu/gl/GrGLGpu.cpp
++++ b/src/gpu/gl/GrGLGpu.cpp
+@@ -33,6 +33,11 @@
+ #include "src/gpu/GrTexturePriv.h"
+ #include "src/gpu/gl/GrGLBuffer.h"
+ #include "src/gpu/gl/GrGLGpu.h"
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++#include <cutils/properties.h>
++#include <log/log.h>
++#include <utils/Timers.h>
++#endif
+ #include "src/gpu/gl/GrGLOpsRenderPass.h"
+ #include "src/gpu/gl/GrGLSemaphore.h"
+ #include "src/gpu/gl/GrGLStencilAttachment.h"
+@@ -1823,31 +1828,54 @@ void GrGLGpu::disableWindowRectangles() {
+ }
+ 
+ bool GrGLGpu::flushGLState(GrRenderTarget* renderTarget, const GrProgramInfo& programInfo) {
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    // G1711 default-OFF observability. No changes to GLES/EGL state ordering.
++    const bool t311Probe = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t t311Start = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     this->handleDirtyContext();
+ 
+     if (GrPrimitiveType::kPatches == programInfo.primitiveType()) {
+         this->flushPatchVertexCount(programInfo.tessellationPatchVertexCount());
+     }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Dirty = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     sk_sp<GrGLProgram> program(fProgramCache->findOrCreateProgram(renderTarget, programInfo));
+     if (!program) {
+         GrCapsDebugf(this->caps(), "Failed to create program!\n");
+         return false;
+     }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Cache = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     this->flushProgram(std::move(program));
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Use = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ 
+     // Swizzle the blend to match what the shader will output.
+     this->flushBlendAndColorWrite(programInfo.pipeline().getXferProcessor().getBlendInfo(),
+                                   programInfo.pipeline().outputSwizzle());
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Blend = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     fHWProgram->updateUniforms(renderTarget, programInfo);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Uniform = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     if (!programInfo.hasDynamicPrimProcTextures()) {
+         auto* primProcTextures = (programInfo.hasFixedPrimProcTextures())
+                 ? programInfo.fixedPrimProcTextures() : nullptr;
+         fHWProgram->bindTextures(programInfo.primProc(), programInfo.pipeline(), primProcTextures);
+     }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Texture = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     GrGLRenderTarget* glRT = static_cast<GrGLRenderTarget*>(renderTarget);
+     GrStencilSettings stencil;
+     if (programInfo.pipeline().isStencilEnabled()) {
+@@ -1874,7 +1902,27 @@ bool GrGLGpu::flushGLState(GrRenderTarget* renderTarget, const GrProgramInfo& pr
+     // This must come after textures are flushed because a texture may need
+     // to be msaa-resolved (which will modify bound FBO state).
+     this->flushRenderTarget(glRT);
+-
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    if (t311Probe) {
++        const int64_t t311End = systemTime(SYSTEM_TIME_MONOTONIC);
++        if (t311End - t311Start > 8000000LL) {
++            static unsigned int logged = 0;
++            if (logged++ < 192) {
++                ALOGI("T311_HWUI_GL_BIND dirty_us=%lld cache_us=%lld use_us=%lld "
++                      "blend_us=%lld uniform_us=%lld textures_us=%lld "
++                      "state_us=%lld total_us=%lld",
++                      static_cast<long long>((t311Dirty - t311Start) / 1000),
++                      static_cast<long long>((t311Cache - t311Dirty) / 1000),
++                      static_cast<long long>((t311Use - t311Cache) / 1000),
++                      static_cast<long long>((t311Blend - t311Use) / 1000),
++                      static_cast<long long>((t311Uniform - t311Blend) / 1000),
++                      static_cast<long long>((t311Texture - t311Uniform) / 1000),
++                      static_cast<long long>((t311End - t311Texture) / 1000),
++                      static_cast<long long>((t311End - t311Start) / 1000));
++            }
++        }
++    }
++#endif
+     return true;
+ }
+ 
+diff --git a/src/gpu/gl/GrGLGpuProgramCache.cpp b/src/gpu/gl/GrGLGpuProgramCache.cpp
+index 02c75a11ec10cfbdf951bf06be45795eebb96396..f514befd2971fa8005866251eeac26c3dbf9075d 100644
+--- a/src/gpu/gl/GrGLGpuProgramCache.cpp
++++ b/src/gpu/gl/GrGLGpuProgramCache.cpp
+@@ -6,6 +6,11 @@
+  */
+ 
+ #include "src/gpu/gl/GrGLGpu.h"
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++#include <cutils/properties.h>
++#include <log/log.h>
++#include <utils/Timers.h>
++#endif
+ 
+ #include "include/gpu/GrContextOptions.h"
+ #include "src/gpu/GrContextPriv.h"
+@@ -61,8 +66,21 @@ sk_sp<GrGLProgram> GrGLGpu::ProgramCache::findOrCreateProgram(GrRenderTarget* re
+ sk_sp<GrGLProgram> GrGLGpu::ProgramCache::findOrCreateProgram(GrRenderTarget* renderTarget,
+                                                               const GrProgramDesc& desc,
+                                                               const GrProgramInfo& programInfo) {
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    // G1718: record whether an expensive bind was a cache hit or shader creation.
++    // Diagnostic default OFF, and does not alter the cache, shader, or GL ordering.
++    const bool t311Probe = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t t311Start = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++    const char* t311Kind = "hit";
++#endif
+     std::unique_ptr<Entry>* entry = fMap.find(desc);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Lookup = t311Probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+     if (entry && !(*entry)->fProgram) {
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        t311Kind = "precompiled";
++#endif
+         // We've pre-compiled the GL program, but don't have the GrGLProgram scaffolding
+         const GrGLPrecompiledProgram* precompiledProgram = &((*entry)->fPrecompiledProgram);
+         SkASSERT(precompiledProgram->fProgramID != 0);
+@@ -74,6 +92,9 @@ sk_sp<GrGLProgram> GrGLGpu::ProgramCache::findOrCreateProgram(GrRenderTarget* re
+             return nullptr;
+         }
+     } else if (!entry) {
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        t311Kind = "miss";
++#endif
+         // We have a cache miss
+         sk_sp<GrGLProgram> program = GrGLProgramBuilder::CreateProgram(fGpu, renderTarget,
+                                                                        desc, programInfo);
+@@ -83,6 +104,24 @@ sk_sp<GrGLProgram> GrGLGpu::ProgramCache::findOrCreateProgram(GrRenderTarget* re
+         entry = fMap.insert(desc, std::unique_ptr<Entry>(new Entry(std::move(program))));
+     }
+ 
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    if (t311Probe) {
++        const int64_t t311End = systemTime(SYSTEM_TIME_MONOTONIC);
++        // A sample every 32 calls also distinguishes ordinary cache hits from
++        // the slow events. Counters are thread-local to avoid shared-state races.
++        static thread_local unsigned int calls = 0;
++        static thread_local unsigned int logged = 0;
++        ++calls;
++        if ((t311End - t311Start > 8000000LL || (calls & 31U) == 0U) && logged++ < 192) {
++            ALOGI("T311_HWUI_SHADER_CACHE kind=%s lookup_us=%lld create_us=%lld "
++                  "total_us=%lld calls=%u",
++                  t311Kind,
++                  static_cast<long long>((t311Lookup - t311Start) / 1000),
++                  static_cast<long long>((t311End - t311Lookup) / 1000),
++                  static_cast<long long>((t311End - t311Start) / 1000), calls);
++        }
++    }
++#endif
+     return (*entry)->fProgram;
+ }
+ 
+diff --git a/src/gpu/gl/builders/GrGLProgramBuilder.cpp b/src/gpu/gl/builders/GrGLProgramBuilder.cpp
+index 012140f0cf2f4806ed54362c375fd9dd70debca4..0d524e09aa44642f236ff14bcb755a983203ea5f 100644
+--- a/src/gpu/gl/builders/GrGLProgramBuilder.cpp
++++ b/src/gpu/gl/builders/GrGLProgramBuilder.cpp
+@@ -6,6 +6,11 @@
+  */
+ 
+ #include "src/gpu/gl/builders/GrGLProgramBuilder.h"
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++#include <cutils/properties.h>
++#include <log/log.h>
++#include <utils/Timers.h>
++#endif
+ 
+ #include "include/gpu/GrContext.h"
+ #include "src/core/SkATrace.h"
+@@ -53,6 +58,11 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::CreateProgram(
+                                                const GrGLPrecompiledProgram* precompiledProgram) {
+     ATRACE_ANDROID_FRAMEWORK_ALWAYS("shader_compile");
+     GrAutoLocaleSetter als("C");
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    // G1732: bounded default-OFF timing only, leaves disk cache and GL behavior intact.
++    const bool t311Profile = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t t311Start = t311Profile ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+ 
+     // create a builder.  This will be handed off to effects so they can use it to add
+     // uniforms, varyings, textures, etc
+@@ -66,10 +76,38 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::CreateProgram(
+         // doing necessary setup in addition to generating the SkSL code. Currently we are only able
+         // to skip the SkSL->GLSL step on a cache hit.
+     }
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Loaded = t311Profile ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++    const bool t311HadDiskBlob = builder.fCached != nullptr;
++#endif
+     if (!builder.emitAndInstallProcs()) {
+         return nullptr;
+     }
+-    return builder.finalize(precompiledProgram);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const int64_t t311Emitted = t311Profile ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
++    auto result = builder.finalize(precompiledProgram);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    if (t311Profile) {
++        const int64_t t311End = systemTime(SYSTEM_TIME_MONOTONIC);
++        static thread_local unsigned int t311Calls = 0;
++        static thread_local unsigned int t311Logs = 0;
++        ++t311Calls;
++        if ((t311End - t311Start > 8000000LL || (t311Calls & 31U) == 0U) &&
++            t311Logs < 192) {
++            ++t311Logs;
++            ALOGI("T311_HWUI_SHADER_BUILD disk_blob=%d load_us=%lld emit_us=%lld "
++                  "finalize_us=%lld total_us=%lld ok=%d",
++                  t311HadDiskBlob ? 1 : 0,
++                  static_cast<long long>((t311Loaded - t311Start) / 1000),
++                  static_cast<long long>((t311Emitted - t311Loaded) / 1000),
++                  static_cast<long long>((t311End - t311Emitted) / 1000),
++                  static_cast<long long>((t311End - t311Start) / 1000),
++                  result ? 1 : 0);
++        }
++    }
++#endif
++    return result;
+ }
+ 
+ /////////////////////////////////////////////////////////////////////////////
+@@ -173,14 +211,25 @@ void GrGLProgramBuilder::storeShaderInCache(const SkSL::Program::Inputs& inputs,
+             writer.write32(length);
+ 
+             void* binary = writer.reservePad(length);
+-            GrGLenum binaryFormat;
+-            GL_CALL(GetProgramBinary(programID, length, &length, &binaryFormat, binary));
+-            writer.write32(binaryFormat);
+-
+-            auto data = writer.snapshotAsData();
+-            this->gpu()->getContext()->priv().getPersistentCache()->store(*key, *data);
++            GrGLenum binaryFormat = 0;
++            GrGLsizei actualLength = 0;
++            GrGLClearErr(this->gpu()->glInterface());
++            GR_GL_CALL_NOERRCHECK(this->gpu()->glInterface(),
++                                  GetProgramBinary(programID, length, &actualLength,
++                                                   &binaryFormat, binary));
++            // Some GLES2/OES drivers advertise binaries but cannot return a usable one.
++            // Never persist a truncated/failed GLPB blob: cache GLSL instead.
++            if (GR_GL_GET_ERROR(this->gpu()->glInterface()) == GR_GL_NO_ERROR &&
++                actualLength == length && actualLength > 0 && binaryFormat != 0) {
++                writer.write32(binaryFormat);
++                auto data = writer.snapshotAsData();
++                this->gpu()->getContext()->priv().getPersistentCache()->store(*key, *data);
++                return;
++            }
+         }
+-    } else {
++    }
++    // Source-cache fallback for a GLES2 driver without a valid program binary.
++    {
+         // source cache, plus metadata to allow for a complete precompile
+         GrPersistentCacheUtils::ShaderMetadata meta;
+         meta.fSettings = settings;
+@@ -239,7 +288,24 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
+ #ifdef SK_DEBUG
+     checkLinked = true;
+ #endif
+-    bool cached = fCached.get() != nullptr;
++    // Reject a truncated blob before constructing SkReader32, which only asserts bounds.
++    bool cached = fCached.get() != nullptr && fCached->size() >= sizeof(uint32_t) &&
++                  SkAlign4(fCached->size()) == fCached->size();
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    const bool t311Profile = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t t311FinalizeStart = t311Profile ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++    const bool t311HadDiskBlob = cached;
++    // Only read a tag when Skia's cached blob contains enough bytes for one.
++    uint32_t t311BlobTag = 0;
++    if (t311Profile && cached && fCached->size() >= sizeof(uint32_t)) {
++        SkReader32 t311TagReader(fCached->data(), fCached->size());
++        t311BlobTag = t311TagReader.readU32();
++    }
++    int64_t t311FragmentNs = 0;
++    int64_t t311VertexNs = 0;
++    int64_t t311LinkNs = 0;
++    int64_t t311StoreNs = 0;
++#endif
+     bool usedProgramBinaries = false;
+     SkSL::String glsl[kGrShaderTypeCount];
+     SkSL::String* sksl[kGrShaderTypeCount] = {
+@@ -267,10 +333,28 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
+                     cached = false;
+                     break;
+                 }
++                // SkReader32 assumes well-formed data and only debug-asserts on
++                // overruns. Reject truncated, negative or oversized disk blobs
++                // before any read/skip, then recompile the shader normally.
++                if (!reader.isAvailable(SkAlign4(sizeof(inputs)) +
++                                        sizeof(int32_t) + sizeof(uint32_t))) {
++                    cached = false;
++                    break;
++                }
+                 reader.read(&inputs, sizeof(inputs));
+                 GrGLsizei length = reader.readInt();
++                if (length <= 0 || !reader.isAvailable(sizeof(uint32_t)) ||
++                    !reader.isAvailable(SkAlign4(static_cast<size_t>(length)) +
++                                        sizeof(uint32_t))) {
++                    cached = false;
++                    break;
++                }
+                 const void* binary = reader.skip(length);
+                 GrGLenum binaryFormat = reader.readU32();
++                if (binaryFormat == 0) {
++                    cached = false;
++                    break;
++                }
+                 GrGLClearErr(this->gpu()->glInterface());
+                 GR_GL_CALL_NOERRCHECK(this->gpu()->glInterface(),
+                                       ProgramBinary(programID, binaryFormat,
+@@ -330,11 +414,17 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
+         }
+ 
+         this->addInputVars(inputs);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        const int64_t t311FragmentStart = t311Profile ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+         if (!this->compileAndAttachShaders(glsl[kFragment_GrShaderType], programID,
+                                            GR_GL_FRAGMENT_SHADER, &shadersToDelete, errorHandler)) {
+             cleanup_program(fGpu, programID, shadersToDelete);
+             return nullptr;
+         }
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        if (t311Profile) t311FragmentNs = systemTime(SYSTEM_TIME_MONOTONIC) - t311FragmentStart;
++#endif
+ 
+         /*
+            Vertex Shader
+@@ -352,11 +442,17 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
+                 return nullptr;
+             }
+         }
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        const int64_t t311VertexStart = t311Profile ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+         if (!this->compileAndAttachShaders(glsl[kVertex_GrShaderType], programID,
+                                            GR_GL_VERTEX_SHADER, &shadersToDelete, errorHandler)) {
+             cleanup_program(fGpu, programID, shadersToDelete);
+             return nullptr;
+         }
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        if (t311Profile) t311VertexNs = systemTime(SYSTEM_TIME_MONOTONIC) - t311VertexStart;
++#endif
+ 
+         // This also binds vertex attribute locations. NVPR doesn't really use vertices,
+         // even though it requires a vertex shader in the program.
+@@ -422,7 +518,9 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
+             }
+         }
+         this->bindProgramResourceLocations(programID);
+-
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        const int64_t t311LinkStart = t311Profile ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+         GL_CALL(LinkProgram(programID));
+         if (checkLinked) {
+             if (!this->checkLinkStatus(programID, errorHandler, sksl, glsl)) {
+@@ -430,6 +528,9 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
+                 return nullptr;
+             }
+         }
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        if (t311Profile) t311LinkNs = systemTime(SYSTEM_TIME_MONOTONIC) - t311LinkStart;
++#endif
+     }
+     this->resolveProgramResourceLocations(programID, usedProgramBinaries);
+ 
+@@ -457,9 +558,43 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
+             }
+             isSkSL = true;
+         }
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        const int64_t t311StoreStart = t311Profile ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++#endif
+         this->storeShaderInCache(inputs, programID, glsl, isSkSL, &settings);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++        if (t311Profile) t311StoreNs = systemTime(SYSTEM_TIME_MONOTONIC) - t311StoreStart;
++#endif
++    }
++    auto result = this->createProgram(programID);
++#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(__ANDROID__)
++    if (t311Profile) {
++        const int64_t t311End = systemTime(SYSTEM_TIME_MONOTONIC);
++        static thread_local unsigned int t311Calls = 0;
++        static thread_local unsigned int t311Logs = 0;
++        ++t311Calls;
++        if ((t311End - t311FinalizeStart > 8000000LL || (t311Calls & 31U) == 0U) &&
++            t311Logs < 192) {
++            ++t311Logs;
++            ALOGI("T311_HWUI_SHADER_BINARY blob=%d glpb=%d glsl=%d sksl=%d "
++                  "binary_loaded=%d fallback=%d finalize_us=%lld ok=%d "
++                  "fragment_us=%lld vertex_us=%lld link_us=%lld store_us=%lld",
++                  t311HadDiskBlob ? 1 : 0,
++                  t311BlobTag == kGLPB_Tag ? 1 : 0,
++                  t311BlobTag == kGLSL_Tag ? 1 : 0,
++                  t311BlobTag == kSKSL_Tag ? 1 : 0,
++                  usedProgramBinaries ? 1 : 0,
++                  t311HadDiskBlob && !usedProgramBinaries ? 1 : 0,
++                  static_cast<long long>((t311End - t311FinalizeStart) / 1000),
++                  result ? 1 : 0,
++                  static_cast<long long>(t311FragmentNs / 1000),
++                  static_cast<long long>(t311VertexNs / 1000),
++                  static_cast<long long>(t311LinkNs / 1000),
++                  static_cast<long long>(t311StoreNs / 1000));
++        }
+     }
+-    return this->createProgram(programID);
++#endif
++    return result;
+ }
+ 
+ void GrGLProgramBuilder::bindProgramResourceLocations(GrGLuint programID) {

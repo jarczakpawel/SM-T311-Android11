@@ -1,0 +1,144 @@
+{
+  "stage": "G687",
+  "result": "HOST COMPLETE RELEASE OFF LINK AND EXPERIMENT ON-CAPABLE COMPARATOR; NO BOOT/FLASH",
+  "last_executable_source_commit": "7d567ea29",
+  "kernel_release": "7.3.0-pjarczak",
+  "positive_source_and_binary_guards": {
+    "tracked_default_base_does_not_enable_experiment": true,
+    "tracked_overlay_opt_in_only": true,
+    "release_experiment_disabled": true,
+    "release_PAGE_RCU_FREE_disabled": true,
+    "release_DEBUG_FS_disabled": true,
+    "experiment_CONFIG_compiled_not_runtime_ON": true,
+    "release_has_zero_return_reader_stub_but_no_runtime_key": true,
+    "runtime_key_storage_absent_from_release": true,
+    "runtime_toggler_absent_from_release": true,
+    "experimental_symbols_linked_in_comparator": true,
+    "ext4_mmap_GP_specific_call_absent_in_release_vma": true,
+    "ext4_mmap_GP_call_present_in_experimental_vma": true,
+    "mmap_region_production_symbol_retained": true,
+    "exact_release_uts_both": true,
+    "only_four_modified_runtime_paths_and_two_overlays": true,
+    "release_has_no_unsafe_fastpath_globally": true
+  },
+  "ARMv7_callsite_assembly_gates": {
+    "ARM32_release_stub_mov_zero": true,
+    "ARM32_release_stub_bx_lr": true,
+    "release_hot_filemap_read_call_eliminated": true,
+    "experiment_hot_filemap_read_call_preserved": true,
+    "release_source_explicit_CONFIG_PAGE_RCU_FREE_guard": true,
+    "release_source_fallback_constant_zero": true,
+    "G688_release_shmem_stub_call_removed": true
+  },
+  "ARMv7_callsite_modified_disassembly_negative_controls": {
+    "reintroduce_release_filemap_stub_call": true,
+    "remove_experiment_filemap_call": true,
+    "corrupt_release_stub_zero_return": true
+  },
+  "positive_guards_pass": 16,
+  "tampered_input_controls_rejected": {
+    "accidentally_enable_experiment": [
+      "release_experiment_disabled",
+      "release_has_no_unsafe_fastpath_globally"
+    ],
+    "accidentally_enable_PAGE_RCU_FREE": [
+      "release_PAGE_RCU_FREE_disabled",
+      "release_has_no_unsafe_fastpath_globally"
+    ],
+    "release_name_plus": [
+      "exact_release_uts_both"
+    ],
+    "delete_release_reader_stub": [
+      "release_has_zero_return_reader_stub_but_no_runtime_key"
+    ],
+    "reintroduce_unref_toggle": [
+      "runtime_toggler_absent_from_release",
+      "release_has_no_unsafe_fastpath_globally"
+    ],
+    "reintroduce_GP_under_mmap": [
+      "ext4_mmap_GP_specific_call_absent_in_release_vma"
+    ],
+    "drop_GP_from_exp_comparator": [
+      "ext4_mmap_GP_call_present_in_experimental_vma"
+    ],
+    "untracked_fifth_kernel_runtime_path": [
+      "only_four_modified_runtime_paths_and_two_overlays"
+    ]
+  },
+  "source_tree_changes": [
+    "arch/arm/configs/sm_t311_rcu_experiment_g686.fragment",
+    "arch/arm/configs/sm_t311_rcu_off_keep_debugfs_g700.fragment",
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ],
+  "host_linked_artifacts": {
+    "release_rcu_off": {
+      "vmlinux": {
+        "sha256": "e929387d60fec5233cab1c36ccdb6ad50e2d7699ccc22c7d231f9992e8cc97c8",
+        "bytes": 24734388,
+        "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g687-release-rcu-off/vmlinux: ELF 32-bit LSB executable, ARM, EABI5 version 1 (SYSV), statically linked, BuildID[sha1]=8cd9b69c7becdb2895a94cf0f41b3c6d04611f32, not stripped",
+        "host_path": "/home/debian/Projekty/samsung/linux-7.3-port/build/g687-release-rcu-off/vmlinux"
+      },
+      "arch/arm/boot/zImage": {
+        "sha256": "1c2dd2e521cbfec48c95c89518487b5cfd1887027e7f9d74146027d777e86c49",
+        "bytes": 6299344,
+        "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g687-release-rcu-off/arch/arm/boot/zImage: Linux kernel ARM boot executable zImage (kernel >=v4.15) (little-endian)",
+        "host_path": "/home/debian/Projekty/samsung/linux-7.3-port/build/g687-release-rcu-off/arch/arm/boot/zImage"
+      },
+      "mm/vma.o": {
+        "sha256": "44d37f7e6fcbfc24dd065e271ac43e953aaedce140b9ae2774a7921d73d6d2bf",
+        "bytes": 33548,
+        "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g687-release-rcu-off/mm/vma.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped",
+        "host_path": "/home/debian/Projekty/samsung/linux-7.3-port/build/g687-release-rcu-off/mm/vma.o"
+      },
+      "mm/filemap.o": {
+        "sha256": "3973982c11eb2c4f32e7e5ce700907bf9023f7cc833283a76045903385c0b7a4",
+        "bytes": 76200,
+        "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g687-release-rcu-off/mm/filemap.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped",
+        "host_path": "/home/debian/Projekty/samsung/linux-7.3-port/build/g687-release-rcu-off/mm/filemap.o"
+      }
+    },
+    "experimental_ON_compiled_but_G692_activation_refused": {
+      "vmlinux": {
+        "sha256": "6674571cbe202e69692a9b9279e6eb2b629b108d390719fb8296fd2e79f44ed4",
+        "bytes": 25128244,
+        "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/vmlinux: ELF 32-bit LSB executable, ARM, EABI5 version 1 (SYSV), statically linked, BuildID[sha1]=017704598dc5caab405ad5e7e683550cbf156426, not stripped",
+        "host_path": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/vmlinux"
+      },
+      "arch/arm/boot/zImage": {
+        "sha256": "5d72282b95b43ef9309a0d4b1eaf4077f15118daece95882f784f1d0d36a82dd",
+        "bytes": 6384904,
+        "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/arch/arm/boot/zImage: Linux kernel ARM boot executable zImage (kernel >=v4.15) (little-endian)",
+        "host_path": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/arch/arm/boot/zImage"
+      },
+      "mm/vma.o": {
+        "sha256": "44b34ee4375bb401fe3084ec633c064dd968f63503ff43c05e8abfef9bf19870",
+        "bytes": 33632,
+        "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/mm/vma.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped",
+        "host_path": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/mm/vma.o"
+      },
+      "mm/filemap.o": {
+        "sha256": "848e2a06c18620cdcf381ff1f8468a416bb15fc844be245247e0268e03e8a1d9",
+        "bytes": 80592,
+        "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/mm/filemap.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped",
+        "host_path": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/mm/filemap.o"
+      }
+    }
+  },
+  "limitations": [
+    "Configuration OFF proves experiment source excluded by Kconfig, but not overall correctness of unrelated kernel changes or physical performance.",
+    "No RCU ON physical trial; no statement that new zImage is flashable Samsung BOOT.",
+    "Neither build has CONFIG_PROVE_LOCKING enabled: no measured lockdep graph.",
+    "No actual Cortex-A9 p99 mmap latency, cache alias/HighMem lifetime or PFN ABA proof.",
+    "The experimental build still adds unconditional ext4 VM_SHARED|MAYWRITE synchronize_rcu under mmap_lock EVEN if its runtime key OFF; release OFF build does not."
+  ],
+  "physical_kernel": "G650, unchanged",
+  "experiment_staged_not_installed": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

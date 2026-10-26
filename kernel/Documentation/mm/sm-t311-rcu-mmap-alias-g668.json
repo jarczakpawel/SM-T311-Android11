@@ -1,0 +1,79 @@
+{
+  "stage": "G668",
+  "source_only": true,
+  "source_anchors_pass": 16,
+  "source_anchors": {
+    "arm_vipt_config": true,
+    "arm_smp_config": true,
+    "writable_counter_atomic_read": true,
+    "writable_counter_atomic_increment": true,
+    "file_mmap_preincrements_writable_counter": true,
+    "file_mmap_counter_drop_after_creation": true,
+    "linked_shared_mapping_keeps_count": true,
+    "unlinked_shared_mapping_decrements_count": true,
+    "reader_writable_guard_before_rcu": true,
+    "reader_no_i_mmap_lock": true,
+    "reader_no_writer_counter_pin": true,
+    "reader_rcu_unlocked_after_copy": true,
+    "reader_direct_lowmem_copy": true,
+    "ext4_page_mkwrite_shared_invalidate": true,
+    "arch_flush_has_alias_sensitive_path": true,
+    "arch_flush_has_mapping_based_lazy_branch": true
+  },
+  "negative_mutants_rejected": {
+    "remove_mapping_atomic_counter_read": [
+      "writable_counter_atomic_read"
+    ],
+    "remove_writer_counter_increment": [
+      "writable_counter_atomic_increment"
+    ],
+    "remove_reader_alias_guard": [
+      "reader_writable_guard_before_rcu"
+    ],
+    "remove_persistent_mapping_counter": [
+      "linked_shared_mapping_keeps_count"
+    ],
+    "remove_cache_maintenance_call": [
+      "arch_flush_has_alias_sensitive_path"
+    ]
+  },
+  "bounded_sc_model": {
+    "counts": {
+      "schedules": 70,
+      "check_saw_zero": 35,
+      "new_shared_write_before_copy": 5,
+      "new_shared_vma_before_copy": 22
+    },
+    "witnesses": {
+      "vma": [
+        "R_check_zero",
+        "W_increment_count",
+        "W_link_vma",
+        "W_fault_page",
+        "W_write_shared",
+        "R_lock",
+        "R_copy",
+        "R_unlock"
+      ],
+      "write": [
+        "R_check_zero",
+        "W_increment_count",
+        "W_link_vma",
+        "W_fault_page",
+        "W_write_shared",
+        "R_lock",
+        "R_copy",
+        "R_unlock"
+      ]
+    },
+    "not_a_kernel_or_cache_coherency_test": true
+  },
+  "finding": "Atomic i_mmap_writable may transition 0->1 after the fast reader's one-time guard check, before/while the reader copies. The reader does not pin the counter or take i_mmap_rwsem. Source-program-order alone cannot rule out this interval; whether ARMv7 cache aliasing causes incorrect returned bytes is NOT demonstrated.",
+  "caveats": [
+    "The counter counts VM_SHARED/VM_MAYWRITE rather than only currently writable PTEs.",
+    "The writer counter is incremented before mmap creates a VMA; this narrows but does not close the race with an earlier reader check.",
+    "RCU read lock concerns lifetime, not i_mmap_writable stabilization or alias flush semantics.",
+    "The model is SC, not herd7, C atomic proof or physical dual Cortex-A9 test.",
+    "S1 ACTIVE; S2/S3 BLOCKED; no-ref RCU stays OFF."
+  ]
+}

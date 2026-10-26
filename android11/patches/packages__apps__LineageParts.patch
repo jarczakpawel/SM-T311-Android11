@@ -1,0 +1,76 @@
+diff --git a/Android.bp b/Android.bp
+index 51ac39bb6ee16f612210016c013da924c6214ad0..916f60a635daf2da8f111b95ab8705042f25bafd 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -21,6 +21,7 @@ android_app {
+     defaults: ["SettingsLibDefaults"],
+ 
+     srcs: ["src/**/*.java"],
++    exclude_srcs: ["src/org/lineageos/lineageparts/trust/*.java"],
+     resource_dirs: ["res"],
+ 
+     manifest: "AndroidManifest.xml",
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index eebaa7c64993424766cbebe7347dadec8676481e..8d14301fde0cad91adead557a01a1fc3080961dc 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -65,18 +65,6 @@
+                 android:value="org.lineageos.lineageparts.PartsUpdater" />
+         </activity>
+ 
+-        <activity android:name=".trust.TrustOnBoardingActivity"
+-            android:label="@string/trust_title"
+-            android:theme="@style/OnBoardingStyle"
+-            android:exported="true"
+-            android:enabled="true"
+-            android:excludeFromRecents="true">
+-            <intent-filter android:priority="-4">
+-                <action android:name="org.lineageos.lineageparts.TRUST_HINT" />
+-                <category android:name="android.intent.category.DEFAULT" />
+-            </intent-filter>
+-        </activity>
+-
+         <receiver android:name=".BootReceiver" android:enabled="true">
+             <intent-filter android:priority="2147483647">
+                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+@@ -169,27 +157,6 @@
+                 android:resource="@string/summary_empty" />
+         </activity-alias>
+ 
+-        <!-- Trust interface (Privacy category) -->
+-        <activity-alias
+-            android:name=".trust.TrustPreferences"
+-            android:label="@string/trust_title"
+-            android:targetActivity="PartsActivity">
+-            <intent-filter>
+-                <action android:name="com.android.settings.action.IA_SETTINGS" />
+-                <action android:name="org.lineageos.lineageparts.TRUST_INTERFACE" />
+-                <category android:name="android.intent.category.DEFAULT" />
+-            </intent-filter>
+-            <meta-data
+-                android:name="com.android.settings.category"
+-                android:value="com.android.settings.category.ia.privacy" />
+-            <meta-data
+-                android:name="com.android.settings.order"
+-                android:value="0" />
+-            <meta-data
+-                android:name="com.android.settings.summary"
+-                android:resource="@string/summary_empty" />
+-        </activity-alias>
+-
+         <!-- Contributors Cloud (MyDeviceInfo category) -->
+         <activity-alias
+             android:name=".contributors.ContributorsCloudFragment"
+diff --git a/res/xml/parts_catalog.xml b/res/xml/parts_catalog.xml
+index a4346c72466261266e9d9d84c50dfff3c61272ce..d50bcc76217d46a82210d180a6e3bea807cd3fcb 100644
+--- a/res/xml/parts_catalog.xml
++++ b/res/xml/parts_catalog.xml
+@@ -108,8 +108,4 @@
+           android:fragment="org.lineageos.lineageparts.gestures.TouchscreenGestureSettings"
+           lineage:xmlRes="@xml/touchscreen_gesture_settings" />
+ 
+-    <part android:key="trust_interface"
+-          android:title="@string/trust_title"
+-          android:fragment="org.lineageos.lineageparts.trust.TrustPreferences"
+-          lineage:xmlRes="@xml/trust_preferences" />
+ </parts-catalog>

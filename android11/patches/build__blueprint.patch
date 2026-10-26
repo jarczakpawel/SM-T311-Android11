@@ -1,0 +1,13 @@
+diff --git a/bootstrap/cleanup.go b/bootstrap/cleanup.go
+index 64440816a6e0bc9bee506413f9bf953ddce1fb8e..8e8731b86c22ffa7b0ae512206b7dab177b0caf2 100644
+--- a/bootstrap/cleanup.go
++++ b/bootstrap/cleanup.go
+@@ -95,7 +95,7 @@ func parseNinjaLog(ninjaBuildDir string, under []string) ([]string, error) {
+ 
+ 	// Check that the first line indicates that this is a Ninja log version 5
+ 	const expectedFirstLine = "# ninja log v5"
+-	if !scanner.Scan() || scanner.Text() != expectedFirstLine {
++	if !scanner.Scan() || (scanner.Text() != expectedFirstLine && scanner.Text() != "# ninja log v7") {
+ 		return nil, errors.New("unrecognized ninja log format")
+ 	}
+ 

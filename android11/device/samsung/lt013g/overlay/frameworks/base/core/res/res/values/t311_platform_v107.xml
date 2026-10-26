@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="config_datause_iface">rmnet0</string>
+    <string translatable="false" name="config_radio_access_family">GSM|GPRS|EDGE|WCDMA</string>
+</resources>

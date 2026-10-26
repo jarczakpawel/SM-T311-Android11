@@ -1,0 +1,15 @@
+// Copyright (C) 2026 Paweł Jarczak
+// SPDX-License-Identifier: Apache-2.0
+
+cc_binary {
+    name: "lt013g-reboot-guard",
+    vendor: true,
+    srcs: ["lt013g_reboot_guard.cpp"],
+    init_rc: ["lt013g-reboot-guard.rc"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+    cpp_std: "gnu++17",
+    shared_libs: [
+        "libbase",
+        "liblog",
+    ],
+}

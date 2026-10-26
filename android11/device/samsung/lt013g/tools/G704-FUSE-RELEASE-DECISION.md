@@ -1,0 +1,6 @@
+# G704 - FUSE release decision for SM-T311
+
+- G700 RCU OFF intentionally disables the optional experimental `passthrough_successful_opens` atomic64 counter and fusectl `passthrough_opens` file. FUSE and FUSE passthrough are still enabled, as is DEBUG_FS. Do not add a separate diagnostic switch without a concrete operational need.
+- Verified `EXPORT_SYMBOL_GPL(fuse_conn_init)` and `__ksymtab_fuse_conn_init` in both host ARM32 ELF files. Both configurations have modules enabled, module versioning disabled, and zero host `.ko`. The changed internal `struct fuse_conn` layout means external module compatibility is NOT verified, even though the global symbol names match.
+- G704 new offline checker `upstream-v7.3/tools/testing/selftests/smt311/rcu_fuse_release_contract_g704.py` 12/12 PASS. No Android executable changes, no new kernel BOOT, no flashes, and no repeated historical tests. G700 BOOT remains HOST ONLY, SHA256 `aec9655acc727ab01d0bde3711414f9606c58c5fdcafb6ae5c52a2d3346edc7f`.
+- S0 PASS S1 ACTIVE S2-S6 BLOCKED S7 PARTIAL S8 ACTIVE. G705 next: kernel module compatibility audit, then only an owner-attended validated physical release. Preserve all four mandatory status sections and S0-S8 in subsequent handoffs. GitHub owner only.

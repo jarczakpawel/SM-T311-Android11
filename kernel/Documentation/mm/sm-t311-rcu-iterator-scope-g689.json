@@ -1,0 +1,111 @@
+{
+  "stage": "G689",
+  "scope": "SM-T311 experimental ref-free RCU filemap iterator whitelist source and ARM32 integration",
+  "source_anchored_gates": {
+    "SMT311_guard_scoped_to_experiment": true,
+    "ext4_eligibility_before_user_iterator": true,
+    "non_user_iterator_early_exit": true,
+    "fastpath_depends_on_mapping_hot_optin": true,
+    "reader_rechecks_key_inside_rcu": true,
+    "source_folio_kmap_and_iter_copy": true,
+    "iov_iter_copier_uses_dispatch": true,
+    "exact_two_user_backed_types": true,
+    "seven_known_iterator_types_defined": true,
+    "iterator_dispatch_has_explicit_user_cases": true,
+    "xarray_destination_enters_own_rcu": true,
+    "folioq_destination_maps_extra_folios": true,
+    "ext4_mmap_gp_unchanged": true,
+    "RCU_batch_ends_before_slow_path": true,
+    "PAGE_RCU_FREE_OFF_dispatch_direct_zero": true,
+    "no_global_rwsem_added": true
+  },
+  "passed": 16,
+  "actual_changed_source_mutants_rejected": {
+    "bypass_type_whitelist": [
+      "ext4_eligibility_before_user_iterator",
+      "non_user_iterator_early_exit"
+    ],
+    "invert_type_whitelist": [
+      "ext4_eligibility_before_user_iterator",
+      "non_user_iterator_early_exit"
+    ],
+    "delete_type_whitelist": [
+      "ext4_eligibility_before_user_iterator",
+      "non_user_iterator_early_exit"
+    ],
+    "allow_bvec_as_user": [
+      "exact_two_user_backed_types"
+    ],
+    "allow_xarray_as_user": [
+      "exact_two_user_backed_types"
+    ],
+    "skip_inner_static_key": [
+      "reader_rechecks_key_inside_rcu"
+    ],
+    "drop_explicit_mmap_gp": [
+      "ext4_mmap_gp_unchanged"
+    ],
+    "remove_xarray_nested_rcu": [
+      "xarray_destination_enters_own_rcu"
+    ],
+    "remove_bounded_source_copy": [
+      "source_folio_kmap_and_iter_copy"
+    ],
+    "remove_marker_eligibility_check": [
+      "fastpath_depends_on_mapping_hot_optin"
+    ]
+  },
+  "allowed_iter_types_when_EXPERIMENT=y": {
+    "ITER_UBUF": true,
+    "ITER_IOVEC": true,
+    "ITER_KVEC": false,
+    "ITER_BVEC": false,
+    "ITER_FOLIOQ": false,
+    "ITER_XARRAY": false,
+    "ITER_DISCARD": false
+  },
+  "source_decision": "Only user-backed UBUF and IOVEC may enter experimental RCU; non-user iterators return zero then standard referenced filemap read.",
+  "full_ARM32_host_images": {
+    "release_OFF": {
+      "vmlinux": {
+        "sha256": "e929387d60fec5233cab1c36ccdb6ad50e2d7699ccc22c7d231f9992e8cc97c8",
+        "size": 24734388
+      },
+      "arch/arm/boot/zImage": {
+        "sha256": "1c2dd2e521cbfec48c95c89518487b5cfd1887027e7f9d74146027d777e86c49",
+        "size": 6299344
+      },
+      "mm/filemap.o": {
+        "sha256": "3973982c11eb2c4f32e7e5ce700907bf9023f7cc833283a76045903385c0b7a4",
+        "size": 76200
+      }
+    },
+    "experiment_optional": {
+      "vmlinux": {
+        "sha256": "6674571cbe202e69692a9b9279e6eb2b629b108d390719fb8296fd2e79f44ed4",
+        "size": 25128244
+      },
+      "arch/arm/boot/zImage": {
+        "sha256": "5d72282b95b43ef9309a0d4b1eaf4077f15118daece95882f784f1d0d36a82dd",
+        "size": 6384904
+      },
+      "mm/filemap.o": {
+        "sha256": "848e2a06c18620cdcf381ff1f8468a416bb15fc844be245247e0268e03e8a1d9",
+        "size": 80592
+      }
+    }
+  },
+  "limitations": [
+    "Nested XARRAY destination RCU and kmap paths are an audit burden, not a reproduced deadlock or corruption.",
+    "Conservative iterator whitelist does not prove PFN ABA safety for user destinations or exclude all indirect RCU/mmap lock cycles.",
+    "Normal RCU-OFF release excludes the guard entirely; its runtime unchanged from G688.",
+    "Experimental ext4 shared-maywrite mmap GP overhead still exists when static key runtime OFF.",
+    "No physical ARMv7 speedup measured; no BOOT package flashed."
+  ],
+  "staged_executable_paths_NOT_INSTALLED": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

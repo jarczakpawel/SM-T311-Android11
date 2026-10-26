@@ -1,0 +1,7 @@
+# G705 - SM-T311 Android11 FUSE built-in and external modules
+
+- Existing G686 and G700 Linux7.3 full ARM32 links have `CONFIG_FUSE_FS=y`, `CONFIG_FUSE_PASSTHROUGH=y`, `CONFIG_MODULES=y`, `CONFIG_MODVERSIONS=n`, no `=m` Kconfig options and no `.ko` files in host output. Their `modules.builtin` entry `kernel/fs/fuse/fuse.ko` is an in-kernel marker, not a loadable file.
+- A full C/H source inventory found 20 FUSE internal files referring to `struct fuse_conn` or `fuse_conn_init`; no other tracked consumer. CUSE and virtiofs are disabled in both builds. Exported `fuse_conn_init` is present in both ELF images, but changed internal layout and disabled MODVERSIONS mean compatibility with external modules remains unproven.
+- New G705 kernel audit `tools/testing/selftests/smt311/rcu_fuse_builtin_module_abi_g705.py` yielded 15/15 real-source/config/ELF checks plus 4/4 rejected modified inputs, no compilation or Android executable changes. Keep G700 optional passthrough diagnostic OFF as in G704; FUSE passthrough itself remains available.
+- G700 BOOT is host-only, 8MiB SHA256 `aec9655acc727ab01d0bde3711414f9606c58c5fdcafb6ae5c52a2d3346edc7f`, not flashed. Physical G650 still last known good; live p9/p10 and safe recovery remain unverified.
+- S0 PASS, S1 ACTIVE, S2-S6 BLOCKED, S7 PARTIAL, S8 ACTIVE. Next G706 evaluate other ARM32 RCU/Kconfig-sensitive ABI only; do not install unknown external kernel modules. In all next reports include ZROBIONE / W TOKU-BLOKADY / DALEJ / FIZYCZNIE NA TABLECIE and complete S0-S8. GitHub by owner only.

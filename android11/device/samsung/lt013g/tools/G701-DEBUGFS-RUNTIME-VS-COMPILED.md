@@ -1,0 +1,9 @@
+# G701 — retained DEBUG_FS in G700 is not mounted on running G650
+
+Kernel commit `0723d9f3b`: `tools/testing/selftests/smt311/rcu_debugfs_mount_contract_g701.py`, RST, machine JSON and S0–S8/33-regression integration.
+
+Passive physical Android 11 G650 `7.3.0-pjarczak` observations: uid2000 `u:r:shell:s0`, userdebug `ro.debuggable=1`, SELinux Enforcing. `CONFIG_DEBUG_FS=y`, `CONFIG_DEBUG_FS_ALLOW_ALL=y`, `CONFIG_PAGE_RCU_FREE=y`, `CONFIG_SM_T311_RCU_HOT4K_EXPERIMENT=y` on physical G650. `/proc/filesystems` lists debugfs, `/sys/kernel/debug` is empty and labeled sysfs, `/d` symlink points there; shell-visible `mount` has NO debugfs mount. Shell could not inspect /proc/self/mountinfo: not proof of all namespaces. Kconfig debugfs compilation does not mean debugfs is mounted, usable by ordinary shell or authorized under SELinux.
+
+Host G700 remains RCU-OFF with DEBUG_FS=y, all 26,742 global defined names retained relative to matched experiment ELF vs G687 DEBUG_FS=n 26,614. Samsung device/common init source has no unconditional per-device debugfs mount; existing narrow `init` debugfs_wifi_tracing SELinux rules unchanged. Do not grant shell broad debugfs access or mount it in Android by default for no reason. Source check **19/19 positive, 9/9 mutated inputs caught**, all 33/33 regressions G659–G701 PASS, two prior ARM32 links and full G700 HOST build confirmed.
+
+Also `/proc/partitions` and raw p9/p10 metadata inaccessible to unprivileged ADB. Physical G650 still boots, RIL/GNSS running SIM LOADED. HOST G700 complete 8MiB BOOT SHA `aec9655acc727ab01d0bde3711414f9606c58c5fdcafb6ae5c52a2d3346edc7f` never flashed. No new executable Android code, root/SELinux chmod, mount, reboot/TWRP, backup, sound, camera, modem call or PIN. Four staged runtime kernel sources NOT INSTALLED. S0 PASS S1 ACTIVE S2–S6 BLOCKED S7 PARTIAL S8 ACTIVE. Next G702 further independent safety and ABI audit, physical TWRP owner-only. GitHub owner only.

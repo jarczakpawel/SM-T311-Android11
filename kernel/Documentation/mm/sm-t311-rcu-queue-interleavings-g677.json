@@ -1,0 +1,81 @@
+{
+  "stage": "G677",
+  "type": "bounded SC ownership/GP queue model, two CPU",
+  "max_folios_in_model": 4,
+  "source_checks_pass": 13,
+  "source_checks": {
+    "rcu_tag_account_before_pending_publish": true,
+    "per_cpu_spinlock_on_defer": true,
+    "start_transfers_pending_to_batch": true,
+    "start_one_gp_per_cpu": true,
+    "gp_callbacks_queue_rcu_work": true,
+    "worker_removes_batch_under_lock": true,
+    "worker_new_gp_before_free": true,
+    "worker_pages_return_after_gp": true,
+    "expedite_take_then_explicit_grace": true,
+    "rcu_drain_iterates_possible_cpu": true,
+    "sync_uses_rcu_specialized_wait": true,
+    "all_page_frees_decrement_zone_counter": true,
+    "rcu_callback_waits_grace_before_workqueue": true
+  },
+  "source_mutants_rejected": {
+    "remove_work_completion_wait": [
+      "sync_uses_rcu_specialized_wait"
+    ],
+    "remove_worker_new_batch": [
+      "worker_new_gp_before_free"
+    ],
+    "remove_page_accounting": [
+      "all_page_frees_decrement_zone_counter"
+    ],
+    "remove_queue_gp": [
+      "gp_callbacks_queue_rcu_work"
+    ]
+  },
+  "baseline_exhaustive_result": {
+    "visited_states": 10886,
+    "successful_terminal_states": 27,
+    "max_simultaneous_unfreed_folios": 4,
+    "duplicate_or_lost_ownership": false,
+    "unsafe_transition": null
+  },
+  "mutated_gp_models_detect_unsafe_free": {
+    "omit_worker_gp": {
+      "visited_states": 2,
+      "unsafe_transition": "cpu0_rcu_workfn",
+      "concrete_schedule": [
+        "cpu0_defer_page0",
+        "cpu0_rcu_workfn"
+      ],
+      "unprotected_folio_mask": 1
+    },
+    "omit_expedite_gp": {
+      "visited_states": 9,
+      "unsafe_transition": "cpu0_expedite_gp_and_free",
+      "concrete_schedule": [
+        "cpu0_defer_page0",
+        "cpu0_expedite_take",
+        "cpu0_expedite_gp_and_free"
+      ],
+      "unprotected_folio_mask": 1
+    },
+    "omit_drain_gp": {
+      "visited_states": 12,
+      "unsafe_transition": "rcu_free_drain_gp_and_free",
+      "concrete_schedule": [
+        "cpu0_defer_page0",
+        "rcu_free_drain_take",
+        "rcu_free_drain_gp_and_free"
+      ],
+      "unprotected_folio_mask": 1
+    }
+  },
+  "important_limits": [
+    "Abstract SC state machine models spinlock-protected queue ownership only.",
+    "This is NOT the ARMv7 LKMM and NOT a simulation of genuine RCU callback execution timing.",
+    "No physical kernel UAF, deadlock or speedup was demonstrated.",
+    "A 4-folio model cannot prove absence of overflow, OOM or starvation for large workloads.",
+    "Concurrent new folios may enter after a drain snapshot, so drain is NOT an unconditional global quiescence barrier.",
+    "S2/S3 stay BLOCKED, no-ref RCU remains DEFAULT OFF, staged changes are NOT flashed."
+  ]
+}

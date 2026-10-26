@@ -1,0 +1,28 @@
+diff --git a/clang-version-inc.py b/clang-version-inc.py
+index eeffb625cc186d2ccef11c1d442916989a19c882..bba80bf53139319327cca0bea4cbaa3037cbdebc 100755
+--- a/clang-version-inc.py
++++ b/clang-version-inc.py
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env python
++#!/usr/bin/env python3
+ 
+ import os
+ import sys
+@@ -8,7 +8,7 @@ import version
+ version_string = '%s.%s.%s' % (version.major, version.minor, version.patch)
+ 
+ if len(sys.argv) < 2:
+-    print sys.stderr, "Usage: %s <Version.inc.in>"
++    print("Usage: %s <Version.inc.in>" % sys.argv[0], file=sys.stderr)
+     sys.exit(1)
+ 
+ with open(sys.argv[1], 'r') as f:
+@@ -22,6 +22,6 @@ with open(sys.argv[1], 'r') as f:
+ 
+     for line in f:
+         line = line.strip()
+-        for replace, to in replacements.iteritems():
++        for replace, to in replacements.items():
+             line = line.replace(replace, to)
+-        print line
++        print(line)

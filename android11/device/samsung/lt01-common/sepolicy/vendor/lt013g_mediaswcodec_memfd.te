@@ -1,0 +1,7 @@
+# Fix anonymous memfd:MessageQueue ownership of the AOSP software codec process.
+# Its memfd objects otherwise inherit generic tmpfs and cause AVC even for self access.
+# This introduces a distinct file type instead of granting access to all tmpfs.
+type mediaswcodec_tmpfs, file_type, mlstrustedobject;
+tmpfs_domain(mediaswcodec)
+allow system_server mediaswcodec_tmpfs:file { getattr map read write };
+allow platform_app mediaswcodec_tmpfs:file { getattr map read write };

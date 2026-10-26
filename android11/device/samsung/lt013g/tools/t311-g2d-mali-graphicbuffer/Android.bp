@@ -1,0 +1,11 @@
+// Real Android GraphicBuffer / RefBase from gralloc, G2D physical fill,
+// offscreen EGLNativeBuffer -> Mali GLES2 sampled pixel. Offline test only.
+cc_binary {
+    name: "t311_g2d_mali_graphicbuffer_offline",
+    vendor: true,
+    srcs: ["main.cpp"],
+    static_libs: ["libexynos_g2d_t311_offline"],
+    shared_libs: ["libdrm", "libui", "libutils", "libEGL", "libGLESv2", "liblog"],
+    include_dirs: ["external/libdrm/exynos", "external/libdrm"],
+    cppflags: ["-Wall", "-Wextra", "-Werror", "-std=gnu++17"],
+}

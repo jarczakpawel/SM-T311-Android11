@@ -1,0 +1,150 @@
+{
+  "stage": "G693",
+  "scope": "Source-anchored referenced XArray reader protocol and snapshot-based hypothetical Normal defer budget, no physical workload",
+  "C_source_guards": {
+    "reference_path_xas_load_try_get_then_recheck": true,
+    "ref_acquire_must_fail_on_zero": true,
+    "slot_mismatch_drops_ref_before_retry": true,
+    "reference_path_holds_RCU_during_lookup": true,
+    "xarray_reload_has_no_generation_id": true,
+    "ref_free_path_checks_unpinned_flag_late": true,
+    "source_acknowledges_recycled_page": true,
+    "normal_folio_only_is_not_a_generation": true,
+    "old_untagged_not_rcu_delayed_by_allocator": true,
+    "not_reclaim_other_zone": true,
+    "reserve_4MiB_constant": true,
+    "queue_soft_limit_2MiB_constant": true,
+    "marking_requires_explicit_key": true,
+    "G692_ON_key_still_fail_closed": true,
+    "direct_slowpath_reads_are_already_referenced": true,
+    "initial_key_is_false": true
+  },
+  "passed_source_guards": 16,
+  "actual_C_mutations_rejected": {
+    "remove_try_get": [
+      "reference_path_xas_load_try_get_then_recheck",
+      "ref_acquire_must_fail_on_zero",
+      "reference_path_holds_RCU_during_lookup"
+    ],
+    "remove_xarray_ref_reload": [
+      "reference_path_xas_load_try_get_then_recheck"
+    ],
+    "remove_failed_reload_put": [
+      "reference_path_xas_load_try_get_then_recheck",
+      "slot_mismatch_drops_ref_before_retry"
+    ],
+    "remove_source_RCU": [
+      "reference_path_holds_RCU_during_lookup"
+    ],
+    "remove_allocator_tag_defer": [
+      "old_untagged_not_rcu_delayed_by_allocator"
+    ],
+    "erase_normal_reserve": [
+      "reserve_4MiB_constant"
+    ],
+    "erase_pending_soft_limit": [
+      "queue_soft_limit_2MiB_constant"
+    ],
+    "remove_experiment_failclosed": [
+      "G692_ON_key_still_fail_closed"
+    ],
+    "remove_key_guard": [
+      "marking_requires_explicit_key"
+    ],
+    "remove_unpinned_flag_check": [
+      "ref_free_path_checks_unpinned_flag_late"
+    ]
+  },
+  "abstract_2_task_SC": {
+    "late_flag_unpinned_old_to_marked_new": {
+      "reachable_states": 39,
+      "terminal_states": 2,
+      "accepted_states": 3,
+      "benign_new_generation_pinned_states": 0,
+      "invalid_recycled_unpinned_states": 2,
+      "invalid_recycled_witness": [
+        "R_LOAD",
+        "W_REMOVE",
+        "W_DROP",
+        "W_REUSE",
+        "W_INSERT",
+        "W_MARK",
+        "R_TRY_GET",
+        "R_RELOAD",
+        "R_COPY"
+      ]
+    },
+    "folio_try_get_then_xas_reload_then_put": {
+      "reachable_states": 70,
+      "terminal_states": 5,
+      "accepted_states": 18,
+      "benign_new_generation_pinned_states": 6,
+      "invalid_recycled_unpinned_states": 0,
+      "invalid_recycled_witness": null
+    }
+  },
+  "snapshot_source": "Documentation/mm/sm-t311-rcu-zone-snapshot-g693.json",
+  "measured_single_snapshot_and_hypothetical_budget": {
+    "normal_managed_pages": 203153,
+    "normal_managed_MiB": 793.57,
+    "normal_free_pages": 74692,
+    "normal_free_MiB": 291.77,
+    "normal_high_watermark_pages": 1350,
+    "normal_4MiB_extra_reserve_pages": 1024,
+    "normal_2MiB_pending_soft_limit_pages": 512,
+    "normal_free_over_high_plus_reserve_pages": 72318,
+    "highmem_free_pages": 308,
+    "highmem_high_watermark_pages": 500,
+    "highmem_below_high": true,
+    "illustrative_whole_normal_zone_deferred_free": {
+      "1pct_managed_normal": {
+        "pages": 2032,
+        "MiB": 7.94,
+        "share_of_current_normal_free_pct": 2.7,
+        "larger_than_2MiB_queue_soft_limit": true,
+        "normal_free_minus_hypothetical_wait_pages": 72660,
+        "would_be_under_high_plus_4MiB_reserve_now": false
+      },
+      "5pct_managed_normal": {
+        "pages": 10158,
+        "MiB": 39.68,
+        "share_of_current_normal_free_pct": 13.6,
+        "larger_than_2MiB_queue_soft_limit": true,
+        "normal_free_minus_hypothetical_wait_pages": 64534,
+        "would_be_under_high_plus_4MiB_reserve_now": false
+      },
+      "10pct_managed_normal": {
+        "pages": 20315,
+        "MiB": 79.36,
+        "share_of_current_normal_free_pct": 27.2,
+        "larger_than_2MiB_queue_soft_limit": true,
+        "normal_free_minus_hypothetical_wait_pages": 54377,
+        "would_be_under_high_plus_4MiB_reserve_now": false
+      },
+      "25pct_managed_normal": {
+        "pages": 50788,
+        "MiB": 198.39,
+        "share_of_current_normal_free_pct": 68.0,
+        "larger_than_2MiB_queue_soft_limit": true,
+        "normal_free_minus_hypothetical_wait_pages": 23904,
+        "would_be_under_high_plus_4MiB_reserve_now": false
+      }
+    }
+  },
+  "conclusions": [
+    "A referenced lookup uses atomic nonzero ref acquisition followed by slot revalidation. Even if a recycled B is referenced, B is safely pinned during copy in the simplified model.",
+    "The unpinned old->new PFN ABA witness remains; no object generation token is introduced.",
+    "Do not add global RCU deferred free of all ext4 folios without Normal memory pressure and cache impact tests.",
+    "The snapshot is one passive sample, not performance, memory stress or production validation.",
+    "The G692 experiment ON fail-closed policy must remain intact.",
+    "Neither finite state SC models nor these source checks prove global Linux kernel LKMM/ARMv7 correctness."
+  ],
+  "kernel_source_changes": [],
+  "deployed": false,
+  "four_staged_runtime_paths": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

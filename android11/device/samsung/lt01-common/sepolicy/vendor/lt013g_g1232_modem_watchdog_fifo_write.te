@@ -1,0 +1,17 @@
+# G1232: exactly one additional, causal rule from physically observed
+# G1224 SELinux Enforcing AVC on Oct 25, 2026 at 05:25:15:
+# denied { write } comm="cmd" path="pipe:[16823]"
+# scontext=u:r:system_server:s0
+# tcontext=u:r:lt013g_modem_watchdog:s0
+# tclass=fifo_file permissive=0.
+#
+# G1221 earlier allowed FD use; the real SettingsProvider command now
+# attempts to write into the pipe originally created by the watchdog.
+# Grant only this single writer the output-pipe write operation.
+# Do not permit general file writes, modems, GPS, process signals,
+# new Binder services or globally/per-domain permissive behavior.
+#
+# Source candidate ONLY until strict native sepolicy compile, full seven-repo
+# qualified ROM, whole-archive TESTKEY signature, exact SYSTEM block audit,
+# physical root TWRP preflight and silent post-install verification.
+allow system_server lt013g_modem_watchdog:fifo_file write;

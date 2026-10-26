@@ -1,0 +1,124 @@
+diff --git a/prebuilts/api/30.0/private/domain.te b/prebuilts/api/30.0/private/domain.te
+index 7116dadfd9c4c2fec50ffec3eccd874aa2fa767e..69bfe3b7d1bffbc6f9d29901f13ed2ed4f245652 100644
+--- a/prebuilts/api/30.0/private/domain.te
++++ b/prebuilts/api/30.0/private/domain.te
+@@ -302,6 +302,7 @@ define(`dac_override_allowed', `{
+   netd
+   postinstall_dexopt
+   recovery
++  lt013g_radio_dac_override_allowed
+   rss_hwm_reset
+   sdcardd
+   tee
+diff --git a/prebuilts/api/30.0/private/hal_allocator_default.te b/prebuilts/api/30.0/private/hal_allocator_default.te
+index 7aa28aa29e35452ecfe7500472c2cc269e558fbe..5bffe7a503b30a81a3b04aa01603df35ba22d84e 100644
+--- a/prebuilts/api/30.0/private/hal_allocator_default.te
++++ b/prebuilts/api/30.0/private/hal_allocator_default.te
+@@ -3,3 +3,21 @@ hal_server_domain(hal_allocator_default, hal_allocator)
+ 
+ type hal_allocator_default_exec, system_file_type, exec_type, file_type;
+ init_daemon_domain(hal_allocator_default)
++
++# Samsung SM-T311 Linux 6.12: the allocator uses memfd-backed ashmem.
++# Distinguish its memory objects from arbitrary tmpfs instead of broadening
++# generic tmpfs permissions across the platform. ftruncate requires write;
++# passing the fd in HIDL allocator replies requires FD__USE and FILE__READ/
++# FILE__WRITE on the recipient (SELinux binder_transfer_file hook).
++tmpfs_domain(hal_allocator_default)
++allow hal_allocator_default hal_allocator_default_tmpfs:file setattr;
++
++# Only services that consume HIDL shared-media buffers: ACodec may execute
++# inside mediaserver and system_server, and codecs/audio share the buffers.
++allow { mediaserver system_server mediaextractor audioserver mediaswcodec } hal_allocator_default:fd use;
++allow { mediaserver system_server mediaextractor audioserver mediaswcodec } hal_allocator_default_tmpfs:file { getattr read write map };
++
++# Settings, Dialer and other apps legitimately receiving allocator memfd
++# through HIDL Binder need access to *that one* trusted-memory file type.
++allow appdomain hal_allocator_default:fd use;
++allow appdomain hal_allocator_default_tmpfs:file { getattr read write map };
+diff --git a/prebuilts/api/30.0/public/attributes b/prebuilts/api/30.0/public/attributes
+index 1efb95aaad9e5a4ef856cb2341d2c2ed8d85ab2c..492af339f4494241f50639f099bd02f9d57f1276 100644
+--- a/prebuilts/api/30.0/public/attributes
++++ b/prebuilts/api/30.0/public/attributes
+@@ -217,6 +217,10 @@ expandattribute socket_between_core_and_vendor_violators false;
+ attribute vendor_executes_system_violators;
+ expandattribute vendor_executes_system_violators false;
+ 
++# Exception for the legacy Exynos modem RIL when enabled by device policy.
++attribute lt013g_radio_dac_override_allowed;
++expandattribute lt013g_radio_dac_override_allowed false;
++
+ # All domains which violate the requirement of not sharing files by path
+ # between between vendor and core domains.
+ # TODO(b/34980020)
+diff --git a/prebuilts/api/30.0/public/hal_allocator_default_tmpfs.te b/prebuilts/api/30.0/public/hal_allocator_default_tmpfs.te
+new file mode 100644
+index 0000000000000000000000000000000000000000..398d158cc25c27299363e2ba386e58ef54e9c903
+--- /dev/null
++++ b/prebuilts/api/30.0/public/hal_allocator_default_tmpfs.te
+@@ -0,0 +1,3 @@
++# Platform HIDL allocator memfd-backed shared memory, Android 11 on SM-T311.
++# Vendor OMX needs to receive FDs with a distinct, trusted SELinux type.
++type hal_allocator_default_tmpfs, file_type, mlstrustedobject;
+diff --git a/private/domain.te b/private/domain.te
+index 7116dadfd9c4c2fec50ffec3eccd874aa2fa767e..69bfe3b7d1bffbc6f9d29901f13ed2ed4f245652 100644
+--- a/private/domain.te
++++ b/private/domain.te
+@@ -302,6 +302,7 @@ define(`dac_override_allowed', `{
+   netd
+   postinstall_dexopt
+   recovery
++  lt013g_radio_dac_override_allowed
+   rss_hwm_reset
+   sdcardd
+   tee
+diff --git a/private/hal_allocator_default.te b/private/hal_allocator_default.te
+index 7aa28aa29e35452ecfe7500472c2cc269e558fbe..5bffe7a503b30a81a3b04aa01603df35ba22d84e 100644
+--- a/private/hal_allocator_default.te
++++ b/private/hal_allocator_default.te
+@@ -3,3 +3,21 @@ hal_server_domain(hal_allocator_default, hal_allocator)
+ 
+ type hal_allocator_default_exec, system_file_type, exec_type, file_type;
+ init_daemon_domain(hal_allocator_default)
++
++# Samsung SM-T311 Linux 6.12: the allocator uses memfd-backed ashmem.
++# Distinguish its memory objects from arbitrary tmpfs instead of broadening
++# generic tmpfs permissions across the platform. ftruncate requires write;
++# passing the fd in HIDL allocator replies requires FD__USE and FILE__READ/
++# FILE__WRITE on the recipient (SELinux binder_transfer_file hook).
++tmpfs_domain(hal_allocator_default)
++allow hal_allocator_default hal_allocator_default_tmpfs:file setattr;
++
++# Only services that consume HIDL shared-media buffers: ACodec may execute
++# inside mediaserver and system_server, and codecs/audio share the buffers.
++allow { mediaserver system_server mediaextractor audioserver mediaswcodec } hal_allocator_default:fd use;
++allow { mediaserver system_server mediaextractor audioserver mediaswcodec } hal_allocator_default_tmpfs:file { getattr read write map };
++
++# Settings, Dialer and other apps legitimately receiving allocator memfd
++# through HIDL Binder need access to *that one* trusted-memory file type.
++allow appdomain hal_allocator_default:fd use;
++allow appdomain hal_allocator_default_tmpfs:file { getattr read write map };
+diff --git a/public/attributes b/public/attributes
+index 1efb95aaad9e5a4ef856cb2341d2c2ed8d85ab2c..492af339f4494241f50639f099bd02f9d57f1276 100644
+--- a/public/attributes
++++ b/public/attributes
+@@ -217,6 +217,10 @@ expandattribute socket_between_core_and_vendor_violators false;
+ attribute vendor_executes_system_violators;
+ expandattribute vendor_executes_system_violators false;
+ 
++# Exception for the legacy Exynos modem RIL when enabled by device policy.
++attribute lt013g_radio_dac_override_allowed;
++expandattribute lt013g_radio_dac_override_allowed false;
++
+ # All domains which violate the requirement of not sharing files by path
+ # between between vendor and core domains.
+ # TODO(b/34980020)
+diff --git a/public/hal_allocator_default_tmpfs.te b/public/hal_allocator_default_tmpfs.te
+new file mode 100644
+index 0000000000000000000000000000000000000000..398d158cc25c27299363e2ba386e58ef54e9c903
+--- /dev/null
++++ b/public/hal_allocator_default_tmpfs.te
+@@ -0,0 +1,3 @@
++# Platform HIDL allocator memfd-backed shared memory, Android 11 on SM-T311.
++# Vendor OMX needs to receive FDs with a distinct, trusted SELinux type.
++type hal_allocator_default_tmpfs, file_type, mlstrustedobject;

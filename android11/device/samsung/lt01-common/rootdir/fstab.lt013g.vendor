@@ -1,0 +1,34 @@
+# SM-T311 PJARCZAK v130 - Android second-stage filesystems.
+/dev/block/mmcblk0p3 /efs ext4 noatime,nosuid,nodev wait,check
+/dev/block/platform/soc/12550000.mmc/by-name/CACHE /cache ext4 noatime,nosuid,nodev wait,check
+/dev/block/platform/soc/12550000.mmc/by-name/USERDATA /data ext4 noatime,nosuid,nodev,noauto_da_alloc wait,check,encryptable=footer
+
+
+# G388 SM-T311: Android11 fs_mgr ReadDefaultFstab() selects THIS vendor
+# fstab during normal boot, not ramdisk/fstab.lt013g. The factory PIT OTA
+# partition is mmcblk0p11; expose it as raw eMMC /misc for Android init's
+# bootloader_message BCB read/write when rebooting into TWRP recovery.
+# fs_mgr_mount_all() intentionally SKIPS emmc types; this is lookup-only.
+# Never mount/format OTA or access EFS/CP/USERDATA for this feature.
+/dev/block/platform/soc/12550000.mmc/by-name/OTA /misc emmc defaults defaults
+
+
+# G408: use the REAL second-stage vendor fstab for LZ4 zram (768 MiB).
+# Old ramdisk/fstab.lt013g swap entry is not active on the real G379 boot.
+# Kernel default compressor is already lz4; do not override on a live device.
+# No emmc swap partitions, no zram backing writes to storage.
+# Avoid max_comp_streams option: 6.12 driver manages concurrency.
+# fs_mgr_swapon_all parses zramsize/swapprio/wait on this vendor fstab.
+/dev/block/zram0 none swap defaults zramsize=805306368,swapprio=32758,wait
+
+# G426: expose stock removable microSD and USB mass-storage to Android 11 vold.
+# Real SM-T311 SD uevent: /devices/platform/soc/12530000.mmc/mmc_host/mmc1/.../block/mmcblk1.
+# Old Samsung fstab.smdk4x12 had sdcard1 and usb voldmanaged entries but
+# Android 11 selects THIS vendor fstab; never mount or format media at boot.
+# Preserve emulated /data as primary; do not adopt/format the user's SD card.
+# Partition 1 only: the inserted SA16G contains FAT boot and Linux ext4 rootfs.
+# Auto-indexing its Linux rootfs caused MediaProvider excessive CPU load.
+/devices/platform/soc/12530000.mmc/mmc_host/mmc1* auto auto defaults voldmanaged=sdcard1:1
+# All Exynos USB controllers: OTG gadget/host 12480000, EHCI 12580000, OHCI 12590000.
+# vold only accepts actual USB BLOCK-device add events here, not HSIC modem.
+/devices/platform/soc/*.usb* auto auto defaults voldmanaged=usb:auto

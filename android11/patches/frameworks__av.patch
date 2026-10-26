@@ -1,0 +1,680 @@
+diff --git a/cmds/screenrecord/ScreenrecordCenterCrop.h b/cmds/screenrecord/ScreenrecordCenterCrop.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..7d352254859bf9bfd54d86dd73294e43c0d09934
+--- /dev/null
++++ b/cmds/screenrecord/ScreenrecordCenterCrop.h
+@@ -0,0 +1,36 @@
++#pragma once
++
++// G1197: source-only screenrecord center-crop geometry.
++// Pure integer geometry is shared with host C++ regression tests. It does not
++// touch the physical device, SurfaceFlinger, camera, audio, or the encoder.
++#include <cstdint>
++
++namespace smt311 {
++struct CenterCrop {
++    uint32_t left;
++    uint32_t top;
++    uint32_t width;
++    uint32_t height;
++};
++
++// Preserve the target aspect without letterboxing by cropping the SOURCE.
++// Use uint64_t products to avoid overflowing on arbitrary display dimensions.
++static inline bool CalculateCenterCrop(uint32_t srcWidth, uint32_t srcHeight,
++                                       uint32_t videoWidth, uint32_t videoHeight,
++                                       CenterCrop* crop) {
++    if (!crop || !srcWidth || !srcHeight || !videoWidth || !videoHeight) return false;
++    uint32_t width = srcWidth;
++    uint32_t height = srcHeight;
++    if (uint64_t(srcWidth) * videoHeight > uint64_t(srcHeight) * videoWidth) {
++        width = uint32_t(uint64_t(srcHeight) * videoWidth / videoHeight);
++    } else {
++        height = uint32_t(uint64_t(srcWidth) * videoHeight / videoWidth);
++    }
++    if (!width || !height || width > srcWidth || height > srcHeight) return false;
++    crop->left = (srcWidth - width) / 2;
++    crop->top = (srcHeight - height) / 2;
++    crop->width = width;
++    crop->height = height;
++    return true;
++}
++}  // namespace smt311
+diff --git a/cmds/screenrecord/screenrecord.cpp b/cmds/screenrecord/screenrecord.cpp
+index f4fb6266d2d90f38c51f6c9a8e7225a2485628d0..c32bc8f4d804140139d32c72cc6313b5ba357f5d 100644
+--- a/cmds/screenrecord/screenrecord.cpp
++++ b/cmds/screenrecord/screenrecord.cpp
+@@ -61,6 +61,7 @@
+ #include <ui/DisplayState.h>
+ 
+ #include "screenrecord.h"
++#include "ScreenrecordCenterCrop.h"
+ #include "Overlay.h"
+ #include "FrameOutput.h"
+ 
+@@ -105,6 +106,8 @@ static const char* kWinscopeMagicString = "#VV1NSC0PET1ME!#";
+ // Command-line parameters.
+ static bool gVerbose = false;           // chatty on stdout
+ static bool gRotate = false;            // rotate 90 degrees
++static bool gFillScreen = false;        // G1197 optional full-frame center crop
++static bool gFixedOrientation = false;  // G1198 keep initial virtual display projection
+ static bool gMonotonicTime = false;     // use system monotonic time for timestamps
+ static bool gPersistentSurface = false; // use persistent surface
+ static enum {
+@@ -196,6 +199,11 @@ static status_t prepareEncoder(float displayFps, sp<MediaCodec>* pCodec,
+     format->setInt32(KEY_COLOR_FORMAT, OMX_COLOR_FormatAndroidOpaque);
+     format->setInt32(KEY_BIT_RATE, gBitRate);
+     format->setFloat(KEY_FRAME_RATE, displayFps);
++    // G859 SM-T311: keep a sparse (1 fps) stream alive when SurfaceFlinger
++    // emits no new frames for an idle display. CCodec maps this metadata key
++    // to InputSurfaceWrapper::Config.mMinFps; ACodec passes it to the
++    // GraphicBufferSource repeater. Keep animation frame rate unconstrained.
++    format->setInt64(KEY_REPEAT_PREVIOUS_FRAME_AFTER, 1000000LL);
+     format->setInt32(KEY_I_FRAME_INTERVAL, 10);
+     format->setInt32(KEY_MAX_B_FRAMES, gBframes);
+     if (gBframes > 0) {
+@@ -279,10 +287,6 @@ static status_t setDisplayProjection(
+     // case is "all of it".
+     Rect layerStackRect(viewport);
+ 
+-    // We need to preserve the aspect ratio of the display.
+-    float displayAspect = viewport.getHeight() / static_cast<float>(viewport.getWidth());
+-
+-
+     // Set the way we map the output onto the display surface (which will
+     // be e.g. 1280x720 for a 720p video).  The rect is interpreted
+     // post-rotation, so if the display is rotated 90 degrees we need to
+@@ -303,19 +307,39 @@ static status_t setDisplayProjection(
+         videoWidth = gVideoHeight;
+         videoHeight = gVideoWidth;
+     }
+-    if (videoHeight > (uint32_t)(videoWidth * displayAspect)) {
+-        // limited by narrow width; reduce height
+-        outWidth = videoWidth;
+-        outHeight = (uint32_t)(videoWidth * displayAspect);
++    uint32_t offX = 0;
++    uint32_t offY = 0;
++    outWidth = videoWidth;
++    outHeight = videoHeight;
++    Rect displayRect(0, 0, videoWidth, videoHeight);
++    if (gFillScreen) {
++        // G1197 explicitly opt-in: fixed encoded raster always fully filled,
++        // with centered source crop. Never evaluate the old float letterbox
++        // math first, especially when a display viewport is invalid.
++        smt311::CenterCrop crop;
++        if (!smt311::CalculateCenterCrop(viewport.getWidth(), viewport.getHeight(),
++                                         videoWidth, videoHeight, &crop)) {
++            ALOGE("G1197_INVALID_DISPLAY_OR_VIDEO_GEOMETRY");
++            return android::BAD_VALUE;
++        }
++        layerStackRect = Rect(crop.left, crop.top,
++                              crop.left + crop.width, crop.top + crop.height);
+     } else {
+-        // limited by short height; restrict width
+-        outHeight = videoHeight;
+-        outWidth = (uint32_t)(videoHeight / displayAspect);
++        // Preserve the original Android 11 screenrecord letterbox path
++        // byte-for-byte in its projection arithmetic and default behavior.
++        const float displayAspect =
++                viewport.getHeight() / static_cast<float>(viewport.getWidth());
++        if (videoHeight > (uint32_t)(videoWidth * displayAspect)) {
++            outWidth = videoWidth;
++            outHeight = (uint32_t)(videoWidth * displayAspect);
++        } else {
++            outHeight = videoHeight;
++            outWidth = (uint32_t)(videoHeight / displayAspect);
++        }
++        offX = (videoWidth - outWidth) / 2;
++        offY = (videoHeight - outHeight) / 2;
++        displayRect = Rect(offX, offY, offX + outWidth, offY + outHeight);
+     }
+-    uint32_t offX, offY;
+-    offX = (videoWidth - outWidth) / 2;
+-    offY = (videoHeight - outHeight) / 2;
+-    Rect displayRect(offX, offY, offX + outWidth, offY + outHeight);
+ 
+     if (gVerbose) {
+         if (gRotate) {
+@@ -347,7 +371,12 @@ static status_t prepareVirtualDisplay(
+             String8("ScreenRecorder"), false /*secure*/);
+     SurfaceComposerClient::Transaction t;
+     t.setDisplaySurface(dpy, bufferProducer);
+-    setDisplayProjection(t, dpy, displayState);
++    status_t projectionErr = setDisplayProjection(t, dpy, displayState);
++    if (projectionErr != NO_ERROR) {
++        // G1197: do not continue without a valid virtual display projection.
++        SurfaceComposerClient::destroyDisplay(dpy);
++        return projectionErr;
++    }
+     t.setDisplayLayerStack(dpy, displayState.layerStack);
+     t.apply();
+ 
+@@ -427,6 +456,14 @@ static status_t runEncoder(const sp<MediaCodec>& encoder,
+     int64_t endWhenNsec = startWhenNsec + seconds_to_nanoseconds(gTimeLimitSec);
+     Vector<int64_t> timestamps;
+     bool firstFrame = true;
++    // G1099: the surface encoder must acknowledge EOS before a completed
++    // recording is successful. On a C2 encoder fatal error (G1098) MediaCodec
++    // can yield -EAGAIN until the requested time ends, silently creating a
++    // short MP4 with exit0 despite the real hardware encoder failure.
++    bool eosSignaled = false;
++    bool eosReceived = false;
++    int64_t drainDeadlineNsec = 0;
++    const int64_t kDrainTimeoutNsec = seconds_to_nanoseconds(10);
+ 
+     assert((rawFp == NULL && muxer != NULL) || (rawFp != NULL && muxer == NULL));
+ 
+@@ -437,8 +474,25 @@ static status_t runEncoder(const sp<MediaCodec>& encoder,
+         return err;
+     }
+ 
+-    // Run until we're signaled.
+-    while (!gStopRequested) {
++    // On an ordinary time limit or SIGINT, explicitly close the encoder's
++    // input and wait for real output EOS. Returning on the timer alone is not
++    // evidence of a healthy encoder or a complete recording.
++    while (!eosReceived) {
++        if (!eosSignaled &&
++                (gStopRequested || systemTime(CLOCK_MONOTONIC) > endWhenNsec)) {
++            const status_t signalErr = encoder->signalEndOfInputStream();
++            if (signalErr != NO_ERROR) {
++                fprintf(stderr, "G1099_ENCODER_EOS_SIGNAL_FAILED err=%d\n", signalErr);
++                return signalErr;
++            }
++            eosSignaled = true;
++            drainDeadlineNsec = systemTime(CLOCK_MONOTONIC) + kDrainTimeoutNsec;
++            ALOGI("G1099_ENCODER_EOS_SIGNALLED");
++        }
++        if (eosSignaled && systemTime(CLOCK_MONOTONIC) > drainDeadlineNsec) {
++            fprintf(stderr, "G1099_ENCODER_EOS_DRAIN_TIMEOUT frames=%u\n", debugNumFrames);
++            return android::TIMED_OUT;
++        }
+         size_t bufIndex, offset, size;
+         int64_t ptsUsec;
+         uint32_t flags;
+@@ -448,14 +502,6 @@ static status_t runEncoder(const sp<MediaCodec>& encoder,
+             firstFrame = false;
+         }
+ 
+-        if (systemTime(CLOCK_MONOTONIC) > endWhenNsec) {
+-            if (gVerbose) {
+-                printf("Time limit reached\n");
+-                fflush(stdout);
+-            }
+-            break;
+-        }
+-
+         ALOGV("Calling dequeueOutputBuffer");
+         err = encoder->dequeueOutputBuffer(&bufIndex, &offset, &size, &ptsUsec,
+                 &flags, kTimeout);
+@@ -475,7 +521,7 @@ static status_t runEncoder(const sp<MediaCodec>& encoder,
+                 ALOGV("Got data in buffer %zu, size=%zu, pts=%" PRId64,
+                         bufIndex, size, ptsUsec);
+ 
+-                { // scope
++                if (!gFixedOrientation) { // G1198: avoid even querying rotation in fixed mode
+                     ATRACE_NAME("orientation");
+                     // Check orientation, update if it has changed.
+                     //
+@@ -488,7 +534,11 @@ static status_t runEncoder(const sp<MediaCodec>& encoder,
+                     } else if (orientation != displayState.orientation) {
+                         ALOGD("orientation changed, now %s", toCString(displayState.orientation));
+                         SurfaceComposerClient::Transaction t;
+-                        setDisplayProjection(t, virtualDpy, displayState);
++                        status_t projectionErr = setDisplayProjection(t, virtualDpy, displayState);
++                        if (projectionErr != NO_ERROR) {
++                            ALOGE("G1197_INVALID_ROTATED_PROJECTION err=%d", projectionErr);
++                            return projectionErr;
++                        }
+                         t.apply();
+                         orientation = displayState.orientation;
+                     }
+@@ -547,9 +597,13 @@ static status_t runEncoder(const sp<MediaCodec>& encoder,
+                 return err;
+             }
+             if ((flags & MediaCodec::BUFFER_FLAG_EOS) != 0) {
+-                // Not expecting EOS from SurfaceFlinger.  Go with it.
+-                ALOGI("Received end-of-stream");
+-                gStopRequested = true;
++                if (!eosSignaled) {
++                    fprintf(stderr, "G1099_UNSOLICITED_ENCODER_EOS frames=%u\n",
++                            debugNumFrames);
++                    return UNKNOWN_ERROR;
++                }
++                ALOGI("G1099_ENCODER_EOS_CONFIRMED frames=%u", debugNumFrames);
++                eosReceived = true;
+             }
+             break;
+         case -EAGAIN:                       // INFO_TRY_AGAIN_LATER
+@@ -600,6 +654,7 @@ static status_t runEncoder(const sp<MediaCodec>& encoder,
+         }
+     }
+ 
++    // The loop exits only on a verified codec EOS, never on elapsed time.
+     ALOGV("Encoder stopping (req=%d)", gStopRequested);
+     if (gVerbose) {
+         printf("Encoder stopping; recorded %u frames in %" PRId64 " seconds\n",
+@@ -883,7 +938,11 @@ static status_t recordScreen(const char* fileName) {
+     if (muxer != NULL) {
+         // If we don't stop muxer explicitly, i.e. let the destructor run,
+         // it may hang (b/11050628).
+-        err = AMediaMuxer_stop(muxer);
++        // G1080: preserve an earlier encoder failure. The muxer may finish
++        // successfully after MediaCodec failed and returned a partial MP4;
++        // overwriting err with NO_ERROR made screenrecord exit with status 0.
++        const status_t muxerErr = AMediaMuxer_stop(muxer);
++        if (err == NO_ERROR) err = muxerErr;
+     } else if (rawFp != stdout) {
+         fclose(rawFp);
+     }
+@@ -1027,6 +1086,13 @@ static void usage() {
+         "--bugreport\n"
+         "    Add additional information, such as a timestamp overlay, that is helpful\n"
+         "    in videos captured to illustrate bugs.\n"
++        "--fill-screen\n"
++        "    Crop a centered portion of the display to fill the fixed video frame;\n"
++        "    no black borders or stretching, but display edges may be cropped.\n"
++        "    This opt-in mode does not lock Android device rotation.\n"
++        "--fixed-orientation\n"
++        "    Keep the initial virtual display projection for the whole recording.\n"
++        "    Stops recorder projection updates but does NOT lock Android UI rotation.\n"
+         "--time-limit TIME\n"
+         "    Set the maximum recording time, in seconds.  Default / maximum is %d.\n"
+         "--display-id ID\n"
+@@ -1058,6 +1124,8 @@ int main(int argc, char* const argv[]) {
+         { "show-device-info",   no_argument,        NULL, 'i' },
+         { "show-frame-time",    no_argument,        NULL, 'f' },
+         { "rotate",             no_argument,        NULL, 'r' },
++        { "fill-screen",        no_argument,        NULL, 'F' },
++        { "fixed-orientation",  no_argument,        NULL, 'L' },
+         { "output-format",      required_argument,  NULL, 'o' },
+         { "codec-name",         required_argument,  NULL, 'N' },
+         { "monotonic-time",     no_argument,        NULL, 'm' },
+@@ -1103,6 +1171,12 @@ int main(int argc, char* const argv[]) {
+             }
+             gSizeSpecified = true;
+             break;
++        case 'F':
++            gFillScreen = true;
++            break;
++        case 'L':
++            gFixedOrientation = true;
++            break;
+         case 'b':
+             if (parseValueWithUnit(optarg, &gBitRate) != NO_ERROR) {
+                 return 2;
+diff --git a/cmds/screenrecord/tests/g1197_center_crop_test.cpp b/cmds/screenrecord/tests/g1197_center_crop_test.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..40a7d5faecb22f635735485723896abd6c33bccc
+--- /dev/null
++++ b/cmds/screenrecord/tests/g1197_center_crop_test.cpp
+@@ -0,0 +1,38 @@
++// G1197 host-only regression for the EXACT header used by Android screenrecord.
++// No video, audio, camera, microphone, SurfaceFlinger or tablet is executed.
++#include "../ScreenrecordCenterCrop.h"
++#include <cassert>
++#include <cstdint>
++#include <cstdio>
++
++using smt311::CalculateCenterCrop;
++using smt311::CenterCrop;
++
++static void Verify(uint32_t sw, uint32_t sh, uint32_t vw, uint32_t vh,
++                   uint32_t left, uint32_t top, uint32_t width, uint32_t height) {
++    CenterCrop c{};
++    assert(CalculateCenterCrop(sw, sh, vw, vh, &c));
++    assert(c.left == left && c.top == top && c.width == width && c.height == height);
++    assert(c.width != 0 && c.height != 0);
++    assert(c.left + c.width <= sw && c.top + c.height <= sh);
++    assert((sw - c.width) / 2 == c.left);
++    assert((sh - c.height) / 2 == c.top);
++}
++int main() {
++    Verify(1280, 800, 1280, 720, 0, 40, 1280, 720);
++    Verify(800, 1280, 720, 1280, 40, 0, 720, 1280);
++    Verify(800, 1280, 1280, 720, 0, 415, 800, 450);
++    Verify(1280, 720, 1280, 720, 0, 0, 1280, 720);
++    Verify(1920, 1080, 1280, 720, 0, 0, 1920, 1080);
++    Verify(UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
++           0, 0, UINT32_MAX, UINT32_MAX);
++    CenterCrop c{1, 2, 3, 4};
++    assert(!CalculateCenterCrop(0, 800, 1280, 720, &c));
++    assert(!CalculateCenterCrop(1280, 0, 1280, 720, &c));
++    assert(!CalculateCenterCrop(1280, 720, 0, 720, &c));
++    assert(!CalculateCenterCrop(1280, 720, 1280, 0, &c));
++    assert(!CalculateCenterCrop(1280, 720, 1280, 720, nullptr));
++    assert(!CalculateCenterCrop(1, UINT32_MAX, UINT32_MAX, 1, &c));
++    std::puts("PASS G1197_EXACT_PRODUCTION_CENTER_CROP_HEADER_GEOMETRY_AND_EXTREMES");
++    std::puts("G1197_NO_RECORDING_NO_MEDIA_NO_DEVICE_ACTIONS");
++}
+diff --git a/cmds/screenrecord/tests/test_g1198_fixed_orientation_source.py b/cmds/screenrecord/tests/test_g1198_fixed_orientation_source.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e19ebca7ded97e26b1955aef6eed7e0cc5037121
+--- /dev/null
++++ b/cmds/screenrecord/tests/test_g1198_fixed_orientation_source.py
+@@ -0,0 +1,75 @@
++#!/usr/bin/env python3
++"""G1198: reject regressions of fixed screenrecord virtual projection.
++
++Static source gate on the EXACT source built for Android 11. Deliberately
++avoids running any screen recording, SurfaceFlinger, sound, or tablet actions.
++"""
++from pathlib import Path
++
++SOURCE = Path(__file__).resolve().parents[1] / "screenrecord.cpp"
++
++
++def verify(source: str) -> None:
++    require = (
++        "static bool gFixedOrientation = false;",
++        '{ "fixed-orientation",  no_argument,        NULL, \'L\' },',
++        "case 'L':\n            gFixedOrientation = true;\n            break;",
++        "if (!gFixedOrientation) { // G1198: avoid even querying rotation in fixed mode",
++        "Stops recorder projection updates but does NOT lock Android UI rotation.",
++    )
++    for token in require:
++        if source.count(token) != 1:
++            raise AssertionError("G1198_INVALID_OPTION_ORIENTATION_GUARD: " + repr(token))
++    method_start = source.index("static status_t runEncoder(")
++    method_end = source.index("static inline uint32_t floorToEven(", method_start)
++    method = source[method_start:method_end]
++    guarded = method.index("if (!gFixedOrientation) {")
++    fetch = method.index("SurfaceComposerClient::getDisplayState(display, &displayState);")
++    update = method.index("setDisplayProjection(t, virtualDpy, displayState);")
++    if not guarded < fetch < update:
++        raise AssertionError("G1198_DISPLAY_ORIENTATION_POLL_OUTSIDE_FIXED_GUARD")
++    # Original non-fixed behavior is intact and initial projection occurs once
++    # in prepareVirtualDisplay even if the fixed flag is passed.
++    create_start = source.index("static status_t prepareVirtualDisplay(")
++    create_end = source.index("static status_t writeWinscopeMetadata", create_start)
++    created = source[create_start:create_end]
++    if "setDisplayProjection(t, dpy, displayState);" not in created:
++        raise AssertionError("G1198_NO_INITIAL_DISPLAY_PROJECTION")
++    if "gFixedOrientation" in created:
++        raise AssertionError("G1198_UNEXPECTED_INITIAL_DISPLAY_PROJECTION_SUPPRESSION")
++    # G1197 opt-in crop still available independently and normal default stays.
++    for token in ("static bool gFillScreen = false;", "case 'F':\n            gFillScreen = true;",
++                  "if (gFillScreen) {", "static bool gRotate = false;"):
++        if token not in source:
++            raise AssertionError("G1198_BROKE_PRIOR_SCREENRECORD: " + token)
++
++
++def test():
++    source = SOURCE.read_text()
++    verify(source)
++    changes = [
++        ("static bool gFixedOrientation = false;", "static bool gFixedOrientation = true;"),
++        ("case 'L':\n            gFixedOrientation = true;",
++         "case 'L':\n            gFixedOrientation = false;"),
++        ("if (!gFixedOrientation) { // G1198:", "if (gFixedOrientation) { // G1198:"),
++        ('{ "fixed-orientation",  no_argument,        NULL, \'L\' },',
++         '{ "fixed-orientation",  no_argument,        NULL, \'X\' },'),
++        ("Stops recorder projection updates but does NOT lock Android UI rotation.",
++         "Locks entire Android UI rotation."),
++    ]
++    for old, replacement in changes:
++        if source.count(old) != 1:
++            raise AssertionError("G1198_BAD_MUTATION_FIXTURE")
++        mutated = source.replace(old, replacement)
++        try:
++            verify(mutated)
++        except AssertionError:
++            pass
++        else:
++            raise AssertionError("G1198_UNSAFE_MUTATION_ACCEPTED: " + old)
++    print("PASS G1198_ACTUAL_ANDROID_CPP_FIXED_PROJECTION_AND_5_FAIL_CLOSED_MUTANTS")
++    print("G1198_HOST_ONLY_NO_AUDIO_VIDEO_CAMERA_RECORDING_DEVICE_ACTIONS")
++
++
++if __name__ == "__main__":
++    test()
+diff --git a/media/codec2/hidl/1.0/utils/types.cpp b/media/codec2/hidl/1.0/utils/types.cpp
+index c73cb52e0daad604e9e394122e66b69615725e33..2082e5c27459467f8a69f843498009cab794de66 100644
+--- a/media/codec2/hidl/1.0/utils/types.cpp
++++ b/media/codec2/hidl/1.0/utils/types.cpp
+@@ -723,6 +723,21 @@ bool addBaseBlock(
+                 index, handle,
+                 baseBlocks, baseBlockIndices);
+     }
++    // SM-T311 uses Chromium's C2VdaBqBlockPool for its MFC/FIMC decoder.
++    // Its private TYPE_BUFFERQUEUE + 256 marks a graphic buffer already
++    // dequeued from the output Surface's BufferQueue. The HIDL serializer
++    // only knows the standard pool/queue types and previously rejected each
++    // decoded frame with "Unknown C2BlockPoolData type". The VDA component
++    // calls MarkBlockPoolDataAsShared() before forwarding the frame, so the
++    // BufferQueue slot ownership is already transferred. Marshal its
++    // existing Codec2 gralloc handle as a native block, preserving metadata
++    // without pretending the private type is an AOSP C2BufferQueueBlockPool.
++    if (static_cast<int>(blockPoolData->getType()) ==
++            _C2BlockPoolData::TYPE_BUFFERQUEUE + 256) {
++        return _addBaseBlock(
++                index, handle,
++                baseBlocks, baseBlockIndices);
++    }
+     switch (blockPoolData->getType()) {
+     case _C2BlockPoolData::TYPE_BUFFERPOOL: {
+             // BufferPoolData
+diff --git a/media/libaudiohal/FactoryHalHidl.cpp b/media/libaudiohal/FactoryHalHidl.cpp
+index 5985ef03ac560ffd4e415becbaaf7f1ea4afa873..4ac2fc075297b3252348f966601360d2a9598c9f 100644
+--- a/media/libaudiohal/FactoryHalHidl.cpp
++++ b/media/libaudiohal/FactoryHalHidl.cpp
+@@ -94,7 +94,7 @@ bool hasHalService(const std::string& package, const std::string& version,
+ }  // namespace
+ 
+ void* createPreferredImpl(const std::string& package, const std::string& interface) {
+-    for (auto version = detail::sAudioHALVersions; version != nullptr; ++version) {
++    for (auto version = detail::sAudioHALVersions; *version != nullptr; ++version) {
+         void* rawInterface = nullptr;
+         if (hasHalService(package, *version, interface)
+                 && createHalService(*version, interface, &rawInterface)) {
+diff --git a/media/libmediaplayerservice/StagefrightRecorder.cpp b/media/libmediaplayerservice/StagefrightRecorder.cpp
+index c66def491b9dde7e8bda049a990d69c68870eead..931cc70f9e96c3dc5ca894c6ce9493f61fd1fa6a 100644
+--- a/media/libmediaplayerservice/StagefrightRecorder.cpp
++++ b/media/libmediaplayerservice/StagefrightRecorder.cpp
+@@ -47,6 +47,7 @@
+ #include <media/stagefright/MediaDefs.h>
+ #include <media/stagefright/MetaData.h>
+ #include <media/stagefright/MediaCodecSource.h>
++#include <media/stagefright/MediaCodecConstants.h>
+ #include <media/stagefright/OggWriter.h>
+ #include <media/stagefright/PersistentSurface.h>
+ #include <media/MediaProfiles.h>
+@@ -1784,6 +1785,23 @@ status_t StagefrightRecorder::setupVideoEncoder(
+         }
+     }
+ 
++    // G874 SM-T311 / SystemUI only. MediaRecorder surface recording, unlike
++    // CLI screenrecord (G859), never set the repeat-previous-frame key.
++    // SurfaceFlinger does not queue frames for an idle/static screen, so the
++    // screen recording could stop advancing timestamps until the next repaint.
++    // Keep a 1fps floor during idle; native moving frames remain unaffected.
++    // Do NOT enable on cameras, time lapse, other applications/devices, or
++    // other codecs. The CCodec InputSurfaceWrapper and ACodec GBS paths both
++    // consume this key; never change their global BufferQueue limits.
++    if (mVideoSource == VIDEO_SOURCE_SURFACE
++            && mVideoEncoder == VIDEO_ENCODER_H264
++            && !mCaptureFpsEnable
++            && mClientName == String16("com.android.systemui")
++            && ::android::base::GetProperty("ro.product.device", "") == "lt013g") {
++        format->setInt64(KEY_REPEAT_PREVIOUS_FRAME_AFTER, 1000000LL);
++        ALOGI("SM-T311 SystemUI surface H264: repeat idle frame after 1000000 us");
++    }
++
+     format->setInt32("bitrate", mVideoBitRate);
+     format->setInt32("frame-rate", mFrameRate);
+     format->setInt32("i-frame-interval", mIFramesIntervalSec);
+diff --git a/media/libstagefright/MediaCodec.cpp b/media/libstagefright/MediaCodec.cpp
+index 8283187c8023e61f0f46a24c1a25cf525d21513e..c69e784e615146e5a8269daa0a2879abb4a5d7dc 100644
+--- a/media/libstagefright/MediaCodec.cpp
++++ b/media/libstagefright/MediaCodec.cpp
+@@ -3187,13 +3187,15 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
+                 break;
+             }
+ 
+-            // If we're flushing, stopping, configuring or starting  but
+-            // received a release request, post the reply for the pending call
+-            // first, and consider it done. The reply token will be replaced
+-            // after this, and we'll no longer be able to reply.
+-            if (mState == FLUSHING || mState == STOPPING
+-                    || mState == CONFIGURING || mState == STARTING) {
+-                // mReply is always set if in these states.
++            // A pending transition reply must be sent before release replaces
++            // its token. FLUSHING, CONFIGURING and STARTING always own one.
++            // STOPPING is different: an earlier kWhatError may have already
++            // replied and cleared mReplyID. Calling the helper in that case
++            // would abort the entire process (e.g. screenrecord), even though
++            // the codec is simply finishing a failed stop. This matches the
++            // later upstream MediaCodec state-machine guard.
++            if (mState == FLUSHING || mState == CONFIGURING || mState == STARTING
++                    || (mState == STOPPING && mReplyID)) {
+                 postPendingRepliesAndDeferredMessages(
+                         std::string("kWhatRelease:") + stateString(mState));
+             }
+diff --git a/media/libstagefright/bqhelper/GraphicBufferSource.cpp b/media/libstagefright/bqhelper/GraphicBufferSource.cpp
+index d031e91f5a3351fa282e4b9a1077029c31cc08d0..90f0106a5a4004157124c202a4399aefe788cf60 100644
+--- a/media/libstagefright/bqhelper/GraphicBufferSource.cpp
++++ b/media/libstagefright/bqhelper/GraphicBufferSource.cpp
+@@ -324,6 +324,7 @@ GraphicBufferSource::GraphicBufferSource() :
+     mInitCheck(UNKNOWN_ERROR),
+     mNumAvailableUnacquiredBuffers(0),
+     mNumOutstandingAcquires(0),
++    mConfiguredMaxAcquiredBuffers(0),
+     mEndOfStream(false),
+     mEndOfStreamSent(false),
+     mLastDataspace(HAL_DATASPACE_UNKNOWN),
+@@ -1022,12 +1023,19 @@ void GraphicBufferSource::onFrameAvailable(const BufferItem& item __unused) {
+     // UNLESS we are discarding this buffer (acquiring and immediately releasing it), which makes
+     // this an ugly logic.
+     // NOTE: We could also rely on our debug counter but that is meant only as a debug counter.
+-    if (!areWeDiscardingAvailableBuffers_l() && mFreeCodecBuffers.empty()) {
+-        // we may not be allowed to acquire a possibly encodable buffer, so just note that
+-        // it is available
+-        ALOGV("onFrameAvailable: cannot acquire buffer right now, do it later");
+-
+-        ++mRepeatLastFrameGeneration; // cancel any pending frame repeat
++    // G913: the incoming producer frame is already counted as available.
++    // AOSP's BufferQueueConsumer permits only (configured max + ONE) acquired
++    // buffers, regardless of how many codec buffers are free. On SM-T311 we
++    // observed acquired=5/max=4 *while the codec had 11 free input buffers*.
++    // Acquiring here repeatedly returns INVALID_OPERATION/-38; leave the
++    // incoming frame in BufferQueue until onInputBufferEmptied() releases a
++    // submitted frame, which already calls fillCodecBuffer_l(). No frames are
++    // explicitly discarded, no queue depth increased, no new runtime thread.
++    const bool atConsumerAcquireLimit = mConfiguredMaxAcquiredBuffers > 0 &&
++            mNumOutstandingAcquires >= mConfiguredMaxAcquiredBuffers + 1;
++    if (!areWeDiscardingAvailableBuffers_l() &&
++            (mFreeCodecBuffers.empty() || atConsumerAcquireLimit)) {
++        ++mRepeatLastFrameGeneration; // cancel stale idle-frame repeat
+         return;
+     }
+ 
+@@ -1172,6 +1180,8 @@ status_t GraphicBufferSource::configure(
+     {
+         Mutex::Autolock autoLock(mMutex);
+         mComponent = component;
++        // BQ and local throttling now use the SAME confirmed consumer cap.
++        mConfiguredMaxAcquiredBuffers = bufferCount;
+ 
+         err = mConsumer->setDefaultBufferSize(frameWidth, frameHeight);
+         if (err != NO_ERROR) {
+diff --git a/media/libstagefright/bqhelper/include/media/stagefright/bqhelper/GraphicBufferSource.h b/media/libstagefright/bqhelper/include/media/stagefright/bqhelper/GraphicBufferSource.h
+index fe6bccee03235b02d0e1cd862f7df50fc43e3484..58eb21c184c9dce5f9aa15e6fc36a2bfa48c2196 100644
+--- a/media/libstagefright/bqhelper/include/media/stagefright/bqhelper/GraphicBufferSource.h
++++ b/media/libstagefright/bqhelper/include/media/stagefright/bqhelper/GraphicBufferSource.h
+@@ -274,6 +274,9 @@ private:
+     // (as in aquireBuffer called, and release needs to be called)
+     int32_t mNumOutstandingAcquires;
+ 
++    // G913/G915: exact BQ limit set at configure(). Do not over-acquire.
++    int32_t mConfiguredMaxAcquiredBuffers;
++
+     // Acquire a buffer from the BQ and store it in |item| if successful
+     // \return OK on success, or error on failure.
+     status_t acquireBuffer_l(VideoBuffer *item);
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index c08810f52aeb4eb5178cef0320726714efcf4438..00af936e0442185e07b86ed1c5d373e76fe2a69d 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -343,7 +343,11 @@ void CameraService::addStates(const String8 id) {
+                                                                 conflicting, deviceKind));
+     }
+ 
+-    if (mFlashlight->hasFlashUnit(id)) {
++    // CameraProviderManager::initialize(this) may synchronously report camera
++    // presence before enumerateProviders() has instantiated mFlashlight.
++    // Ignore torch bookkeeping until flashlight discovery is available;
++    // a camera without an available flashlight should still be registered.
++    if (mFlashlight != nullptr && mFlashlight->hasFlashUnit(id)) {
+         Mutex::Autolock al(mTorchStatusMutex);
+         mTorchStatusMap.add(id, TorchModeStatus::AVAILABLE_OFF);
+ 
+@@ -356,7 +360,11 @@ void CameraService::addStates(const String8 id) {
+ 
+ void CameraService::removeStates(const String8 id) {
+     updateCameraNumAndIds();
+-    if (mFlashlight->hasFlashUnit(id)) {
++    // CameraProviderManager::initialize(this) may synchronously report camera
++    // presence before enumerateProviders() has instantiated mFlashlight.
++    // Ignore torch bookkeeping until flashlight discovery is available;
++    // a camera without an available flashlight should still be registered.
++    if (mFlashlight != nullptr && mFlashlight->hasFlashUnit(id)) {
+         Mutex::Autolock al(mTorchStatusMutex);
+         mTorchStatusMap.removeItem(id);
+     }
+diff --git a/services/camera/libcameraservice/api1/client2/Parameters.cpp b/services/camera/libcameraservice/api1/client2/Parameters.cpp
+index dbc863b3adcbdd72d25b6a200480761de8324816..25f378e84f2a83ea3ff11f4aaf9187b915e22333 100644
+--- a/services/camera/libcameraservice/api1/client2/Parameters.cpp
++++ b/services/camera/libcameraservice/api1/client2/Parameters.cpp
+@@ -2970,6 +2970,17 @@ status_t Parameters::getFilteredSizes(Size limit, Vector<Size> *sizes) {
+     }
+     sizes->clear();
+ 
++    // SM-T311 front SR130PC20 is accurately advertised at 25 fps (40 ms).
++    // The generic camera1 compatibility filter assumes >=29.97 fps and
++    // otherwise rejects *every* front preview/video mode. Restrict this
++    // legacy API exception to that one tablet/front camera only; retain
++    // the actual 25 fps HAL metadata rather than falsely claiming 30 fps.
++    char productDevice[PROPERTY_VALUE_MAX] = {};
++    property_get("ro.product.device", productDevice, "");
++    const bool t311Front25Fps = cameraFacing == CAMERA_FACING_FRONT &&
++            strcmp(productDevice, "lt013g") == 0;
++    constexpr int64_t kT311Front25FpsFrameDurationNs = 40000000LL;
++
+     Vector<StreamConfiguration> scs = getStreamConfigurations();
+     for (size_t i=0; i < scs.size(); i++) {
+         const StreamConfiguration &sc = scs[i];
+@@ -2978,8 +2989,10 @@ status_t Parameters::getFilteredSizes(Size limit, Vector<Size> *sizes) {
+                 sc.width <= limit.width && sc.height <= limit.height) {
+             int64_t minFrameDuration = getMinFrameDurationNs(
+                     {sc.width, sc.height}, HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
+-            if (minFrameDuration > MAX_PREVIEW_RECORD_DURATION_NS) {
+-                // Filter slow sizes from preview/record
++            if (minFrameDuration > MAX_PREVIEW_RECORD_DURATION_NS &&
++                    (!t311Front25Fps ||
++                     minFrameDuration > kT311Front25FpsFrameDurationNs)) {
++                // Filter truly slow sizes while retaining SM-T311 25-fps VGA.
+                 continue;
+             }
+             sizes->push({sc.width, sc.height});
+diff --git a/services/mediaextractor/seccomp_policy/mediaextractor-arm.policy b/services/mediaextractor/seccomp_policy/mediaextractor-arm.policy
+index e1f7fe726515f088e6d21880a6a4d907eb3a7046..1745c5b748d3936b8d37b8c3266c23d53fd241df 100644
+--- a/services/mediaextractor/seccomp_policy/mediaextractor-arm.policy
++++ b/services/mediaextractor/seccomp_policy/mediaextractor-arm.policy
+@@ -45,6 +45,17 @@ timer_create: 1
+ timer_settime: 1
+ timer_delete: 1
+ 
++# Android 11 sets sys.use_memfd=true on this ARMv7 platform. The
++# libcutils ashmem compatibility layer probes memfd_create and seals the fd;
++# MediaExtractor also creates binder MemoryDealer regions with this path.
++# Without these syscalls minijail kills media.extractor with SIGSYS (observed
++# 2026-10-17 SM-T311 from SIGSYS tombstone at __has_memfd_support).
++memfd_create: 1
++fcntl: 1
++fcntl64: 1
++ftruncate: 1
++ftruncate64: 1
++
+ # for dynamically loading extractors
+ pread64: 1
+ 

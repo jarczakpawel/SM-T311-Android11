@@ -1,0 +1,9 @@
+device=lt013g
+rom_build=SMT311G1441
+kernel=7.3.0-pjarczak
+selinux=Enforcing
+hwmixed=1
+singleatomic=1
+composer_service=running
+surfaceflinger_pid=224
+lmkd=running

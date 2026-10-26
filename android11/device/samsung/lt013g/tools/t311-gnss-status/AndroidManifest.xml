@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.pjarczak.t311gnssstatus">
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <application android:label="T311 GNSS Status" android:allowBackup="false" android:usesCleartextTraffic="false">
+        <service android:name=".GnssProbeService" android:exported="true" android:foregroundServiceType="location" />
+    </application>
+</manifest>

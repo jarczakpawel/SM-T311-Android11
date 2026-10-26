@@ -1,0 +1,22 @@
+cc_binary {
+    name: "android.hardware.ir@1.0-service.lt013g",
+    vendor: true,
+    relative_install_path: "hw",
+    srcs: ["ConsumerIr.cpp", "service.cpp"],
+    shared_libs: [
+        "libbase",
+        "libbinder",
+        "libhidlbase",
+        "libutils",
+        "android.hardware.ir@1.0",
+    ],
+    init_rc: ["android.hardware.ir@1.0-service.lt013g.rc"],
+    vintf_fragments: ["manifest.ir.xml"],
+}
+
+cc_binary {
+    name: "t311-ir-hal-probe",
+    vendor: true,
+    srcs: ["ir_hal_probe.cpp"],
+    shared_libs: ["libhidlbase", "libutils", "android.hardware.ir@1.0"],
+}

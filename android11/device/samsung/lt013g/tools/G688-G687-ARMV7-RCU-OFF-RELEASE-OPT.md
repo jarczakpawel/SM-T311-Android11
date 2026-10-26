@@ -1,0 +1,9 @@
+# G687/G688 — ARMv7 normal RCU-OFF buffered file read optimizations (STAGED)
+
+Kernel `9e374ff1b` + `d2d2c9192` (G687) removes empty out-of-line `filemap_read_rcu()` call from standard `mm/filemap.c:filemap_read()` when `CONFIG_PAGE_RCU_FREE=n`, without changing supported configurations. Kernel `c439cc374` + `93035dd4d` (G688) independently removes the same always-zero RCU stub call from `mm/shmem.c:shmem_file_read_iter()` for normal tmpfs/memfd OFF builds.
+
+These are **genuine source changes**; real cross-compiled ARM32 linked release and experimental vmlinux objdump verifies OFF read/shmem callers lack the stub branch. The experiment-enabled ext4 filemap reader remains and the normal release still retains a zero-return two-instruction filemap_read_rcu symbol for other callers. G688 8/8 source guards, 6/6 real-source negative controls, 6/6 ARM disassembly checks, 2/2 mutated assembler controls PASS; full host **19/19 G660-G688** test series and S0–S8 plan PASS.
+
+Host ARM32 releases: release OFF zImage SHA256 `c08721c9e77d892a4dd563900237a7f3fc243c1d1c6acd7b9383007806010dab`; experiment zImage SHA256 `ebda968fa1f1d5efe6d8d9a5696ad4775caab545fa5fbe4fedca8604adaa258f`. Both exact UTS_RELEASE `7.3.0-pjarczak`. These are host-only kernel products, NOT flashable boot.img and NOT run on physical device.
+
+**Exactly FOUR runtime source paths STAGED NOT INSTALLED** versus physical G650: `mm/filemap.c`, `mm/page_alloc.c`, `mm/shmem.c`, `mm/vma.c`. Optional `arch/arm/configs/sm_t311_rcu_experiment_g686.fragment` is build-time only. No claim of performance percentage before benchmarks on actual dual Cortex-A9. Global mmap_lock/RCU GP ordering and PFN/ABA/cache alias are unproven, so experiment RCU ON stays BLOCKED. S0 PASS, S1 ACTIVE, S2–S6 BLOCKED, S7 PARTIAL, S8 ACTIVE. No physical flash, backups, overnight audio/camera/phone/PIN/OTG; GitHub push solely by owner.

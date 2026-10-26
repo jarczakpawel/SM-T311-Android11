@@ -1,0 +1,21 @@
+// Copyright (C) 2026 Paweł Jarczak
+// SPDX-License-Identifier: Apache-2.0
+
+cc_library_shared {
+    name: "sensors.lt013g",
+    vendor: true,
+    relative_install_path: "hw",
+    srcs: ["sensors_lt013g.cpp"],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-missing-field-initializers",
+    ],
+    cpp_std: "gnu++17",
+    shared_libs: [
+        "libbase",
+        "libhardware",
+        "liblog",
+    ],
+}

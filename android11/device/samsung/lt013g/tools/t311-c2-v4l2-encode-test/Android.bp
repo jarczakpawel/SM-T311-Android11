@@ -1,0 +1,13 @@
+cc_binary {
+    name: "T311C2V4L2EncodeTest",
+    srcs: ["t311_c2_v4l2_encode_test.cpp"],
+    shared_libs: [
+        "liblog",
+        "libmediandk",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}

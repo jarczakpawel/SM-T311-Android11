@@ -1,0 +1,43 @@
+{
+  "device": "SM-T311 BCM4752",
+  "environment": "tablet resting indoors on desk, no outdoor fix required",
+  "baseline_2026_10_16": {
+    "kernel": "previous kernel",
+    "duration_seconds": 70,
+    "sv_events": 71,
+    "max_visible": 7,
+    "max_cn0_dbhz": 32,
+    "max_satellites_above_25dbhz": 2,
+    "fixes": 0
+  },
+  "retest_2026_10_20": {
+    "kernel": "7.3.0-pjarczak",
+    "duration_seconds": 70,
+    "sv_events": 115,
+    "max_visible": 11,
+    "max_cn0_dbhz": 10,
+    "max_satellites_above_25dbhz": 0,
+    "fixes": 0,
+    "hal_started": true,
+    "returned_to_idle": true,
+    "test_app_uninstalled": true
+  },
+  "conclusion": "11 satellite slot entries are NOT 11 RF-strength verified signals; observation differs vs former C/N0 32 but different time/day and software/hardware conditions preclude kernel-root-cause claim. No indoor fix expected.",
+  "privacy": "No location coordinates, raw NMEA, SVID or SIM identifiers captured",
+  "next": "Audit NMEA GSV C/N0 and native GNSS_SV callback stream, GNSS UART/power and AGPS, without synthetic fixes. G573 SYSTEM still not flashed.",
+  "retest_2026_10_20_positive_signal_counter": {
+    "kernel": "7.3.0-pjarczak",
+    "duration_seconds": 70,
+    "status_callbacks": 90,
+    "max_sv_entries": 12,
+    "max_satellites_with_positive_cn0": 3,
+    "max_cn0_dbhz": 11,
+    "fixes": 0,
+    "max_satellites_at_least_25dbhz": 0,
+    "source_apk_sha256": "345508e5835b6b1a31e5d0efc4d1d980b72e440bab96fccd09966814eb515303",
+    "source_git": "17585eb",
+    "probe_app_uninstalled": true,
+    "gps_idle_after_test": true,
+    "note": "12 reported SV entries include many zero-CNo slots, max3 positive, zero fix expected indoors"
+  }
+}

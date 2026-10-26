@@ -1,0 +1,8 @@
+cc_binary {
+    name: "T311NtpTransportProbe",
+    srcs: ["ntp_probe.c"],
+    compile_multilib: "32",
+    vendor: true,
+    // Engineering-only explicit build target; NOT in PRODUCT_PACKAGES.
+    cflags: ["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror"],
+}

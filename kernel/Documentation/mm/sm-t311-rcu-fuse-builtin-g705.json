@@ -1,0 +1,93 @@
+{
+  "stage": "G705",
+  "scope": "Entire tracked kernel C/H reference inventory; real existing ARM32 ELF, .config and modules.builtin; no rebuild/ADB",
+  "checks": {
+    "FUSE_FS_builtin_both": true,
+    "FUSE_PASSTHROUGH_builtin_both": true,
+    "MODULES_enabled_but_MODVERSIONS_disabled": true,
+    "ZERO_configured_module_values_m": true,
+    "FUSE_is_modules_builtin_entry_in_both": true,
+    "no_external_module_object_built": true,
+    "CUSE_and_VIRTIO_FS_disabled_both": true,
+    "FUSE_makefile_has_conditional_cuse_and_virtio": true,
+    "FUSE_makefile_links_in_tree_inode_and_iomode": true,
+    "fuse_conn_init_all_in_tree_callers_located": true,
+    "fuse_conn_refs_only_under_fs_fuse": true,
+    "fuse_conn_init_GPL_export_in_source": true,
+    "fuse_conn_init_real_GPL_symbol_table_present_both": true,
+    "G686_experiment_ON_G700_OFF": true,
+    "G704_release_decision_preserved": true
+  },
+  "negative_controls": {
+    "mutate_G700_FUSE_to_module": true,
+    "mutate_G700_builtins_without_FUSE": true,
+    "mutate_G686_turn_MODVERSIONS_on": true,
+    "mutate_out_of_tree_struct_consumer": true
+  },
+  "references": [
+    "./fs/fuse/acl.c",
+    "./fs/fuse/backing.c",
+    "./fs/fuse/control.c",
+    "./fs/fuse/cuse.c",
+    "./fs/fuse/dax.c",
+    "./fs/fuse/dev.c",
+    "./fs/fuse/dev.h",
+    "./fs/fuse/dir.c",
+    "./fs/fuse/file.c",
+    "./fs/fuse/fuse_dev_i.h",
+    "./fs/fuse/fuse_i.h",
+    "./fs/fuse/inode.c",
+    "./fs/fuse/ioctl.c",
+    "./fs/fuse/iomode.c",
+    "./fs/fuse/notify.c",
+    "./fs/fuse/passthrough.c",
+    "./fs/fuse/poll.c",
+    "./fs/fuse/readdir.c",
+    "./fs/fuse/req.c",
+    "./fs/fuse/virtio_fs.c"
+  ],
+  "fuse_conn_init_source_caller_paths": {
+    "built_in_main_FUSE": "fs/fuse/inode.c",
+    "disabled_CUSE": "fs/fuse/cuse.c",
+    "disabled_virtiofs": "fs/fuse/virtio_fs.c",
+    "declaration": "fs/fuse/fuse_i.h"
+  },
+  "modules_builtin_fuse_marker": "kernel/fs/fuse/fuse.ko",
+  "modules_builtin_markers_are_not_loadable_ko_artifacts": true,
+  "module_objects": {
+    "G686_EXP": [],
+    "G700_OFF": []
+  },
+  "module_config_counts": {
+    "G686_EXP": 0,
+    "G700_OFF": 0
+  },
+  "export_symbols": {
+    "G686_EXP": {
+      "fuse_conn_init": [
+        "c051159c T fuse_conn_init"
+      ],
+      "__ksymtab_fuse_conn_init": [
+        "c11ae974 r __ksymtab_fuse_conn_init"
+      ],
+      "__kstrtab_fuse_conn_init": [
+        "c11d3f7d r __kstrtab_fuse_conn_init"
+      ]
+    },
+    "G700_OFF": {
+      "fuse_conn_init": [
+        "c05101c8 T fuse_conn_init"
+      ],
+      "__ksymtab_fuse_conn_init": [
+        "c11ad974 r __ksymtab_fuse_conn_init"
+      ],
+      "__kstrtab_fuse_conn_init": [
+        "c11d2f7d r __kstrtab_fuse_conn_init"
+      ]
+    }
+  },
+  "external_module_struct_layout_compatibility_proven": false,
+  "kernel_binary_dependency_compatibility_proven": false,
+  "physical_p9_p10_sha_verified": false,
+  "G700_flash_authorized": false
+}

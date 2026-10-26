@@ -1,0 +1,23 @@
+/dev/dri/card0           0660 system graphics
+/dev/dri/renderD128      0660 system graphics
+/dev/video0              0660 system media
+/dev/video1              0660 system media
+/dev/video2              0660 system media
+/dev/video3              0660 system media
+/dev/input/event*        0660 root input
+/dev/ttySAC0             0660 bluetooth bluetooth
+/dev/ttySAC1             0660 gps system
+/dev/ttySAC2             0660 root system
+/dev/ttyGS0              0660 system system
+/dev/rfkill              0660 system bluetooth
+
+# XMM6262 modem nodes.
+/dev/umts*              0660 system radio
+/dev/hsic*              0666 system radio
+/dev/link_pm             0660 system radio
+
+# SM-T311 HOTFIX26 MFC Codec2 nodes only
+/dev/video6 0660 media media
+/dev/video7 0660 media media
+
+/dev/lirc*               0660 system system

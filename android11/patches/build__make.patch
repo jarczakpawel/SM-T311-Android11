@@ -1,0 +1,137 @@
+diff --git a/core/main.mk b/core/main.mk
+index 5b39e8da4164c26785062926fdb764f4f4e96c79..08320059385c92f0dada4734f5409f1918c2d42a 100644
+--- a/core/main.mk
++++ b/core/main.mk
+@@ -57,6 +57,11 @@ ifeq ($(strip $(HAS_BUILD_NUMBER)),false)
+ else
+   FILE_NAME_TAG := $(file <$(BUILD_NUMBER_FILE))
+ endif
++ifeq ($(TARGET_PRODUCT),lineage_lt013g)
++  ifneq ($(SMT311_PINNED_FILE_TAG),)
++    FILE_NAME_TAG := $(SMT311_PINNED_FILE_TAG)
++  endif
++endif
+ .KATI_READONLY := FILE_NAME_TAG
+ 
+ # Make an empty directory, which can be used to make empty jars
+diff --git a/target/product/base_system.mk b/target/product/base_system.mk
+index 5b118eee7f17071317df72ecf9f01f2d8affe9b0..af30af020dea19ecf52b3e584e2a65f24eecba97 100644
+--- a/target/product/base_system.mk
++++ b/target/product/base_system.mk
+@@ -69,8 +69,6 @@ PRODUCT_PACKAGES += \
+     ContactsProvider \
+     content \
+     crash_dump \
+-    CtsShimPrebuilt \
+-    CtsShimPrivPrebuilt \
+     debuggerd\
+     device_config \
+     dmctl \
+@@ -79,7 +77,6 @@ PRODUCT_PACKAGES += \
+     dpm \
+     dumpstate \
+     dumpsys \
+-    DynamicSystemInstallationService \
+     e2fsck \
+     ExtShared \
+     flags_health_check \
+@@ -274,6 +271,11 @@ PRODUCT_PACKAGES += \
+     wifi.rc \
+     wm \
+ 
++# G1780: retain CTS-only shim APKs for other devices, omit from SM-T311 release.
++ifneq ($(SMT311_EXCLUDE_CTS_SHIMS),true)
++PRODUCT_PACKAGES += CtsShimPrebuilt CtsShimPrivPrebuilt
++endif
++
+ # VINTF data for system image
+ PRODUCT_PACKAGES += \
+     system_manifest.xml \
+@@ -357,11 +359,18 @@ PRODUCT_COPY_FILES += system/core/rootdir/init.zygote32.rc:system/etc/init/hw/in
+ PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.zygote=zygote32
+ 
+ PRODUCT_SYSTEM_DEFAULT_PROPERTIES += debug.atrace.tags.enableflags=0
++# G1780: SM-T311 release does not run Perfetto tracing unless explicitly requested.
++ifeq ($(SMT311_RELEASE_STRIP_DEBUG_TOOLS),true)
++PRODUCT_SYSTEM_DEFAULT_PROPERTIES += persist.traced.enable=0
++else
+ PRODUCT_SYSTEM_DEFAULT_PROPERTIES += persist.traced.enable=1
++endif
+ 
+-# Packages included only for eng or userdebug builds, previously debug tagged
+-PRODUCT_PACKAGES_DEBUG := \
+-    adb_keys \
++# G1780: keep ADB authentication for Wi-Fi/USB, but omit the optional
++# development CLI tools and debug-only init scripts from the SM-T311 public ROM.
++PRODUCT_PACKAGES_DEBUG := adb_keys
++ifneq ($(SMT311_RELEASE_STRIP_DEBUG_TOOLS),true)
++PRODUCT_PACKAGES_DEBUG += \
+     arping \
+     gdbserver \
+     idlcli \
+@@ -384,7 +393,8 @@ PRODUCT_PACKAGES_DEBUG := \
+     traceroute6 \
+     unwind_info \
+     unwind_reg_info \
+-    unwind_symbols \
++    unwind_symbols
++endif
+ 
+ ifeq ($(LINEAGE_BUILD),)
+ PRODUCT_PACKAGES_DEBUG += \
+@@ -413,3 +423,9 @@ PRODUCT_COPY_FILES += $(call add-to-product-copy-files-if-exists,\
+     frameworks/base/config/dirty-image-objects:system/etc/dirty-image-objects)
+ 
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/runtime_libart.mk)
++
++
++# G1410: Samsung SM-T311 excludes unused optional DSU GSI frontend.
++ifneq ($(SMT311_EXCLUDE_DSU),true)
++PRODUCT_PACKAGES += DynamicSystemInstallationService
++endif
+diff --git a/target/product/handheld_system.mk b/target/product/handheld_system.mk
+index f6c92b5e80547b16bd91d1c85aae5912317f25f9..537365390645183a3eec3879ab3cfbd7dffb2297 100644
+--- a/target/product/handheld_system.mk
++++ b/target/product/handheld_system.mk
+@@ -46,7 +46,6 @@ PRODUCT_PACKAGES += \
+     clatd.conf \
+     DocumentsUI \
+     DownloadProviderUi \
+-    EasterEgg \
+     ExternalStorageProvider \
+     FusedLocation \
+     InputDevices \
+@@ -67,11 +66,19 @@ PRODUCT_PACKAGES += \
+     Telecom \
+     TelephonyProvider \
+     TeleService \
+-    Traceur \
+     UserDictionaryProvider \
+     VpnDialogs \
+     vr \
+ 
++# G1780: optional cosmetic Easter egg is omitted only from SM-T311.
++ifneq ($(SMT311_EXCLUDE_EASTEREGG),true)
++PRODUCT_PACKAGES += EasterEgg
++endif
++# G1778: only SM-T311 excludes the optional tracing UI from clean builds.
++ifneq ($(SMT311_EXCLUDE_TRACEUR),true)
++PRODUCT_PACKAGES += Traceur
++endif
++
+ 
+ PRODUCT_SYSTEM_SERVER_APPS += \
+     FusedLocation \
+diff --git a/tools/releasetools/edify_generator.py b/tools/releasetools/edify_generator.py
+index 0a0ff5f12637f56c786a0569415fe890467845fe..f6e6eadc7c9f660583bd374123b46065516200c4 100644
+--- a/tools/releasetools/edify_generator.py
++++ b/tools/releasetools/edify_generator.py
+@@ -143,6 +143,8 @@ class EdifyGenerator(object):
+            ' || abort("E%d: This package is for device: %s; ' +
+            'this device is " + getprop("ro.product.device") + ".");' +
+            ');') % (common.ErrorCode.DEVICE_MISMATCH, device)
++    if "lt013g" in device.split(","):
++      cmd = cmd.replace(' || abort(', ' || file_getprop("/default.prop", "ro.product.device") == "lt013g" || abort(', 1)
+     self.script.append(self.WordWrap(cmd))
+ 
+   def AssertSomeBootloader(self, *bootloaders):

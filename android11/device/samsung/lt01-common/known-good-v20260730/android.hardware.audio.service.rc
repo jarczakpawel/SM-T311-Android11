@@ -1,0 +1,9 @@
+# SM-T311 v86 - AOSP Audio HIDL 6.0 service without legacy schedtune profiles.
+service vendor.audio-hal /vendor/bin/hw/android.hardware.audio.service
+    class hal
+    user audioserver
+    group audio camera drmrpc inet media mediadrm net_bt net_bt_admin net_bw_acct wakelock context_hub system
+    capabilities BLOCK_SUSPEND SYS_NICE
+    rlimit rtprio 10 10
+    ioprio rt 4
+    onrestart restart audioserver

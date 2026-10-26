@@ -1,0 +1,187 @@
+diff --git a/fs/Exfat.cpp b/fs/Exfat.cpp
+index 34f10240892fa2a4b69389dc66c9ec720d352e23..9b06dcb399cf4ff90bd74422db90674ea9e3a1b0 100644
+--- a/fs/Exfat.cpp
++++ b/fs/Exfat.cpp
+@@ -41,7 +41,8 @@ bool IsSupported() {
+ status_t Check(const std::string& source) {
+     std::vector<std::string> cmd;
+     cmd.push_back(kFsckPath);
+-    cmd.push_back("-a");
++    // Non-destructive check: removable media must not be auto-repaired.
++    cmd.push_back("-n");
+     cmd.push_back(source);
+ 
+     int rc = ForkExecvp(cmd, nullptr, sFsckUntrustedContext);
+@@ -56,16 +57,21 @@ status_t Check(const std::string& source) {
+ }
+ 
+ status_t Mount(const std::string& source, const std::string& target, int ownerUid, int ownerGid,
+-               int permMask) {
++               int permMask, bool forceReadOnly) {
+     int mountFlags = MS_NODEV | MS_NOSUID | MS_DIRSYNC | MS_NOATIME | MS_NOEXEC;
+     auto mountData = android::base::StringPrintf("uid=%d,gid=%d,fmask=%o,dmask=%o", ownerUid,
+                                                  ownerGid, permMask, permMask);
+ 
+-    if (mount(source.c_str(), target.c_str(), "exfat", mountFlags, mountData.c_str()) == 0) {
+-        return 0;
++    if (!forceReadOnly) {
++        if (mount(source.c_str(), target.c_str(), "exfat", mountFlags,
++                  mountData.c_str()) == 0) {
++            return 0;
++        }
++        PLOG(ERROR) << "Read-write exFAT mount failed; attempting read-only";
++    } else {
++        LOG(WARNING) << "exFAT fsck failed: kernel read-only mount only";
+     }
+-
+-    PLOG(ERROR) << "Mount failed; attempting read-only";
++    // Never attempt RW after a failed integrity check.
+     mountFlags |= MS_RDONLY;
+     if (mount(source.c_str(), target.c_str(), "exfat", mountFlags, mountData.c_str()) == 0) {
+         return 0;
+diff --git a/fs/Exfat.h b/fs/Exfat.h
+index 768d8a5472837b4bd8bc0179e6062d9e573867bd..7845958b96a9247468a63c20634a9a901c594627 100644
+--- a/fs/Exfat.h
++++ b/fs/Exfat.h
+@@ -29,7 +29,7 @@ bool IsSupported();
+ 
+ status_t Check(const std::string& source);
+ status_t Mount(const std::string& source, const std::string& target, int ownerUid, int ownerGid,
+-               int permMask);
++               int permMask, bool forceReadOnly = false);
+ status_t Format(const std::string& source);
+ 
+ }  // namespace exfat
+diff --git a/model/PublicVolume.cpp b/model/PublicVolume.cpp
+index b6a662aa044d320b9284d34638ea4542463afbbe..5015d0b2e76a1fe1b841eff91885438868e0cb51 100644
+--- a/model/PublicVolume.cpp
++++ b/model/PublicVolume.cpp
+@@ -137,8 +137,18 @@ status_t PublicVolume::doMount() {
+     }
+ 
+     int ret = 0;
++    bool exfatReadOnly = false;
+     if (mFsType == "exfat") {
+         ret = exfat::Check(mDevPath);
++        if (ret) {
++            // G737: never automatically repair somebody's USB drive.
++            // On a failed read-only fsck try a kernel-verified RO mount;
++            // keep all other filesystem check failures fail-closed.
++            LOG(WARNING) << getId() << " exFAT check failed; "
++                         << "only a read-only mount will be attempted";
++            exfatReadOnly = true;
++            ret = 0;
++        }
+     } else if (mFsType == "ext4") {
+         ret = ext4::Check(mDevPath, mRawPath, false);
+     } else if (mFsType == "f2fs") {
+@@ -157,7 +167,8 @@ status_t PublicVolume::doMount() {
+ 
+     if (mFsType == "exfat") {
+         ret = exfat::Mount(mDevPath, mRawPath, AID_ROOT,
+-                 (isVisible ? AID_MEDIA_RW : AID_EXTERNAL_STORAGE), 0007);
++                 (isVisible ? AID_MEDIA_RW : AID_EXTERNAL_STORAGE), 0007,
++                 exfatReadOnly);
+     } else if (mFsType == "ext4") {
+         ret = ext4::Mount(mDevPath, mRawPath, false, false, true, mMntOpts,
+                 false, true);
+diff --git a/tests/g737-exfat-ro-fallback.py b/tests/g737-exfat-ro-fallback.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..32f9c03bbdceebc45a467674bc39094058c7cded
+--- /dev/null
++++ b/tests/g737-exfat-ro-fallback.py
+@@ -0,0 +1,94 @@
++#!/usr/bin/env python3
++"""G737 source/model regressions for non-destructive exFAT USB media handling.
++
++No partition writes, no flash or external storage access. Verify that:
++- clean exFAT gets regular RW-first mounting,
++- nonzero read-only fsck gets RO-only mount,
++- non-exFAT check failures remain fatal,
++- unknown benign entry sets are checksum and secondary-tag verified,
++- unknown critical entries still fail fsck, no auto-repair.
++"""
++from pathlib import Path
++A=Path(__file__).resolve().parents[3]
++vold=A/"system/vold"
++exfat=A/"external/exfatprogs"
++e=(vold/"fs/Exfat.cpp").read_text()
++h=(vold/"fs/Exfat.h").read_text()
++v=(vold/"model/PublicVolume.cpp").read_text()
++f=(exfat/"fsck/fsck.c").read_text()
++types=(exfat/"include/exfat_ondisk.h").read_text()
++checks={
++ "fsck_always_non_destructive":'cmd.push_back("-n");' in e and
++  'cmd.push_back("-a");' not in e,
++ "ro_flag_in_mount_signature":'bool forceReadOnly' in h and 'bool forceReadOnly)' in e,
++ "never_first_rw_on_bad_fsck":'if (!forceReadOnly) {' in e and
++   e.find('if (!forceReadOnly) {') < e.find('mount(source.c_str()'),
++ "always_RO_after_first_failed_RW":"mountFlags |= MS_RDONLY;" in e,
++ "exfat_failed_fsck_only_degrades_RO":'if (mFsType == "exfat")' in v and
++   "exfatReadOnly = true;" in v and
++   "ret = exfat::Mount(mDevPath" in v and
++   "exfatReadOnly);" in v,
++ "other_failed_checks_still_abort":'if (ret) {' in v and
++   '" failed filesystem check"' in v,
++ "benign_primary_explicit_filter":'IS_EXFAT_BENIGN_PRIMARY(dentry->type)' in f,
++ "benign_entries_verified_checksum":'dentry_calc_checksum(secondary, &checksum,' in f and
++  'checksum != expected_checksum' in f,
++ "secondary_flags_must_be_in_use":'EXFAT_DENTRY_SECONDARY)) !=' in f and
++   'EXFAT_DENTRY_IN_USE' in f,
++ "critical_unknown_still_fatal":'exfat_err("unknown entry type. 0x%x' in f and
++   'ret = -EINVAL;' in f,
++ "deleted_entry_handling_preserved":'IS_EXFAT_DELETED(dentry->type)' in f,
++ "only_benign_primary_type_mask":'(((x) & 0xE0) == 0xA0)' in types,
++}
++for name, good in checks.items():
++    assert good,name
++    print("PASS source",name)
++
++def entry_is_benign_primary(entry): return (entry & 0xE0)==0xA0
++def checksum(entries):
++    total=0
++    for i,block in enumerate(entries):
++        for offset,byte in enumerate(block):
++            if i==0 and offset in (2,3): continue
++            total=((total>>1)|((total & 1)<<15))
++            total=(total+byte)&0xffff
++    return total
++def valid_opaque_benign_primary(entries):
++    if not entries or len(entries[0])!=32:return False
++    primary=entries[0]
++    if not entry_is_benign_primary(primary[0]):return False
++    if len(entries)!=primary[1]+1:return False
++    if not all(len(x)==32 and x[0]&0xc0==0xc0 for x in entries[1:]):return False
++    return checksum(entries)==int.from_bytes(primary[2:4],"little")
++
++primary=bytearray(32);primary[0]=0xBA;primary[1]=1
++sec=bytearray(32);sec[0]=0xE0;sec[7]=0x55
++primary[2:4]=checksum([primary,sec]).to_bytes(2,"little")
++assert valid_opaque_benign_primary([primary,sec])
++print("PASS synthetic_valid_unknown_benign_set")
++for mutation in ("secondary_missing","secondary_critical","wrong_checksum","critical_primary","deleted_primary","wrong_count"):
++    p=bytearray(primary);q=bytearray(sec);items=[p,q]
++    if mutation=="secondary_missing":items=[p]
++    if mutation=="secondary_critical":q[0]=0x80
++    if mutation=="wrong_checksum":q[7]^=1
++    if mutation=="critical_primary":p[0]=0x8a
++    if mutation=="deleted_primary":p[0]=0x3a
++    if mutation=="wrong_count":p[1]=2
++    assert not valid_opaque_benign_primary(items),mutation
++    print("PASS synthetic_reject",mutation)
++
++def mount_mode(fs,check_ok):
++    if fs!="exfat":
++        return "NORMAL" if check_ok else "REJECT"
++    return "RW_FIRST_RO_FALLBACK" if check_ok else "RO_ONLY"
++cases=[
++ ("exfat",True,"RW_FIRST_RO_FALLBACK"),
++ ("exfat",False,"RO_ONLY"),
++ ("vfat",False,"REJECT"),
++ ("ntfs",False,"REJECT"),
++ ("ext4",False,"REJECT"),
++]
++for fs,ok,expected in cases:
++    assert mount_mode(fs,ok)==expected
++    print("PASS mount",fs,ok,expected)
++print("G737_SAFE_EXFAT_MODEL_PASS",len(checks)+7+len(cases))

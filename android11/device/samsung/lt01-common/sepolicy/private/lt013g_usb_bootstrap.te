@@ -1,0 +1,35 @@
+type lt013g_usb_bootstrap, domain;
+typeattribute lt013g_usb_bootstrap coredomain;
+type lt013g_usb_bootstrap_exec, exec_type, file_type, system_file_type;
+type lt013g_usb_bootstrap_data_file, file_type, data_file_type, core_data_file_type;
+vendor_public_prop(lt013g_usb_bootstrap_prop)
+
+init_daemon_domain(lt013g_usb_bootstrap)
+set_prop(lt013g_usb_bootstrap, lt013g_usb_bootstrap_prop)
+
+allow lt013g_usb_bootstrap configfs:dir { getattr open read search };
+allow lt013g_usb_bootstrap configfs:file { getattr open read };
+allow lt013g_usb_bootstrap configfs:lnk_file { getattr read };
+allow lt013g_usb_bootstrap functionfs:dir { getattr search setattr };
+allow lt013g_usb_bootstrap functionfs:file { getattr open read };
+allow lt013g_usb_bootstrap proc_mounts:file r_file_perms;
+allow lt013g_usb_bootstrap sysfs:dir { getattr search };
+allow lt013g_usb_bootstrap sysfs:file { getattr open read };
+allow lt013g_usb_bootstrap system_data_file:dir search;
+allow lt013g_usb_bootstrap lt013g_usb_bootstrap_data_file:dir { getattr open read search write add_name };
+allow lt013g_usb_bootstrap lt013g_usb_bootstrap_data_file:file { create open read write append getattr };
+allow lt013g_usb_bootstrap toolbox_exec:file rx_file_perms;
+
+# G299: the stock v115 helper creates /dev/usb-ffs and sets its owner
+# before FunctionFS is mounted. Required by physical G298 boot AVCs.
+allow lt013g_usb_bootstrap device:dir { write add_name create setattr };
+allow lt013g_usb_bootstrap self:capability chown;
+
+# vendor_init executes restorecon for the original helper and data
+# directories; both are now labeled with dedicated G298 SELinux types.
+allow vendor_init lt013g_usb_bootstrap_exec:file getattr;
+allow vendor_init lt013g_usb_bootstrap_data_file:dir getattr;
+
+# G300: v115 also chowns the FunctionFS mountpoint and mounts its
+# own adb instance. These three denials were physically observed on G299.
+allow lt013g_usb_bootstrap self:capability fowner;

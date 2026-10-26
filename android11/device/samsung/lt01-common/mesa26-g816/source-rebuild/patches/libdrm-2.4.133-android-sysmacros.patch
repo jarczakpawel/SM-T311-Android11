@@ -1,0 +1,15 @@
+--- a/xf86drm.c
++++ b/xf86drm.c
+@@ -56,6 +56,12 @@
+ #include <sys/mkdev.h>
+ #endif
+ #ifdef MAJOR_IN_SYSMACROS
++#include <sys/sysmacros.h>
++#endif
++/* Android Bionic API 29 defines major/minor/makedev as sysmacros.
++ * Meson 26 cross-probes may not detect function-like macros here.
++ * Keep this fix scoped to our extracted libdrm test tree. */
++#if defined(__ANDROID__) && !defined(MAJOR_IN_SYSMACROS)
+ #include <sys/sysmacros.h>
+ #endif
+ #if HAVE_SYS_SYSCTL_H

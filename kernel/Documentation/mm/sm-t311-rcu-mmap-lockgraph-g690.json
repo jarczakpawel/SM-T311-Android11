@@ -1,0 +1,102 @@
+{
+  "stage": "G690",
+  "topic": "source-anchored RCU/mmap_lock wait-for graph: PER_VMA_LOCK fallback",
+  "source_guards": {
+    "PER_VMA_LOCK_supported_on_target": true,
+    "mmap_region_has_writer_lock_assertion": true,
+    "ext4_writer_counter_then_GP_then_VMA": true,
+    "RCU_GP_does_not_hold_reader_lock_in_mmap_region": true,
+    "read_helper_requires_RCU_held": true,
+    "read_helper_on_error_releases_RCU": true,
+    "read_helper_on_unstable_error_releases_RCU": true,
+    "read_helper_error_contract": true,
+    "caller_failed_lock_falls_back_after_helper": true,
+    "caller_locked_path_explicit_drop": true,
+    "fallback_uses_sleepable_mmap_lock": true,
+    "caller_reenters_RCU_after_sleepable_fallback": true,
+    "proc_scan_initially_takes_RCU": true,
+    "proc_scan_delegates_to_guarded_helper": true,
+    "proc_explicit_mmap_fallback_unlocks_first": true,
+    "proc_query_ends_RCU_before_fallback_lock": true,
+    "header_requires_RCU_on_lock_next_vma": true,
+    "experimental_fast_reader_has_no_mmap_wait": true,
+    "experimental_fast_reader_exits_RCU": true
+  },
+  "passed_source_guards": 19,
+  "modified_real_source_mutations_rejected": {
+    "remove_helper_error_RCU_drop": [
+      "read_helper_on_error_releases_RCU",
+      "caller_failed_lock_falls_back_after_helper"
+    ],
+    "remove_helper_unstable_RCU_drop": [
+      "read_helper_on_unstable_error_releases_RCU"
+    ],
+    "direct_fallback_skips_rcu_drop": [
+      "caller_locked_path_explicit_drop"
+    ],
+    "reader_reenters_RCU_before_blocking": [
+      "caller_locked_path_explicit_drop",
+      "caller_reenters_RCU_after_sleepable_fallback"
+    ],
+    "proc_mmap_fallback_reversed": [
+      "proc_explicit_mmap_fallback_unlocks_first"
+    ],
+    "remove_proc_query_RCU_release": [
+      "proc_query_ends_RCU_before_fallback_lock"
+    ],
+    "remove_writer_GP": [
+      "ext4_writer_counter_then_GP_then_VMA"
+    ],
+    "remove_writer_mmap_assertion": [
+      "mmap_region_has_writer_lock_assertion"
+    ],
+    "sleep_within_fast_rcu_reader": [
+      "experimental_fast_reader_has_no_mmap_wait"
+    ]
+  },
+  "bounded_interleaving": {
+    "actual_contract_reader_releases_RCU_before_mmap_read_lock": {
+      "reachable_states": 26,
+      "finished": true,
+      "deadlock_reachable": false,
+      "deadlock_witness": null
+    },
+    "counterfactual_reader_blocks_on_mmap_lock_holding_RCU": {
+      "reachable_states": 17,
+      "finished": true,
+      "deadlock_reachable": true,
+      "deadlock_witness": {
+        "state": [
+          1,
+          1,
+          true,
+          false,
+          true
+        ],
+        "wants_writer": "GP",
+        "wants_reader": "MLOCK",
+        "trace": [
+          "W:WLOCK",
+          "R:RLOCK"
+        ]
+      }
+    }
+  },
+  "result": "One candidate direct inversion in /proc/maps VMA-lock fallback is avoided because vma_start_read() releases RCU on error and explicit fallback releases it first. This is NOT a global lockdep proof.",
+  "limitations": [
+    "A modeled cycle in a counterfactual source is not a reproduced deadlock in the actual kernel.",
+    "The finite-state model conservatively waits for all readers at GP and abstracts preemption, refcounts and cache ordering.",
+    "Other RCU read-side sections, callbacks, unrelated per-mm locks and global edges not exhaustively audited.",
+    "No PREEMPT_RCU physical lockdep execution or mmap p99 measurement; CONFIG_PROVE_LOCKING=n in current host build.",
+    "PFN/ABA and ARMv7 VIPT cache aliases remain unproven; S2/S3 BLOCKED.",
+    "G683 conservative EXT4 GP under mmap write lock still has cost even when experiment runtime key OFF.",
+    "No new kernel executable source paths and no flash."
+  ],
+  "physical_kernel": "G650 unchanged",
+  "staged_kernel_executable_files_NOT_INSTALLED": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

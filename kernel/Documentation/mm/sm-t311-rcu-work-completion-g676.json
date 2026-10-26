@@ -1,0 +1,74 @@
+{
+  "stage": "G676",
+  "source_assertions_pass": 16,
+  "source_assertions": {
+    "queue_rcu_work_uses_call_rcu_hurry": true,
+    "queue_rcu_work_sets_pending_before_rcu_callback": true,
+    "rcu_callback_queues_embedded_work_only_after_grace": true,
+    "api_flush_rcu_work_accounts_for_pending_callback": true,
+    "api_exposes_flush_rcu_work": true,
+    "allocator_uses_one_inflight_callback_per_cpu": true,
+    "allocator_queues_callback_under_percpu_lock": true,
+    "allocator_backlog_accounting": true,
+    "worker_take_batch_under_spinlock": true,
+    "drain_uses_mutex_and_waits_rcu_grace": true,
+    "sync_drains_before_wait_for_rcu_work": true,
+    "sync_does_not_use_generic_flush_for_rcuwork": true,
+    "sync_includes_all_possible_cpu_rcu_workers": true,
+    "hotplug_uses_rcu_free_sync": true,
+    "memory_failure_uses_rcu_free_sync": true,
+    "source_respects_page_tag_free_soft_cap": true
+  },
+  "modified_source_rejected": {
+    "revert_to_generic_flush": [
+      "sync_drains_before_wait_for_rcu_work",
+      "sync_does_not_use_generic_flush_for_rcuwork"
+    ],
+    "remove_rcu_barrier": [
+      "api_flush_rcu_work_accounts_for_pending_callback"
+    ],
+    "remove_queue_gp": [
+      "queue_rcu_work_uses_call_rcu_hurry",
+      "queue_rcu_work_sets_pending_before_rcu_callback"
+    ],
+    "remove_drain": [
+      "sync_drains_before_wait_for_rcu_work"
+    ],
+    "skip_expedite_completion": [
+      "sync_drains_before_wait_for_rcu_work"
+    ]
+  },
+  "example_registered_but_work_not_enqueued": {
+    "generic_flush_work": {
+      "returned": true,
+      "rcu_callback_complete": false,
+      "work_done": false,
+      "events": [
+        "rcu_free_drain",
+        "begin_per_cpu_wait",
+        "generic_flush_cannot_guarantee_rcu_callback"
+      ]
+    },
+    "correct_flush_rcu_work": {
+      "returned": true,
+      "rcu_callback_complete": true,
+      "work_done": true,
+      "events": [
+        "rcu_free_drain",
+        "begin_per_cpu_wait",
+        "rcu_barrier_wait",
+        "rcu_callback_queues_work",
+        "flush_work_wait",
+        "return"
+      ]
+    }
+  },
+  "limits": [
+    "Toy model is API-contract documentation, not CPU race reproduction.",
+    "The queued callback may be waiting on RCU when generic flush_work is called.",
+    "No physical hung flush, UAF, memory corruption or demonstrated exploit.",
+    "flush_rcu_work includes rcu_barrier and can be more expensive in rare synchronizing paths.",
+    "Current G674/G676 executable changes are STAGED NOT INSTALLED.",
+    "S1 ACTIVE, S2/S3 BLOCKED; no-ref RCU must stay DEFAULT OFF."
+  ]
+}

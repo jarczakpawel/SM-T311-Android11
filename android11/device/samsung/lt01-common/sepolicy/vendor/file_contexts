@@ -1,0 +1,81 @@
+/(vendor|system/vendor)/bin/hw/android\.hardware\.light@2\.0-service\.lt013g u:object_r:hal_light_default_exec:s0
+
+# BEGIN SM-T311 V158 FILE CONTEXTS
+/vendor/bin/lt013g-reboot-guard                                     u:object_r:lt013g_reboot_guard_exec:s0
+# END SM-T311 V158 FILE CONTEXTS
+
+# BEGIN SM-T311 V168 FILE CONTEXTS
+/dev/dri(/.*)?                                                    u:object_r:gpu_device:s0
+/(vendor|system/vendor)/bin/hw/android\.hardware\.power@1\.0-service\.lt013g       u:object_r:hal_power_default_exec:s0
+# END SM-T311 V168 FILE CONTEXTS
+
+# BEGIN SM-T311 V183 MEDIA/AUDIO CONTEXTS
+/vendor/etc/media_profiles_V1_0\.xml                  u:object_r:vendor_configs_file:s0
+/vendor/etc/media_codecs\.xml                        u:object_r:vendor_configs_file:s0
+/vendor/etc/media_codecs_google_audio\.xml           u:object_r:vendor_configs_file:s0
+/vendor/etc/audio_.*\.xml                            u:object_r:vendor_configs_file:s0
+/vendor/lib/hw/audio\..*\.so                         u:object_r:vendor_file:s0
+/vendor/lib/lib(alsautils|nbaio_mono)\.so             u:object_r:vendor_file:s0
+# END SM-T311 V183 MEDIA/AUDIO CONTEXTS
+
+# BEGIN SM-T311 A1 FILE CONTEXTS
+/(vendor|system/vendor)/bin/hw/android\.hardware\.thermal@2\.0-service\.samsung    u:object_r:hal_thermal_default_exec:s0
+/(vendor|system/vendor)/bin/hw/android\.hardware\.vibrator@1\.0-service\.lt013g u:object_r:hal_vibrator_default_exec:s0
+# END SM-T311 A1 FILE CONTEXTS
+
+# Legacy Samsung XMM6262 RIL state lives in /data/misc/radio.
+# Without this entry the entire directory is labeled system_data_file,
+# causing mislabeled create/read/write operations in Permissive mode.
+# Keep this limited to the specific legacy radio subtree.
+/data/misc/radio(/.*)?                 u:object_r:radio_data_file:s0
+
+# BEGIN SM-T311 SEPOLICY V107
+/(vendor|system/vendor)/bin/t311-cbd       u:object_r:rild_exec:s0
+/(vendor|system/vendor)/bin/t311-modem-watchdog u:object_r:lt013g_modem_watchdog_exec:s0
+/(vendor|system/vendor)/bin/t311-radio-hal-probe u:object_r:lt013g_modem_watchdog_probe_exec:s0
+/(vendor|system/vendor)/bin/t311-mobile-session-probe u:object_r:lt013g_modem_watchdog_probe_exec:s0
+/(vendor|system/vendor)/bin/t311-cbd-pidfd-signal u:object_r:lt013g_modem_watchdog_probe_exec:s0
+/cache/smt311-radio-diagnostics(/.*)? u:object_r:lt013g_modem_watchdog_cache_file:s0
+/dev/umts.*                             u:object_r:radio_device:s0
+/dev/hsic.*                             u:object_r:radio_device:s0
+/dev/link_pm                            u:object_r:radio_device:s0
+/dev/mbin0                              u:object_r:radio_device:s0
+/dev/block/mmcblk0p13                   u:object_r:radio_device:s0
+# END SM-T311 SEPOLICY V107
+
+# BEGIN SM-T311 PJARCZAK RECOVERY NOOP
+/(vendor|system/vendor)/bin/t311-recovery-noop u:object_r:rild_exec:s0
+# END SM-T311 PJARCZAK RECOVERY NOOP
+/(vendor|system/vendor)/bin/t311-audio-ril   u:object_r:rild_exec:s0
+
+# SM-T311 HOTFIX26 modern V4L2 Codec2 service
+/(vendor|system/vendor)/bin/hw/android\.hardware\.media\.c2@1\.0-service-v4l2    u:object_r:mediacodec_exec:s0
+
+/(vendor|system/vendor)/bin/hw/android\.hardware\.ir@1\.0-service\.lt013g u:object_r:hal_ir_default_exec:s0
+/dev/lirc[0-9]+ u:object_r:lt013g_lirc_device:s0
+
+/(vendor|system/vendor)/bin/lt013g-gps-legacy-launcher-v195 u:object_r:lt013g_gps_legacy_exec:s0
+/vendor/etc/lt013g-gps-legacy/immutable/system/bin/(gpsd|linker|mksh|sensorservice|servicemanager) u:object_r:lt013g_gps_legacy_code_exec:s0
+/vendor/etc/lt013g-gps-legacy/immutable(/.*)? u:object_r:lt013g_gps_legacy_code_file:s0
+/dev/ttySAC1 u:object_r:lt013g_gps_serial_device:s0
+/dev/block/mmcblk0p3 u:object_r:lt013g_efs_block_device:s0
+# G389: EXACT Samsung SM-T311 factory OTA (PIT p11) is Android BCB /misc.
+# Stock G379 labels p11 block_device, which init can read but cannot WRITE
+# under Enforcing. Label this ONE raw node with AOSP's existing
+# misc_block_device type: init's existing platform permissions are sufficient.
+# Do not grant init blanket block_device write or relabel EFS/CP/USERDATA.
+/dev/block/mmcblk0p11 u:object_r:misc_block_device:s0
+/dev/block/mmcblk0p19 u:object_r:cache_block_device:s0
+/dev/block/mmcblk0p21 u:object_r:userdata_block_device:s0
+
+# GPS private scratch subtrees and IPC socket only; do not relabel rootfs executables.
+/data/vendor/gps/legacy-v195/data-gps(/.*)? u:object_r:lt013g_gps_scratch_data_file:s0
+/data/vendor/gps/legacy-v195/dev-socket(/.*)? u:object_r:lt013g_gps_scratch_data_file:s0
+/data/vendor/gps/legacy-v195/system-gps(/.*)? u:object_r:lt013g_gps_scratch_data_file:s0
+/data/vendor/gps/legacy-v195/storage/angrygps(/.*)? u:object_r:lt013g_gps_scratch_data_file:s0
+/data/vendor/gps/legacy-v195/storage/broadcom(/.*)? u:object_r:lt013g_gps_scratch_data_file:s0
+
+/cache/smt311-reboot-trace(/.*)? u:object_r:lt013g_reboot_trace_cache_file:s0
+
+# G831: Linux 7.3 DMA-BUF system heap used by platform graphics/media.
+/dev/dma_heap/system   u:object_r:smt311_system_dma_heap_device:s0

@@ -1,0 +1,8 @@
+// SM-T311 G641 standalone ARM32 test only; no PRODUCT_PACKAGES consumer.
+cc_binary {
+    name: "t311_sched_handoff_bench",
+    vendor: true,
+    srcs: ["main.c"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-O2"],
+    stl: "none",
+}

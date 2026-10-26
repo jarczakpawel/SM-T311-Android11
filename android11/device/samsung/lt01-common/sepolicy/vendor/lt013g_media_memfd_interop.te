@@ -1,0 +1,36 @@
+# Samsung SM-T311 Android 11: buffers passed through Binder/HwBinder between
+# platform applications, audioserver, mediaserver, extractor, and Codec2 SW.
+# These are actual observed memfd/MessageQueue/AudioFlinger AVCs on G301.
+# The regular appdomain access to audioserver_tmpfs exists in AOSP policy,
+# but Android MLS category labels still block app -> audioserver memfd writes.
+# Media buffers must remain shareable when exported to platform apps.
+typeattribute audioserver_tmpfs mlstrustedobject;
+
+# Shared memory FDs crossing the AOSP software codec and legacy media server.
+allow mediaswcodec mediaserver_tmpfs:file { getattr open read write map };
+allow mediaserver mediaswcodec_tmpfs:file { getattr open read write map };
+allow mediaserver mediaextractor_tmpfs:file { getattr open read write map };
+allow mediaserver audioserver_tmpfs:file { getattr open read write map };
+
+# G750: The hardware c2.v4l2 AVC decoder receives BufferPool MessageQueue
+# memfds created by mediaserver, not by the decoder. During HIDL FMQ sender
+# registration, Binder fd-array transfer was denied { read write } on
+# mediaserver_tmpfs to u:r:mediacodec:s0, followed by CRITICAL_ERROR(4)
+# and MediaCodec error 0xe. Grant exactly those received shared-memory FDs.
+# Do not grant /dev/dri, camera device, broad tmpfs, or arbitrary app data.
+allow mediacodec mediaserver_tmpfs:file { getattr read write map };
+
+# G1153: H.264 ExoPlayer decoding failure, physically observed on 2026-10-24.
+# App pl.paweljarczak.cdafreeplayer creates Android11 BufferPool FMQ
+# memfd:MessageQueue under appdomain_tmpfs:s0:c87,c256,c512,c768.
+# The hardware c2.v4l2.avc.decoder runs u:r:mediacodec:s0.  When it
+# receives the fd through Codec2 BufferPool/HIDL, SELinux denied
+# { read write } on appdomain_tmpfs, registerSender returned 4,
+# queueCSDInputBuffer failed 14, MediaCodec error 0xe, ExoPlayer
+# ERROR_CODE_DECODING_FAILED at 1280x720 avc1.42C01E.
+# The existing narrow mediaswcodec->appdomain_tmpfs and
+# audioserver->appdomain_tmpfs FMQ rules do not cover mediacodec.
+# Allow ONLY hardware codec access to already shared anonymous app
+# FMQ file objects.  No general app-data paths, no generic tmpfs,
+# no execute, create, unlink, rename, setenforce or PIN changes.
+allow mediacodec appdomain_tmpfs:file { getattr map read write };

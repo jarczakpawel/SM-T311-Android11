@@ -1,0 +1,79 @@
+{
+  "device": "Samsung SM-T311 Cortex-A9 ARMv7",
+  "model": "abstract sequentially consistent event ordering, NOT LKMM/herd7",
+  "flagged_and_deferred": {
+    "tested_interleavings": 120,
+    "accepted_copies": 14,
+    "pointer_ABA_copies": 0,
+    "example_schedules": []
+  },
+  "negative_control_no_defer": {
+    "tested_interleavings": 120,
+    "accepted_copies": 20,
+    "pointer_ABA_copies": 3,
+    "example_schedules": [
+      [
+        "R_lock",
+        "R_load",
+        "W_remove",
+        "W_drop_last_ref",
+        "W_reinsert",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "R_copy",
+        "R_unlock"
+      ],
+      [
+        "R_lock",
+        "R_load",
+        "W_remove",
+        "R_flag",
+        "W_drop_last_ref",
+        "W_reinsert",
+        "R_size",
+        "R_reload",
+        "R_copy",
+        "R_unlock"
+      ],
+      [
+        "R_lock",
+        "R_load",
+        "W_remove",
+        "R_flag",
+        "W_drop_last_ref",
+        "R_size",
+        "W_reinsert",
+        "R_reload",
+        "R_copy",
+        "R_unlock"
+      ]
+    ]
+  },
+  "unmarked_donor_then_marked_reinsertion": {
+    "tested_interleavings": 120,
+    "accepted_copies": 5,
+    "pointer_ABA_copies": 1,
+    "example_schedules": [
+      [
+        "R_lock",
+        "R_load",
+        "W_remove",
+        "W_drop_last_ref",
+        "W_reinsert",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "R_copy",
+        "R_unlock"
+      ]
+    ]
+  },
+  "interpretation": [
+    "Flagged folio deferred reuse prevents same-physical-address generation ABA in this toy model.",
+    "Removing deferred reuse admits accepted pointer-ABA histories; not proof of actual kernel execution.",
+    "An initially unmarked folio can be recycled and a new folio flagged before the stale lookup checks the flag, yielding pointer-ABA histories; whether the real kernel allows a dangerous instance requires ARMv7 LKMM/writer proof.",
+    "A stale pointer-ABA observation is not in itself proof of corrupt application data. This model omits inode, i_size, xarray locks, cache-coherency and barriers."
+  ],
+  "safety_gate": "S2 MUST REMAIN BLOCKED until LKMM + real writer/reader review is complete"
+}

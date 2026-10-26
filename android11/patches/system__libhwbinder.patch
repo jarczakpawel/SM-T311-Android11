@@ -1,0 +1,30 @@
+diff --git a/binder_kernel.h b/binder_kernel.h
+index fdf5b1ec8ea98543a532ad394ca8f2e46541bc38..9b0e16ec3435ade4156632c723232b50ff9415d6 100644
+--- a/binder_kernel.h
++++ b/binder_kernel.h
+@@ -17,6 +17,10 @@
+ #ifndef ANDROID_HARDWARE_BINDER_KERNEL_H
+ #define ANDROID_HARDWARE_BINDER_KERNEL_H
+ 
++#if defined(__LP64__) && !defined(__ANDROID__) && defined(BINDER_IPC_32BIT)
++#undef BINDER_IPC_32BIT
++#endif
++
+ /**
+  * Only need this file to fix the __packed__ keyword.
+  */
+diff --git a/include/hwbinder/Parcel.h b/include/hwbinder/Parcel.h
+index d3bdfe6d8cdb1b2acc1a41f2d48c0b421df14e7a..923ff90631169e95c76b1e0b266d16fde14afed4 100644
+--- a/include/hwbinder/Parcel.h
++++ b/include/hwbinder/Parcel.h
+@@ -17,6 +17,10 @@
+ #ifndef ANDROID_HARDWARE_PARCEL_H
+ #define ANDROID_HARDWARE_PARCEL_H
+ 
++#if defined(__LP64__) && !defined(__ANDROID__) && defined(BINDER_IPC_32BIT)
++#undef BINDER_IPC_32BIT
++#endif
++
+ #include <string>
+ #include <vector>
+ 

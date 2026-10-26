@@ -1,0 +1,94 @@
+{
+  "stage": "G683",
+  "source_guards": {
+    "experiment_compile_only_guard": true,
+    "ext4_super_magic_header_is_included": true,
+    "tag_marker_only_ext4_normal_4k": true,
+    "marker_publish_tag_then_eligibility": true,
+    "eligibility_is_atomic_flag_independent_of_writable_counter": true,
+    "reader_checks_eligibility_before_rcu_enter": true,
+    "writer_counter_first_then_ext4_gp_then_vma": true,
+    "writer_does_NOT_consult_AS_RCU_READ_for_gp": true,
+    "writer_gp_scoped_ext4_nonnull_inode": true,
+    "writer_writable_count_balanced_after_attempt": true,
+    "writable_map_count_has_atomic_publish": true,
+    "no_reader_sleeps_during_rcu_copy": true,
+    "no_G683_GP_in_filemap_fastpath": true,
+    "RCU_GP_api_has_publication_barrier": true
+  },
+  "source_guards_passed": 14,
+  "changed_source_mutants_rejected": {
+    "restore_racy_AS_RCU_READ_gate": [
+      "writer_counter_first_then_ext4_gp_then_vma",
+      "writer_does_NOT_consult_AS_RCU_READ_for_gp",
+      "writer_gp_scoped_ext4_nonnull_inode"
+    ],
+    "skip_ext4_GP": [
+      "writer_counter_first_then_ext4_gp_then_vma",
+      "writer_gp_scoped_ext4_nonnull_inode"
+    ],
+    "replace_GP_with_smp_mb": [
+      "writer_counter_first_then_ext4_gp_then_vma"
+    ],
+    "remove_GP": [
+      "writer_counter_first_then_ext4_gp_then_vma"
+    ],
+    "remove_writable_counter_publish": [
+      "writer_counter_first_then_ext4_gp_then_vma",
+      "writer_writable_count_balanced_after_attempt"
+    ],
+    "remove_ref_free_reader_RCU_lock": [
+      "reader_checks_eligibility_before_rcu_enter",
+      "no_reader_sleeps_during_rcu_copy"
+    ],
+    "disable_marker_eligibility_publish": [
+      "marker_publish_tag_then_eligibility"
+    ],
+    "disable_eligibility_test": [
+      "eligibility_is_atomic_flag_independent_of_writable_counter"
+    ]
+  },
+  "actual_herd7_models": {
+    "old_eligibility_guard_race": {
+      "test": "tools/memory-model/litmus-tests/SMT311+MmapEligiblePublicationRaceG683.litmus",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 8,
+      "source_sha256": "d3b9c31e42b8c50aa5010bb91ed660d25e09cb988caa0e7aa9e8a197448db3fd",
+      "normalized_herd7_sha256": "37f65ccbf650ffeca74829a4c2040cbf22fa607f057979963be03865e6000f6c"
+    },
+    "unconditional_ext4_grace": {
+      "test": "tools/memory-model/litmus-tests/SMT311+MmapEligibleAlwaysGraceG683.litmus",
+      "outcome": "Never",
+      "positive": 0,
+      "negative": 8,
+      "source_sha256": "7851f0b08691df35db2a172824afe18ae90c2faf28e86497a3cfe15694c7ff57",
+      "normalized_herd7_sha256": "c05edd19d29368f3d258fbc92b30dde2252f67f274f3cd5aabba0dfe8e790402"
+    },
+    "writer_barrier_is_not_grace": {
+      "test": "tools/memory-model/litmus-tests/SMT311+MmapEligibleRelaxedNoGPBarrierG683.litmus",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 8,
+      "source_sha256": "6adf967a69b49b506bf77adbb9a81a1bf049a349e2107f05e9c4866a3f670563",
+      "normalized_herd7_sha256": "747a84c1738e23981a765e1c5946124c27c233ecac8a09c9126c0f975d01c5aa"
+    },
+    "reader_barrier_counterfactual": {
+      "test": "tools/memory-model/litmus-tests/SMT311+MmapEligibleReaderBarrierG683.litmus",
+      "outcome": "Never",
+      "positive": 0,
+      "negative": 7,
+      "source_sha256": "c51be73d38616cacbbdebb309d7a1c9eff6e252e8a41269c2d75010d08ffec49",
+      "normalized_herd7_sha256": "d1f5a2795f13076ed570f445500d7f0ac2afe57dc7b7aa074032b553a6acfdee"
+    }
+  },
+  "change": "mm/vma.c: for CONFIG_SM_T311_RCU_HOT4K_EXPERIMENT, ext4 shared-maywrite creation waits GP regardless of concurrently published AS_RCU_READ",
+  "risk": "Unconditional GP on all ext4 shared-maywrite mmap in experiment, even with static key OFF; mmap_lock-held latency unmeasured",
+  "limitations": [
+    "LKMM scalar eligibility/count model with illustrative full writer barriers, not exact atomic bit RMW implementation.",
+    "Neither an allowed execution nor its removal in the model proves real ARMv7 cache corruption or complete safety.",
+    "Reader-barrier model is counterfactual only; no extra hot-read barrier is installed.",
+    "Other writer paths, mmap_lock global deadlock graph, memory pressure and performance remain unproven.",
+    "S2/S3 BLOCKED; kernel runtime change remains STAGED NOT INSTALLED, physical G650 stays RCU OFF."
+  ]
+}

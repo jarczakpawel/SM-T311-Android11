@@ -1,0 +1,6 @@
+service vendor.lt013g-reboot-guard /vendor/bin/lt013g-reboot-guard
+    class core
+    user root
+    group root system
+    capabilities SYS_BOOT
+    shutdown critical

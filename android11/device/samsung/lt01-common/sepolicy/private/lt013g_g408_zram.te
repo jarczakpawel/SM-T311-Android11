@@ -1,0 +1,9 @@
+# G408: /dev/block/zram0 is labeled ram_device by Android 11's PLATFORM
+# /dev/block/zram[0-9]* file_contexts. SM-T311 physical ls -Z verified.
+# AOSP init's fs_mgr_swapon_all configures ZRAM, forks mkswap in toolbox
+# domain, then calls swapon() from init. Both must have access to the SAME
+# exact RAM block label. Android's existing allow rules target only
+# swap_block_device, not this built-in zram ram_device type.
+# Never grant generic block_device access; never relabel EFS/eMMC/CP.
+allow init ram_device:blk_file rw_file_perms;
+allow toolbox ram_device:blk_file rw_file_perms;

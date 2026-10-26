@@ -1,0 +1,58 @@
+{
+  "stage": "G664",
+  "type": "SOURCE STRUCTURAL PREFLIGHT ONLY",
+  "kernel_runtime_base": "a2fca4558",
+  "positive_pass": 23,
+  "checks": {
+    "board_armv7_smp": true,
+    "board_preempt_rcu": true,
+    "mark_under_ref_atomic_rmw": true,
+    "mark_before_mapping_opt_in": true,
+    "mark_4k_normal_only": true,
+    "pageflag_uses_test_and_set_bit": true,
+    "armv7_smp_dispatches_atomic_asm": true,
+    "arm_testset_instantiates_testop": true,
+    "arm_testop_dmb_before_and_after": true,
+    "armv7_smp_mb_is_inner_shareable_dmb": true,
+    "reader_rcu_and_fault_safeguard": true,
+    "reader_flag_size_reload_order": true,
+    "reader_second_barrier_after_reload": true,
+    "xarray_reader_load_under_rcu": true,
+    "xarray_node_retired_after_rcu": true,
+    "xarray_slot_rcu_dereference": true,
+    "xarray_reload_rechecks_slot": true,
+    "tagged_final_free_diverted": true,
+    "rcu_work_grace_before_recycle": true,
+    "expedited_gp_before_free": true,
+    "hwpoison_lastfree_exception_has_grace": true,
+    "hwpoison_unmap_exception_has_grace": true,
+    "split_has_rcu_tag_before_tail_switch": true
+  },
+  "negative_controls": {
+    "drop_arm_smp_testop_barrier": [
+      "arm_testop_dmb_before_and_after"
+    ],
+    "drop_atomic_mark": [
+      "mark_under_ref_atomic_rmw",
+      "mark_before_mapping_opt_in"
+    ],
+    "drop_xarray_node_rcu": [
+      "xarray_node_retired_after_rcu"
+    ],
+    "drop_rcu_work_gp": [
+      "rcu_work_grace_before_recycle"
+    ],
+    "drop_expedited_gp": [
+      "expedited_gp_before_free"
+    ]
+  },
+  "s2": "BLOCKED",
+  "s3": "BLOCKED",
+  "rcu_no_ref_default": "OFF",
+  "limitations": [
+    "Confirms symbol and barrier implementation ordering, not CPU-level or LKMM global correctness.",
+    "xas_reload rechecks a cached slot, not allocation-generation identity.",
+    "Last-free and hwpoison/eviction/migration coverage is not a closed-world proof.",
+    "Does not qualify a physical RCU ON test or a BOOT flash."
+  ]
+}

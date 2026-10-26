@@ -1,0 +1,20 @@
+{
+  "android_build_make_git_head": "0b95a0146bfce3c57bd49c45ca1ebbad9b9b3137",
+  "aosp_manifest_name": "SMT311_G1783_G1781_CLEAN_RELEASE_863_AOSP_MANIFEST_20261026.xml",
+  "aosp_manifest_sha256": "2ada3d44f9fc1e568d221d042ee86a7a6947db5b74b09d8764ddc7ff306e8350",
+  "aosp_mismatches": 0,
+  "aosp_repo_count": 863,
+  "date": "2026-10-26",
+  "extra_device_lt013g_head": "67e6439323b0f7b06cccc539b26985100b22e185",
+  "extra_device_lt01_common_head": "0067c3b9b3f9e80a7c9070d2698ed2eeba561a5a",
+  "frameworks_base_git_head": "afbaf1f801d647c08790dac1fd6c60d6af0921de",
+  "frameworks_native_git_head": "fe2f78ad96a243f9d93500a2ed10d8b3d455b145",
+  "kernel_source_head": "45a3082266c1095fc9115815d76e03f20239fa19",
+  "kernel_uname_release": "7.3.0-pjarczak",
+  "no_automated_github_push": true,
+  "published_rom_build_id": "SMT311G1441",
+  "rom_build": "SMT311G1786",
+  "rom_qa_receipt": "G1787_G1786_FINAL_43_FILES_REMOVED_ONLY_BUILDPROP_CHANGED_24_HARDWARE_EXT4_PASS",
+  "skia_git_head": "965e48ffbaa2daf33eb9ddbc20fcf0c0bb3d1058",
+  "status": "G1789_FINAL_PUBLIC_RELEASE_863_AOSP_PLUS_TWO_EXTRA_DEVICE_SOURCE_KERNEL_GIT_HEADS_EXACT"
+}

@@ -1,0 +1,43 @@
+diff --git a/include/fmq/MessageQueue.h b/include/fmq/MessageQueue.h
+index 475c2b0ab1d552c177b1b77e67b5e7c4afc3fd38..8a659f7a9e3ed7b2f2f9669fb3e1268c225ed368 100644
+--- a/include/fmq/MessageQueue.h
++++ b/include/fmq/MessageQueue.h
+@@ -619,7 +619,9 @@ void MessageQueue<T, flavor>::initMemory(bool resetPointers) {
+     mRing = reinterpret_cast<uint8_t*>(mapGrantorDescr(Descriptor::DATAPTRPOS));
+     details::check(mRing != nullptr);
+ 
+-    mEvFlagWord = static_cast<std::atomic<uint32_t>*>(mapGrantorDescr(Descriptor::EVFLAGWORDPOS));
++    mEvFlagWord = mDesc->countGrantors() > Descriptor::EVFLAGWORDPOS
++            ? static_cast<std::atomic<uint32_t>*>(mapGrantorDescr(Descriptor::EVFLAGWORDPOS))
++            : nullptr;
+     if (mEvFlagWord != nullptr) {
+         android::hardware::EventFlag::createEventFlag(mEvFlagWord, &mEventFlag);
+     }
+diff --git a/tests/mq_test.cpp b/tests/mq_test.cpp
+index 96528d3424fc2c5cc5142b7d57c6708d59865ba6..f1cab0fcb4c04f9d3e13416fcbb6ba1154f469e1 100644
+--- a/tests/mq_test.cpp
++++ b/tests/mq_test.cpp
+@@ -313,6 +313,23 @@ TEST_F(QueueSizeOdd, EventFlagTest) {
+     ASSERT_TRUE(ret);
+ }
+ 
++TEST_F(BadQueueConfig, DescriptorWithoutEventFlagGrantor) {
++    MessageQueueSync producer(32, false);
++    ASSERT_TRUE(producer.isValid());
++    ASSERT_EQ(nullptr, producer.getEventFlagWord());
++    ASSERT_NE(nullptr, producer.getDesc());
++
++    MessageQueueSync consumer(*producer.getDesc(), false);
++    ASSERT_TRUE(consumer.isValid());
++    ASSERT_EQ(nullptr, consumer.getEventFlagWord());
++
++    const uint8_t sent[] = {1, 2, 3, 4};
++    uint8_t received[sizeof(sent)] = {};
++    ASSERT_TRUE(producer.write(sent, sizeof(sent)));
++    ASSERT_TRUE(consumer.read(received, sizeof(received)));
++    ASSERT_EQ(0, memcmp(sent, received, sizeof(sent)));
++}
++
+ /*
+  * Verify that a few bytes of data can be successfully written and read.
+  */

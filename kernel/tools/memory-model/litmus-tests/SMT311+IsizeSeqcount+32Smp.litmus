@@ -1,0 +1,44 @@
+C SMT311+IsizeSeqcount+32Smp
+
+(*
+ * G656 Cortex-A9 source-guided i_size_read/i_size_write model.
+ * Writer: write_seqcount_begin -> two halves of 64bit i_size ->
+ * write_seqcount_end (as implemented through LKMM barriers).
+ * Reader: read_seqcount_begin -> two 32bit halves ->
+ * read_seqcount_retry (check that the begin seq equals end, both even).
+ * Exact generated ARMv7 instructions and external writer locks are NOT
+ * modeled, so even a real herd7 result cannot close the full S2 proof.
+ *)
+
+{
+seq=0;
+size_low=0;
+size_high=0;
+}
+
+P0(int *seq, int *size_low, int *size_high)
+{
+	WRITE_ONCE(*seq, 1);
+	smp_wmb();
+	WRITE_ONCE(*size_low, 1);
+	WRITE_ONCE(*size_high, 1);
+	smp_wmb();
+	WRITE_ONCE(*seq, 2);
+}
+
+P1(int *seq, int *size_low, int *size_high)
+{
+	int rseq1;
+	int rlo;
+	int rhi;
+	int rseq2;
+
+	rseq1 = READ_ONCE(*seq);
+	smp_rmb();
+	rlo = READ_ONCE(*size_low);
+	rhi = READ_ONCE(*size_high);
+	smp_rmb();
+	rseq2 = READ_ONCE(*seq);
+}
+
+exists (1:rseq1=0 /\ 1:rlo=1 /\ 1:rhi=0 /\ 1:rseq2=0)

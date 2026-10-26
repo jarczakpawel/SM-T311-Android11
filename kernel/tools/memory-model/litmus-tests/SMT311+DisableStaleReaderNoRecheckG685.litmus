@@ -1,0 +1,36 @@
+C SMT311+DisableStaleReaderNoRecheckG685
+(*
+ * Reader observed key ON OUTSIDE RCU.
+ * Disabler sets OFF then waits GP, allowing mmap writer to skip GP.
+ * Reader enters RCU too late and can still copy despite new VMA.
+ *)
+{
+active=1;
+disabled_done=0;
+published=0;
+}
+P0(int *active,int *disabled_done,int *published)
+{
+ int r0;
+ int r1=2;
+ r0=READ_ONCE(*active);
+ if (r0 == 1) {
+   rcu_read_lock();
+   r1=READ_ONCE(*published);
+   rcu_read_unlock();
+ }
+}
+P1(int *active,int *disabled_done,int *published)
+{
+ WRITE_ONCE(*active,0);
+ synchronize_rcu();
+ WRITE_ONCE(*disabled_done,1);
+}
+P2(int *active,int *disabled_done,int *published)
+{
+ int r2;
+ r2=READ_ONCE(*disabled_done);
+ if (r2 == 1)
+   WRITE_ONCE(*published,1);
+}
+exists (0:r0=1 /\ 0:r1=1 /\ 2:r2=1)

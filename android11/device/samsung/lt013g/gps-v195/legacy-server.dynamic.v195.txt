@@ -1,0 +1,33 @@
+
+Dynamic section at offset 0x1fbc contains 30 entries:
+  Tag        Type                         Name/Value
+ 0x00000001 (NEEDED)                     Shared library: [libc.so]
+ 0x00000001 (NEEDED)                     Shared library: [libm.so]
+ 0x00000001 (NEEDED)                     Shared library: [libdl.so]
+ 0x0000001e (FLAGS)                      BIND_NOW
+ 0x6ffffffb (FLAGS_1)                    Flags: NOW
+ 0x00000015 (DEBUG)                      0x0
+ 0x00000011 (REL)                        0x77c
+ 0x00000012 (RELSZ)                      64 (bytes)
+ 0x00000013 (RELENT)                     8 (bytes)
+ 0x6ffffffa (RELCOUNT)                   8
+ 0x00000017 (JMPREL)                     0x864
+ 0x00000002 (PLTRELSZ)                   288 (bytes)
+ 0x00000003 (PLTGOT)                     0x40b0
+ 0x00000014 (PLTREL)                     REL
+ 0x00000006 (SYMTAB)                     0x1e0
+ 0x0000000b (SYMENT)                     16 (bytes)
+ 0x00000005 (STRTAB)                     0x604
+ 0x0000000a (STRSZ)                      374 (bytes)
+ 0x6ffffef5 (GNU_HASH)                   0x4bc
+ 0x00000004 (HASH)                       0x4d4
+ 0x00000020 (PREINIT_ARRAY)              0x3f80
+ 0x00000021 (PREINIT_ARRAYSZ)            8 (bytes)
+ 0x00000019 (INIT_ARRAY)                 0x3f88
+ 0x0000001b (INIT_ARRAYSZ)               8 (bytes)
+ 0x0000001a (FINI_ARRAY)                 0x3f90
+ 0x0000001c (FINI_ARRAYSZ)               8 (bytes)
+ 0x6ffffff0 (VERSYM)                     0x430
+ 0x6ffffffe (VERNEED)                    0x47c
+ 0x6fffffff (VERNEEDNUM)                 2
+ 0x00000000 (NULL)                       0x0

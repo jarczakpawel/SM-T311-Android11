@@ -1,0 +1,8 @@
+# Legacy vendor hardware watcher receives uevents on a socket already owned by init.
+# Only allow reading that existing socket, not creating/binding new netlink sockets.
+allow init self:netlink_kobject_uevent_socket read;
+
+# G316 physical G301 AVC: init configures the existing cfg80211
+# gtk_rekey_notify tracing node at boot. No other debugfs tree is writable.
+allow init debugfs_wifi_tracing:dir { search write add_name };
+allow init debugfs_wifi_tracing:file { create open write };

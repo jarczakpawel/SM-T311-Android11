@@ -1,0 +1,77 @@
+type lt013g_gps_legacy, domain;
+type lt013g_gps_legacy_exec, exec_type, vendor_file_type, file_type;
+type lt013g_gps_legacy_code_exec, exec_type, vendor_file_type, file_type;
+type lt013g_gps_legacy_code_file, vendor_file_type, file_type;
+type lt013g_gps_rootfs_mountpoint, file_type, data_file_type;
+type_transition lt013g_gps_legacy vendor_data_file:dir lt013g_gps_rootfs_mountpoint "bin";
+type_transition lt013g_gps_legacy vendor_data_file:dir lt013g_gps_rootfs_mountpoint "lib";
+type_transition lt013g_gps_legacy vendor_data_file:dir lt013g_gps_rootfs_mountpoint "usr";
+allow lt013g_gps_legacy lt013g_gps_rootfs_mountpoint:dir { create getattr open read search mounton };
+allow lt013g_gps_legacy lt013g_gps_legacy_code_exec:dir r_dir_perms;
+allow lt013g_gps_legacy lt013g_gps_legacy_code_exec:file { getattr open read execute execute_no_trans map };
+allow lt013g_gps_legacy lt013g_gps_legacy_code_file:dir r_dir_perms;
+allow lt013g_gps_legacy lt013g_gps_legacy_code_file:file { getattr open read execute map };
+
+init_daemon_domain(lt013g_gps_legacy)
+net_domain(lt013g_gps_legacy)
+allow lt013g_gps_legacy dnsproxyd_socket:sock_file write;
+allow lt013g_gps_legacy netd:unix_stream_socket connectto;
+allow hal_gnss_default lt013g_gps_legacy:unix_stream_socket connectto;
+allow lt013g_gps_legacy lt013g_gps_serial_device:chr_file rw_file_perms;
+allow lt013g_gps_legacy sysfs_lt013g_gps_power:file { getattr open read write };
+
+# The isolated legacy sensor HAL reads these three IIO devices. No write permission.
+allow lt013g_gps_legacy sysfs_lt013g_legacy_iio:file r_file_perms;
+
+# Limit writable private GNSS data, IPC FIFO, socket and configuration to five exact paths.
+allow lt013g_gps_legacy lt013g_gps_scratch_data_file:dir create_dir_perms;
+allow lt013g_gps_legacy lt013g_gps_scratch_data_file:file create_file_perms;
+allow lt013g_gps_legacy lt013g_gps_scratch_data_file:fifo_file create_file_perms;
+allow lt013g_gps_legacy lt013g_gps_scratch_data_file:sock_file create_file_perms;
+allow lt013g_gps_legacy sysfs_wake_lock:file { getattr open write };
+
+# G289: required by the *running* stock GPS chroot on this non-Treble
+# system-as-root device. All permissions below correspond to observed AVCs.
+# The legacy launcher bind-mounts its immutable reference filesystem.
+allow lt013g_gps_legacy self:capability { sys_admin chown fowner sys_chroot setgid setuid };
+allow lt013g_gps_legacy rootfs:dir mounton;
+
+# The old GNSS runtime sets root-owned workdir permissions and reads the
+# preserved GPS configuration under /data/vendor/gps/legacy-v195.
+allow lt013g_gps_legacy vendor_data_file:dir { getattr open read search setattr };
+allow lt013g_gps_legacy vendor_data_file:file { getattr open read };
+
+# The immutable vendor GPS ELF is currently labeled vendor_configs_file on
+# this legacy /system/vendor layout. Keep permission within the GPS domain.
+allow lt013g_gps_legacy vendor_configs_file:file { getattr open read execute execute_no_trans map };
+allow lt013g_gps_legacy sysfs_wake_lock:file read;
+allow lt013g_gps_legacy proc_net:file { getattr open read };
+
+# Stock BC4752 gpsd and the Samsung RIL exchange GNSS/modem data on an
+# abstract Unix stream socket. The RIL examines the gpsd process cmdline.
+allow lt013g_gps_legacy rild:unix_stream_socket connectto;
+allow rild lt013g_gps_legacy:dir search;
+allow rild lt013g_gps_legacy:file { getattr open read };
+
+# The legacy launcher uses vendor toybox for archive extraction and rm.
+# Platform toolbox execution is forbidden for vendor HALs in Enforcing.
+allow lt013g_gps_legacy vendor_toolbox_exec:file rx_file_perms;
+
+# G301: physical G300 boot runs vendor /vendor/bin/rm -rf to recreate the
+# private stock GNSS rootfs under /data/vendor/gps/legacy-v195.
+# These are the exact vendor_data_file classes denied for that cleanup.
+allow lt013g_gps_legacy vendor_data_file:dir { create write add_name remove_name rmdir };
+allow lt013g_gps_legacy vendor_data_file:file unlink;
+allow lt013g_gps_legacy vendor_data_file:lnk_file unlink;
+allow lt013g_gps_legacy lt013g_gps_rootfs_mountpoint:dir { write add_name remove_name rmdir };
+
+# G302 physical G301 startup: tar recreates private rootfs files and
+# launcher bind-mounts the private hosts file. No general data paths.
+allow lt013g_gps_legacy vendor_data_file:file { create write setattr mounton };
+allow lt013g_gps_legacy lt013g_gps_rootfs_mountpoint:dir setattr;
+# The stock rootfs contains mixed UID-owned files; GPS launcher is root
+# and requires DAC override during trusted local setup only.
+typeattribute lt013g_gps_legacy lt013g_radio_dac_override_allowed;
+allow lt013g_gps_legacy self:capability { dac_override dac_read_search };
+
+allow lt013g_gps_legacy self:binder { call transfer };

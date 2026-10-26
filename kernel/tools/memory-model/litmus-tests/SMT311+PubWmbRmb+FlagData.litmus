@@ -1,0 +1,29 @@
+C SMT311+PubWmbRmb+FlagData
+
+(*
+ * G654: generic message-passing CONTROL, not the real HOT-page publisher.
+ * With writer smp_wmb() and reader smp_rmb(), seeing a freshly published
+ * flag while missing the earlier data should not be allowed by LKMM.
+ * DO NOT mistake this for a proof of mm/filemap's flag tagging path.
+ *)
+
+{}
+
+P0(int *data, int *flag)
+{
+	WRITE_ONCE(*data, 1);
+	smp_wmb();
+	WRITE_ONCE(*flag, 1);
+}
+
+P1(int *data, int *flag)
+{
+	int r0;
+	int r1;
+
+	r0 = READ_ONCE(*flag);
+	smp_rmb();
+	r1 = READ_ONCE(*data);
+}
+
+exists (1:r0=1 /\ 1:r1=0)

@@ -1,0 +1,32 @@
+type lt013g_modem_watchdog, domain;
+type lt013g_modem_watchdog_exec, exec_type, vendor_file_type, file_type;
+type lt013g_modem_watchdog_probe_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(lt013g_modem_watchdog)
+vendor_internal_prop(lt013g_modem_watchdog_ctl_prop)
+set_prop(lt013g_modem_watchdog, lt013g_modem_watchdog_ctl_prop)
+allow lt013g_modem_watchdog vendor_shell_exec:file rx_file_perms;
+allow lt013g_modem_watchdog vendor_toolbox_exec:file rx_file_perms;
+allow lt013g_modem_watchdog lt013g_modem_watchdog_probe_exec:file rx_file_perms;
+allow lt013g_modem_watchdog sysfs_lt013g_modem_state:file r_file_perms;
+allow lt013g_modem_watchdog lt013g_modem_watchdog_cache_file:dir create_dir_perms;
+allow lt013g_modem_watchdog lt013g_modem_watchdog_cache_file:file create_file_perms;
+allow lt013g_modem_watchdog cache_file:dir { getattr open read search add_name };
+allow lt013g_modem_watchdog cache_file:file r_file_perms;
+allow lt013g_modem_watchdog rild:process sigkill;
+hwbinder_use(lt013g_modem_watchdog)
+binder_call(lt013g_modem_watchdog, hwservicemanager)
+binder_call(lt013g_modem_watchdog, rild)
+hal_client_domain(lt013g_modem_watchdog, hal_telephony)
+file_type_auto_trans(lt013g_modem_watchdog, lt013g_modem_watchdog_cache_file, lt013g_modem_watchdog_cache_file)
+
+# getifaddrs() issues read-only RTM_GETLINK/RTM_GETADDR via NETLINK_ROUTE.
+allow lt013g_modem_watchdog self:netlink_route_socket { create bind getattr getopt setopt read write nlmsg_read };
+
+# Legacy Android 11 watchdog calls the platform settings CLI. Keep its
+# existing behavior rather than duplicating SettingsProvider state in vendor.
+# This is an intentional Treble compatibility exception for this legacy ROM.
+typeattribute lt013g_modem_watchdog vendor_executes_system_violators;
+allow lt013g_modem_watchdog { shell_exec system_file }:file { getattr open read execute execute_no_trans map };
+binder_use(lt013g_modem_watchdog)
+binder_call(lt013g_modem_watchdog, system_server)
+allow lt013g_modem_watchdog { activity_service app_api_service system_api_service }:service_manager find;

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- SM-T311 V183: stable Android 11 OMX software audio registry.
+     Codec2 is disabled on this device until the framework is ported from
+     legacy ION allocation to DMA-BUF heaps used by the Linux 6.12 kernel. -->
+<MediaCodecs>
+    <Include href="media_codecs_google_audio.xml" />
+    <Include href="media_codecs_samsung_video.xml" />
+</MediaCodecs>

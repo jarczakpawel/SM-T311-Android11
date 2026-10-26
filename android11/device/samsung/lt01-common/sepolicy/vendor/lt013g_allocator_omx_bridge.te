@@ -1,0 +1,5 @@
+# Media OMX decoder receives native_handle FDs from platform HIDL allocator.
+# `mediacodec` is vendor-defined; `hal_allocator_server` and the named memfd
+# type are public platform symbols, so platform/vendor policy builds together.
+allow mediacodec hal_allocator_server:fd use;
+allow mediacodec hal_allocator_default_tmpfs:file { getattr read write map };

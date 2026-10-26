@@ -1,0 +1,98 @@
+# SM-T311 V115: deterministic physical ADB over DWC2 peripheral.
+# Standard Android init USB property paths are disabled with configfs=2.
+# usbd + USB Gadget HAL remain the sole ConfigFS/UDC owner.
+
+on early-init
+    # Stop console flooding after second-stage init, but keep every record
+    # in /dev/kmsg. G1154: removed the older /proc/sys/kernel/printk write:
+    # physical vendor_init audit denies it and the operation did NOT apply.
+    # Retain the working USB/DWC2/ConfigFS ownership and ADB behavior.
+    write /sys/module/printk/parameters/ignore_loglevel N
+
+on init
+    # Value 2 matches neither stock configfs=0 nor configfs=1 trigger paths.
+    setprop sys.usb.configfs 2
+    setprop sys.usb.config none
+    setprop service.adb.tcp.port -1
+    setprop vendor.smt311.usb.bootstrap pending
+    setprop vendor.smt311.usb.fallback pending
+
+on post-fs
+    stop usbd
+    stop adbd
+    stop vendor.usb-gadget-hal-1-1
+
+    mkdir /config/usb_gadget/g1 0770 shell shell
+    write /config/usb_gadget/g1/idVendor 0x18d1
+    write /config/usb_gadget/g1/idProduct 0x4ee7
+    write /config/usb_gadget/g1/bcdDevice 0x0100
+    write /config/usb_gadget/g1/bcdUSB 0x0200
+
+    mkdir /config/usb_gadget/g1/strings/0x409 0770 shell shell
+    write /config/usb_gadget/g1/strings/0x409/serialnumber ${ro.serialno}
+    write /config/usb_gadget/g1/strings/0x409/manufacturer Samsung
+    write /config/usb_gadget/g1/strings/0x409/product "SM-T311 Android 11"
+
+    mkdir /config/usb_gadget/g1/configs/b.1 0770 shell shell
+    mkdir /config/usb_gadget/g1/configs/b.1/strings/0x409 0770 shell shell
+    write /config/usb_gadget/g1/configs/b.1/MaxPower 500
+    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration adb
+
+    mkdir /config/usb_gadget/g1/functions/ffs.adb 0770 shell shell
+    # G428: prepare stock Android 11 MTP/PTP FunctionFS instances only.
+    # DO NOT link either function or change the proven ADB-only default/UDC.
+    mkdir /config/usb_gadget/g1/functions/ffs.mtp 0770 shell shell
+    mkdir /config/usb_gadget/g1/functions/ffs.ptp 0770 shell shell
+    write /config/usb_gadget/g1/os_desc/use 1
+    write /config/usb_gadget/g1/os_desc/b_vendor_code 0x1
+    write /config/usb_gadget/g1/os_desc/qw_sign MSFT100
+    symlink /config/usb_gadget/g1/configs/b.1 /config/usb_gadget/g1/os_desc/b.1
+
+    setprop sys.usb.controller 12480000.usb
+
+on post-fs-data
+    mkdir /data/smt311-v115 0755 root root
+    restorecon_recursive /data/smt311-v115
+    restorecon /system/bin/smt311-usb-v115
+
+# Start only after the system-side init action mounts FunctionFS. Vendor
+# services are forbidden from mounting filesystems in Android 11 Enforcing.
+on property:vendor.smt311.usb.bootstrap=mount-ready
+    start smt311-usb-v115-bootstrap
+
+on property:vendor.smt311.usb.bootstrap=ready
+    setprop sys.usb.configfs 2
+    setprop persist.sys.usb.config adb
+    setprop sys.usb.config adb
+    setprop service.adb.tcp.port -1
+    # HAL must be registered before usbd requests ADB; adbd then opens ep0/ep1/ep2.
+    start vendor.usb-gadget-hal-1-1
+    start usbd
+    start adbd
+
+# G286: The original V115 bootstrap can report ready while the Gadget HAL
+# never pulls up DWC2. Android's standard configfs=1 rules are intentionally
+# disabled here, so explicitly attach ADB once FunctionFS descriptors exist.
+# This is only a fallback: if the HAL already attached the gadget, duplicate
+# symlink/UDC writes fail harmlessly and the existing connection is kept.
+# G428: the legacy ADB-only fallback must NOT attach ffs.adb while the
+# system USB Gadget HAL owns an MTP/PTP or composite-function transition.
+on property:sys.usb.ffs.ready=1 && property:sys.usb.configfs=2 && property:sys.usb.config=adb && property:vendor.smt311.usb.fallback=pending
+    symlink /config/usb_gadget/g1/functions/ffs.adb /config/usb_gadget/g1/configs/b.1/f1
+    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+    setprop vendor.smt311.usb.fallback done
+    setprop sys.usb.state adb
+    write /sys/class/udc/12480000.usb/uevent change
+
+# The Android USB UI can toggle adbd after V115 bootstrap has already run.
+# Re-enable it for ADB-only mode without needing a full bootstrap rerun.
+on property:sys.usb.config=adb && property:sys.usb.configfs=2
+    start adbd
+
+service smt311-usb-v115-bootstrap /system/bin/smt311-usb-v115 bootstrap
+    class core
+    user root
+    group root shell system
+    disabled
+    oneshot
+

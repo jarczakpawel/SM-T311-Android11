@@ -1,0 +1,13 @@
+get_prop(bootanim, userspace_reboot_exported_prop)
+get_prop(zygote, exported_camera_prop)
+
+# G1138: On SM-T311 Android 11, target_compatible_property is not enabled.
+# Consequently the AOSP domain.te compatible_property_only(...) grant for
+# exported_camera_prop is excluded from compiled plat_sepolicy.cil.
+# The real enforcing boot AVCs explicitly deny ONLY read for these domains:
+#   system_server -> exported_camera_prop:file read
+#   platform_app (com.android.camera2) -> exported_camera_prop:file read
+# Keep the dedicated, read-only property-file macro. Do not grant writes,
+# set_prop, other cameras/services, global appdomain or permissive access.
+get_prop(system_server, exported_camera_prop)
+get_prop(platform_app, exported_camera_prop)

@@ -1,0 +1,8 @@
+// Copyright (C) 2026 Pawel Jarczak
+prebuilt_etc {
+    name: "manifest.lt013g.omx.xml",
+    src: "manifest.omx.xml",
+    vendor: true,
+    sub_dir: "vintf/manifest",
+    filename: "manifest.lt013g.omx.xml",
+}

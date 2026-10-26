@@ -1,0 +1,5 @@
+# Merge this entry into the final vendor fstab after storage bring-up:
+# /dev/block/zram0 none swap defaults zramsize=50%,swapprio=32758
+#
+# 50% of physically verified 1.5 GiB RAM gives approximately 768 MiB zram.
+# No swap file or swap partition on eMMC is used.

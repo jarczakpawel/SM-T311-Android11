@@ -1,0 +1,35 @@
+C SMT311+RCUGraceLastFree
+
+(*
+ * G658: real LKMM RCU grace-period control adapted from documented
+ * RCU+sync+free, for conceptual filecache slot update + old page reuse.
+ * The writer must not alter old folio contents until synchronize_rcu().
+ * x models old contents, y points to old x, z is replacement.
+ * This does NOT model XArray/folio PG_rcu_free or call_rcu internals.
+ *)
+
+{
+x=1;
+y=x;
+z=2;
+}
+
+P0(int *x, int *z, int **y)
+{
+	int *r0;
+	int r1;
+
+	rcu_read_lock();
+	r0 = rcu_dereference(*y);
+	r1 = READ_ONCE(*r0);
+	rcu_read_unlock();
+}
+
+P1(int *x, int *z, int **y)
+{
+	rcu_assign_pointer(*y, z);
+	synchronize_rcu();
+	WRITE_ONCE(*x, 2);
+}
+
+exists (0:r0=x /\ 0:r1=2)

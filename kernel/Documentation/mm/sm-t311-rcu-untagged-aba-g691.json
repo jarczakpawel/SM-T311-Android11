@@ -1,0 +1,121 @@
+{
+  "stage": "G691",
+  "earlier_G659_four_LKMM_diagnostics_NOT_new_discovery": {
+    "SMT311+XALockUnmarkedABA": "Sometimes",
+    "SMT311+XALockGraceABA": "Sometimes",
+    "SMT311+XALockOldNewGenNoGrace": "Sometimes",
+    "SMT311+XALockOldNewGenGrace": "Sometimes"
+  },
+  "incremental_value_vs_G659": "G691 adds source-anchored explicit old-untagged -> buddy last put -> same physical P reallocation -> same mapping/index new tag before stale reader checks; G659 had synthetic LKMM pointer/generation observations.",
+  "result": "UNMARKED-to-marked physical PFN reuse is an abstract ABA witness, not a proven live kernel corruption",
+  "source_guards": {
+    "RCU_read_section_brackets_raw_lookup": true,
+    "raw_XArray_then_later_flag_test": true,
+    "reader_rechecks_slot_then_mapping": true,
+    "reader_has_no_generation_or_reference_acquire": true,
+    "reader_checks_inode_size_before_reload": true,
+    "reader_limits_normal_order_zero": true,
+    "mark_only_when_opt_in_and_marked_hot": true,
+    "mark_sets_mapping_eligible_only_if_still_mapped": true,
+    "single_remove_drops_xarray_slot_then_mapping": true,
+    "single_and_batch_preserve_tag_during_inode_exit_on_T311": true,
+    "last_put_checks_tag_before_buddy": true,
+    "unmarked_free_has_ordinary_allocator_path": true,
+    "defer_queues_folio_to_pending_before_start": true,
+    "rcu_work_only_frees_after_callback": true,
+    "RCU_disabled_by_default_on_SM_T311": true,
+    "no_global_mapping_generation_marker": true,
+    "user_backed_iter_g689_guard_preserved": true,
+    "safety_flag_pg_rcu_free_exists": true,
+    "last_ref_calls_normal_page_free": true
+  },
+  "source_guards_passed": 19,
+  "actual_modified_source_inputs_rejected": {
+    "remove_raw_slot_reload": [
+      "raw_XArray_then_later_flag_test",
+      "reader_rechecks_slot_then_mapping",
+      "reader_checks_inode_size_before_reload"
+    ],
+    "remove_flag_test": [
+      "raw_XArray_then_later_flag_test"
+    ],
+    "remove_mapping_identity": [
+      "reader_rechecks_slot_then_mapping"
+    ],
+    "replace_deferred_free_by_direct": [
+      "last_put_checks_tag_before_buddy"
+    ],
+    "remove_last_put_tag_clear": [
+      "last_put_checks_tag_before_buddy"
+    ],
+    "drop_inode_exit_tag_preservation": [
+      "single_and_batch_preserve_tag_during_inode_exit_on_T311"
+    ],
+    "drop_pending_rcu_work_enqueue": [
+      "defer_queues_folio_to_pending_before_start"
+    ],
+    "remove_reader_RCU_lock": [
+      "RCU_read_section_brackets_raw_lookup"
+    ],
+    "drop_user_iterator_whitelist": [
+      "user_backed_iter_g689_guard_preserved"
+    ]
+  },
+  "interleaving": {
+    "initial_xarray_folio_UNTAGGED_can_free_and_reuse": {
+      "states": 54,
+      "terminal_sequences": 2,
+      "accepted_states_old": 0,
+      "accepted_states_with_recycled_same_PFN": 2,
+      "ABA_witness": [
+        "R_LOAD",
+        "W_REMOVE",
+        "W_LAST_PUT",
+        "W_REUSE",
+        "W_INSERT",
+        "W_MARK",
+        "R_FLAG",
+        "R_SIZE",
+        "R_RELOAD",
+        "R_MAP",
+        "R_COPY"
+      ]
+    },
+    "initial_xarray_folio_TAGGED_waits_grace_before_reuse": {
+      "states": 47,
+      "terminal_sequences": 3,
+      "accepted_states_old": 9,
+      "accepted_states_with_recycled_same_PFN": 0,
+      "ABA_witness": null
+    },
+    "hypothetical_atomic_generation_identity_comparison": {
+      "states": 54,
+      "terminal_sequences": 2,
+      "accepted_states_old": 0,
+      "accepted_states_with_recycled_same_PFN": 0,
+      "ABA_witness": null
+    }
+  },
+  "witness_assumptions": [
+    "Two generations of a physical struct page pointer P appear in the SAME mapping inode/index; XArray has no unique generation token checked by reader.",
+    "First generation is untagged, so final put may return it to buddy before old RCU reader has finished processing its raw xas_load pointer.",
+    "Second generation is inserted and becomes hot/PG_rcu_free marked before the reader tests the raw pointer's flag.",
+    "The reader's xas_reload compares pointer P with pointer P and the mapping field also matches. This allows an abstract ABA acceptance.",
+    "Folio content validity, i_size, pagefault and cache behavior are simplified; no real UAF or corruption reproduced on SM-T311.",
+    "The no-witness tagged-old result applies ONLY to the G691 simplified two-task model; G659 synthetic grace LKMM variants had Sometimes outcomes and are not resolved or disproved by this test."
+  ],
+  "blocking_decision": "S2 ARMv7 PFN/ABA BLOCKED. The existing guards alone cannot be claimed to universally rule out this scenario.",
+  "safe_alternatives_to_research": [
+    "Generation identity coupled atomically to XArray slot and validated before/after dereference (requires rigorous design).",
+    "RCU grace delayed reuse for ALL candidate ext4 pagecache folios (potentially prohibitive Normal memory overhead).",
+    "Reference-acquiring fallback before unpinned dereference, or ship normal RCU-OFF kernel only."
+  ],
+  "no_changes_to_executable_sources": true,
+  "physical": "G650, unchanged",
+  "staged_runtime_sources_NOT_INSTALLED": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

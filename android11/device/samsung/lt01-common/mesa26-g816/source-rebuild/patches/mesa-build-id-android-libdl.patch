@@ -1,0 +1,13 @@
+--- a/src/util/build_id.h
++++ b/src/util/build_id.h
+@@ -26,7 +26,9 @@
+ 
+ #include "detect_os.h"
+ 
+-#if defined(HAVE_DL_ITERATE_PHDR) || DETECT_OS_APPLE
++/* Android API 21+ declares dl_iterate_phdr in link.h and exports it from
++ * libdl.so. Clang 11/Meson cross checks miss it when testing libc alone. */
++#if defined(HAVE_DL_ITERATE_PHDR) ||    (defined(__ANDROID__) && __ANDROID_API__ >= 21) || DETECT_OS_APPLE
+ #define HAVE_BUILD_ID 1
+ #else
+ #define HAVE_BUILD_ID 0

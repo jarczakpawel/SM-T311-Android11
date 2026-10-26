@@ -1,0 +1,5 @@
+cc_binary {
+    name: "t311-aaudio-rate-probe",
+    srcs: ["aaudio-rate-probe.c"],
+    shared_libs: ["libaaudio"],
+}

@@ -1,0 +1,83 @@
+{
+  "stage": "G678",
+  "tool": "real herdtools7 LKMM",
+  "tool_version": "7.58, Rev: exported",
+  "config": "tools/memory-model/linux-kernel.cfg",
+  "models": {
+    "without_grace": {
+      "name": "SMT311+CrossInodeRecycledBeforeGraceG678",
+      "model_file": "tools/memory-model/litmus-tests/SMT311+CrossInodeRecycledBeforeGraceG678.litmus",
+      "model_sha256": "71780e3f7a2c528116fd3110ac7483dc948b43fb1d394ad7d95416bd7196fc51",
+      "outcome": "Sometimes",
+      "positive_witnesses": 6,
+      "negative_witnesses": 318,
+      "herd7_normalized_stdout_sha256": "29bc73e6b47d3c7bea01022015f6cd2e8a35eeaf6c6234ce3e3794130b01184a",
+      "herd7_observation": "Observation SMT311+CrossInodeRecycledBeforeGraceG678 Sometimes 6 318",
+      "herd7_outcome_footer": "2=1; 0:r3=1; 0:r4=1; 0:r5=3;\n0:r0=1; 0:r1=3; 0:r2=1; 0:r3=1; 0:r4=2; 0:r5=3;\nOk\nWitnesses\nPositive: 6 Negative: 318\nCondition exists (0:r0=1 /\\ 0:r1=1 /\\ 0:r2=1 /\\ 0:r3=1 /\\ 0:r4=1 /\\ 0:r5=3)\nObservation SMT311+CrossInodeRecycledBeforeGraceG678 Sometimes 6 318\nHash=69a3ca3dbaf46d6eec975cabe6bd2bcf"
+    },
+    "with_grace": {
+      "name": "SMT311+CrossInodeRecycledAfterGraceG678",
+      "model_file": "tools/memory-model/litmus-tests/SMT311+CrossInodeRecycledAfterGraceG678.litmus",
+      "model_sha256": "bd60316347973318f7b0573f473aefa3f6da2c8df43aec63c2b0e422b4134fef",
+      "outcome": "Never",
+      "positive_witnesses": 0,
+      "negative_witnesses": 71,
+      "herd7_normalized_stdout_sha256": "e5af692fb9651e2f3057281f14acd31ac785945a4e59bcebb2fc1fd3a529db3d",
+      "herd7_observation": "Observation SMT311+CrossInodeRecycledAfterGraceG678 Never 0 71",
+      "herd7_outcome_footer": "=3; 0:r2=0; 0:r3=1; 0:r4=1; 0:r5=3;\n0:r0=1; 0:r1=3; 0:r2=0; 0:r3=1; 0:r4=2; 0:r5=3;\nNo\nWitnesses\nPositive: 0 Negative: 71\nCondition exists (0:r0=1 /\\ 0:r1=1 /\\ 0:r2=1 /\\ 0:r3=1 /\\ 0:r4=1 /\\ 0:r5=3)\nObservation SMT311+CrossInodeRecycledAfterGraceG678 Never 0 71\nHash=7532ba21c66af91efd900060b823889e"
+    },
+    "barrier_not_grace": {
+      "name": "SMT311+CrossInodeBarrierNotGraceG678",
+      "model_file": "tools/memory-model/litmus-tests/SMT311+CrossInodeBarrierNotGraceG678.litmus",
+      "model_sha256": "b568bf50cf9db7c45be47f367d6f74055198c23d5aa6267780b4a31af79e56e0",
+      "outcome": "Sometimes",
+      "positive_witnesses": 4,
+      "negative_witnesses": 233,
+      "herd7_normalized_stdout_sha256": "4ca8edadd2c88fb4ce819224ae81da786693a1344e4af8a63f277b2ab07933b9",
+      "herd7_observation": "Observation SMT311+CrossInodeBarrierNotGraceG678 Sometimes 4 233",
+      "herd7_outcome_footer": "0:r2=1; 0:r3=1; 0:r4=1; 0:r5=3;\n0:r0=1; 0:r1=3; 0:r2=1; 0:r3=1; 0:r4=2; 0:r5=3;\nOk\nWitnesses\nPositive: 4 Negative: 233\nCondition exists (0:r0=1 /\\ 0:r1=1 /\\ 0:r2=1 /\\ 0:r3=1 /\\ 0:r4=1 /\\ 0:r5=3)\nObservation SMT311+CrossInodeBarrierNotGraceG678 Sometimes 4 233\nHash=516eefeb574f9a87d2696aa321970a66"
+    },
+    "reader_without_rcu": {
+      "name": "SMT311+CrossInodeReaderNoRCUG678",
+      "model_file": "tools/memory-model/litmus-tests/SMT311+CrossInodeReaderNoRCUG678.litmus",
+      "model_sha256": "14befd90984707547a63efc0c167f36010844c0d3d8f33459c9c3bbff17aee88",
+      "outcome": "Sometimes",
+      "positive_witnesses": 4,
+      "negative_witnesses": 233,
+      "herd7_normalized_stdout_sha256": "97c55706f2d68f4a04300c38ecd02c6fd989e4cd7c5cdc3a9acff8ddd87ff32c",
+      "herd7_observation": "Observation SMT311+CrossInodeReaderNoRCUG678 Sometimes 4 233",
+      "herd7_outcome_footer": "1=3; 0:r2=1; 0:r3=1; 0:r4=1; 0:r5=3;\n0:r0=1; 0:r1=3; 0:r2=1; 0:r3=1; 0:r4=2; 0:r5=3;\nOk\nWitnesses\nPositive: 4 Negative: 233\nCondition exists (0:r0=1 /\\ 0:r1=1 /\\ 0:r2=1 /\\ 0:r3=1 /\\ 0:r4=1 /\\ 0:r5=3)\nObservation SMT311+CrossInodeReaderNoRCUG678 Sometimes 4 233\nHash=154c01c32b22c0ea7699481192ae92a8"
+    }
+  },
+  "output_normalization": "Removed only volatile Time line from actual herd7 stdout before hashing and storing footer.",
+  "source_gates": {
+    "reader_rcu_critical_section": true,
+    "reader_first_xas_load": true,
+    "reader_flag_check": true,
+    "reader_order_flag_before_reload": true,
+    "reader_includes_barriers": true,
+    "reader_checks_file_mapping": true,
+    "source_no_generation_comparison": true,
+    "G674_single_inode_exit_keeps_tag": true,
+    "G674_batch_inode_exit_keeps_tag": true,
+    "allocator_clears_flag_on_final_put": true,
+    "allocator_defers_reuse_when_tagged": true,
+    "rcu_worker_uses_queued_grace": true
+  },
+  "source_gates_passed": 12,
+  "paired_negative_controls": [
+    "Removing RCU grace allows the mixed-generation condition.",
+    "Replacing grace with smp_mb also allows mixed-generation outcome.",
+    "Removing the reader RCU read-side critical section allows mixed-generation outcome."
+  ],
+  "interpretation": "RCU GP + reader lock prevents this particular modeled cross-inode tag-generation observation under LKMM; full memory barrier does not substitute for GP.",
+  "critical_limits": [
+    "Abstract scalar slot=1 is a numeric same-address pointer, generation is a TEST oracle not present in kernel.",
+    "Writer serializes inode A, B and C but does not model all XArray nodes, allocator reuse or RCU callback queue details.",
+    "The oracle generation reads add ordering/constraints absent from the actual ref-free reader.",
+    "LKMM is a portable kernel memory model, not a complete ARMv7 machine/cache/HIGHMEM execution proof.",
+    "An allowed mixed-generation condition is NOT a live UAF; its absence is NOT proof whole algorithm is safe.",
+    "The special G674 inode-exit tag preservation is STAGED NOT INSTALLED; physical kernel G650 remains default-OFF.",
+    "S2/S3 remain BLOCKED; no-ref RCU ON is NOT approved."
+  ]
+}

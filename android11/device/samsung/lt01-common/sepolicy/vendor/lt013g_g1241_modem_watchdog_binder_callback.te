@@ -1,0 +1,14 @@
+# G1241 — exact physical G1233 SELinux Enforcing callback denial:
+# 2026-10-25 05:42:55 avc denied { call } for comm="Binder:392_7"
+# scontext=u:r:system_server:s0
+# tcontext=u:r:lt013g_modem_watchdog:s0
+# tclass=binder permissive=0
+#
+# The guarded modem watchdog invokes Android Settings via the platform cmd
+# tool, which already has watchdog -> system_server binder_call in
+# lt013g_modem_watchdog.te. Android may callback into that client.
+# Grant ONLY the reverse binder call, not transfer/impersonation or other
+# daemon/system_server rights. Keep previous FD-use and FIFO-write rules.
+#
+# HOST SOURCE CANDIDATE: no physical watchdog failure/recovery claim.
+allow system_server lt013g_modem_watchdog:binder call;

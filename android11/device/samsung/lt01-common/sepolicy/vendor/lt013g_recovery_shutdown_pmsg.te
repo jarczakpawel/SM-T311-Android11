@@ -1,0 +1,4 @@
+# SM-T311 G471 forensic traces: allow *only* Android init to write to
+# pmsg, while all existing pmsg/PMIC/USB SELinux restrictions remain.
+# /dev/pmsg0 is a kernel-owned bounded circular persistent-ram log.
+allow init pmsg_device:chr_file write;

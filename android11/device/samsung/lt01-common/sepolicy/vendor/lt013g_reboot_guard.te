@@ -1,0 +1,6 @@
+type lt013g_reboot_guard, domain;
+type lt013g_reboot_guard_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(lt013g_reboot_guard)
+
+get_prop(lt013g_reboot_guard, powerctl_prop)
+allow lt013g_reboot_guard self:capability sys_boot;

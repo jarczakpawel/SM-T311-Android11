@@ -1,0 +1,267 @@
+{
+  "stage": "G694",
+  "baseline_git_commit": "a2fca4558",
+  "target_last_executable_source_commit": "7d567ea29",
+  "real_independent_ARM32_object_build": true,
+  "compiler_same": true,
+  "config_byte_identical": true,
+  "source_and_machine_code_gates": {
+    "old_source_provenance_is_G650": true,
+    "exact_matching_config": true,
+    "exact_matching_compiler": true,
+    "release_uses_RCU_OFF": true,
+    "same_UTS_RELEASE_both": true,
+    "baseline_filemap_no_RCU_stub_call": true,
+    "release_filemap_no_RCU_stub_call": true,
+    "filemap_identical_machine_instruction_words": true,
+    "filemap_no_instruction_reduction": true,
+    "G650_shmem_did_call_noop_stub": true,
+    "G694_release_shmem_no_stub_call": true,
+    "shmem_instructions_reduced_by_14": true,
+    "shmem_code_bytes_reduced_by_56": true,
+    "source_shmem_only_REMOVED_stub_call_when_PAGE_RCU_FREE_OFF": true,
+    "release_shmem_copy_path_still_uses_folio_reference": true,
+    "release_pagecache_read_still_gets_referenced_folios": true,
+    "G692_failclosed_still_present": true
+  },
+  "source_gates_passed": 17,
+  "mutated_real_comparison_inputs_detected": {
+    "invent_G687_speedup": [
+      "filemap_identical_machine_instruction_words"
+    ],
+    "delete_G688_benefit": [
+      "shmem_instructions_reduced_by_14",
+      "shmem_code_bytes_reduced_by_56"
+    ],
+    "reintroduce_G650_shmem_stub": [
+      "G694_release_shmem_no_stub_call"
+    ],
+    "mismatched_kernel_config": [
+      "exact_matching_config"
+    ],
+    "mismatched_toolchain": [
+      "exact_matching_compiler"
+    ],
+    "remove_SOURCE_release_guard": [
+      "source_shmem_only_REMOVED_stub_call_when_PAGE_RCU_FREE_OFF"
+    ],
+    "remove_folio_put_runtime_call": [
+      "release_pagecache_read_still_gets_referenced_folios"
+    ]
+  },
+  "objects": {
+    "g650": {
+      "mm/filemap.o": {
+        "elf_sha256": "93a1c7b572b087ac8b307b0e8f82c2803a9309de19ca36caf4e2357f3a000080",
+        "size_bytes": 1236,
+        "section_address": 22220,
+        "opcode_count": 309,
+        "relocations": [
+          [
+            "R_ARM_CALL",
+            "memset"
+          ],
+          [
+            "R_ARM_CALL",
+            "folio_mark_accessed"
+          ],
+          [
+            "R_ARM_CALL",
+            "flush_dcache_folio"
+          ],
+          [
+            "R_ARM_CALL",
+            "copy_page_to_iter"
+          ],
+          [
+            "R_ARM_CALL",
+            "folio_unlock"
+          ],
+          [
+            "R_ARM_CALL",
+            "__folio_put"
+          ],
+          [
+            "R_ARM_CALL",
+            "touch_atime"
+          ],
+          [
+            "R_ARM_CALL",
+            "__stack_chk_fail"
+          ]
+        ]
+      },
+      "mm/shmem.o": {
+        "elf_sha256": "ee99705b9e971b996d515458093a2238bf54653369fd34748e5a129022352f57",
+        "size_bytes": 976,
+        "section_address": 19684,
+        "opcode_count": 244,
+        "relocations": [
+          [
+            "R_ARM_CALL",
+            "filemap_read_rcu"
+          ],
+          [
+            "R_ARM_CALL",
+            "folio_unlock"
+          ],
+          [
+            "R_ARM_CALL",
+            "flush_dcache_folio"
+          ],
+          [
+            "R_ARM_CALL",
+            "filemap_read_accessed"
+          ],
+          [
+            "R_ARM_CALL",
+            "copy_page_to_iter"
+          ],
+          [
+            "R_ARM_MOVW_ABS_NC",
+            "__zero_page"
+          ],
+          [
+            "R_ARM_MOVT_ABS",
+            "__zero_page"
+          ],
+          [
+            "R_ARM_CALL",
+            "copy_page_to_iter"
+          ],
+          [
+            "R_ARM_CALL",
+            "__folio_put"
+          ],
+          [
+            "R_ARM_CALL",
+            "touch_atime"
+          ],
+          [
+            "R_ARM_CALL",
+            "__folio_put"
+          ],
+          [
+            "R_ARM_CALL",
+            "iov_iter_zero"
+          ],
+          [
+            "R_ARM_CALL",
+            "__stack_chk_fail"
+          ]
+        ]
+      }
+    },
+    "release_rcu_off": {
+      "mm/filemap.o": {
+        "elf_sha256": "3973982c11eb2c4f32e7e5ce700907bf9023f7cc833283a76045903385c0b7a4",
+        "size_bytes": 1236,
+        "section_address": 22220,
+        "opcode_count": 309,
+        "relocations": [
+          [
+            "R_ARM_CALL",
+            "memset"
+          ],
+          [
+            "R_ARM_CALL",
+            "folio_mark_accessed"
+          ],
+          [
+            "R_ARM_CALL",
+            "flush_dcache_folio"
+          ],
+          [
+            "R_ARM_CALL",
+            "copy_page_to_iter"
+          ],
+          [
+            "R_ARM_CALL",
+            "folio_unlock"
+          ],
+          [
+            "R_ARM_CALL",
+            "__folio_put"
+          ],
+          [
+            "R_ARM_CALL",
+            "touch_atime"
+          ],
+          [
+            "R_ARM_CALL",
+            "__stack_chk_fail"
+          ]
+        ]
+      },
+      "mm/shmem.o": {
+        "elf_sha256": "9deeaf67d0ccc296ef2122cf6efaf0e004e2967c8652bd981dec01f28e374031",
+        "size_bytes": 920,
+        "section_address": 19424,
+        "opcode_count": 230,
+        "relocations": [
+          [
+            "R_ARM_CALL",
+            "folio_unlock"
+          ],
+          [
+            "R_ARM_CALL",
+            "flush_dcache_folio"
+          ],
+          [
+            "R_ARM_CALL",
+            "filemap_read_accessed"
+          ],
+          [
+            "R_ARM_CALL",
+            "copy_page_to_iter"
+          ],
+          [
+            "R_ARM_MOVW_ABS_NC",
+            "__zero_page"
+          ],
+          [
+            "R_ARM_MOVT_ABS",
+            "__zero_page"
+          ],
+          [
+            "R_ARM_CALL",
+            "copy_page_to_iter"
+          ],
+          [
+            "R_ARM_CALL",
+            "__folio_put"
+          ],
+          [
+            "R_ARM_CALL",
+            "__folio_put"
+          ],
+          [
+            "R_ARM_CALL",
+            "touch_atime"
+          ],
+          [
+            "R_ARM_CALL",
+            "iov_iter_zero"
+          ],
+          [
+            "R_ARM_CALL",
+            "__stack_chk_fail"
+          ]
+        ]
+      }
+    }
+  },
+  "findings": [
+    "filemap_read: 309 identical ARM instruction words at G650 and current RCU OFF; no extra compiled speed gain from G687 despite cleaner C.",
+    "shmem_file_read_iter: G650 had 244 instructions and R_ARM_CALL filemap_read_rcu; current RCU OFF has 230 and zero such calls, 56 bytes smaller after G688.",
+    "Opcode/instruction counts are static. This is NOT measured throughput, power, cache misses or latency on physical SM-T311.",
+    "Neither host object nor host zImage is Samsung boot.img; physical BOOT remains G650."
+  ],
+  "safety": "G692 experimental RCU ON fail-closed remains -EOPNOTSUPP, no new runtime C change",
+  "staged_runtime_files_NOT_INSTALLED": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

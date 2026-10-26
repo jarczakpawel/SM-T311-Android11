@@ -1,0 +1,4 @@
+# SM-T311 A1 - LP8556 panel backlight + regulator touch-key LED.
+allow hal_light_default sysfs_leds:dir r_dir_perms;
+allow hal_light_default sysfs_leds:file rw_file_perms;
+allow hal_light_default sysfs:lnk_file read;

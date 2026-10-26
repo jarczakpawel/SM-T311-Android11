@@ -1,0 +1,36 @@
+C SMT311+MmapTwoWritersSkipGraceG682
+(*
+ * P1 reserves the first writable mmap then waits for RCU GP.
+ * P2 sees positive counter from P1, "optimizes" away its own GP,
+ * and publishes a different VMA before P1 finishes the GP.
+ * The reader that observed zero can still overlap P2's published VMA.
+ * Count and VMA are abstractions, not real kernel VMAs.
+ *)
+{
+count=0;
+published2=0;
+published1=0;
+}
+P0(int *count, int *published1, int *published2)
+{
+ int r0;
+ int r1;
+ rcu_read_lock();
+ r0 = READ_ONCE(*count);
+ r1 = READ_ONCE(*published2);
+ rcu_read_unlock();
+}
+P1(int *count, int *published1, int *published2)
+{
+ WRITE_ONCE(*count, 1);
+ synchronize_rcu();
+ WRITE_ONCE(*published1, 1);
+}
+P2(int *count, int *published1, int *published2)
+{
+ int r2;
+ r2 = READ_ONCE(*count);
+ if (r2 == 1)
+   WRITE_ONCE(*published2, 1);
+}
+exists (0:r0=0 /\ 0:r1=1 /\ 2:r2=1)

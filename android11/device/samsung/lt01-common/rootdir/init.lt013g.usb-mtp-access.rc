@@ -1,0 +1,5 @@
+on property:vendor.smt311.usb.bootstrap=ready
+    chmod 0711 /dev/usb-ffs
+
+on property:sys.boot_completed=1
+    chmod 0711 /dev/usb-ffs

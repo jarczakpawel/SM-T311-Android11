@@ -1,0 +1,125 @@
+{
+  "stage": "G684",
+  "kind": "Linux herdtools7 LKMM + source/config-anchored OFF->ON / mmap race gate",
+  "source_predicates": {
+    "defconfig_preempt_rcu": true,
+    "ARM32_TEST_CONFIG_EXP_ON": true,
+    "ARM32_TEST_CONFIG_PAGE_RCU_FREE_ON": true,
+    "ARM32_TEST_CONFIG_DEBUGFS_ON": true,
+    "defconfig_no_jump_label": true,
+    "no_jump_label_static_key_is_count_test": true,
+    "SMT311_runtime_key_default_FALSE": true,
+    "debugfs_toggle_sets_reader_key": true,
+    "debugfs_toggle_NOT_serialized_with_mmap_writer": true,
+    "reader_active_decision_before_enter_RCU": true,
+    "writable_counter_file_shared": true,
+    "writable_count_published_before_writer_grace": true,
+    "writer_GP_before_VMA_publication": true,
+    "writer_ext4_scope": true,
+    "writer_does_NOT_observe_runtime_key_before_GP": true,
+    "reader_has_no_global_serialize_mmap_lock": true,
+    "runtime_key_toggle_does_not_wait_writers": true,
+    "RCU_synchronize_wait_contract_present": true
+  },
+  "source_predicates_pass": 18,
+  "ARM32_experiment_ENABLED_objects": {
+    "mm/vma.o": {
+      "sha256": "44b34ee4375bb401fe3084ec633c064dd968f63503ff43c05e8abfef9bf19870",
+      "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g633-armv7-rcu-zone-guard/mm/vma.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped"
+    },
+    "mm/filemap.o": {
+      "sha256": "0c97df92e8c15d5163ea91e7c54ad0ac20c7b71297c6a5b31f440dece0cdf9c1",
+      "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g633-armv7-rcu-zone-guard/mm/filemap.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped"
+    },
+    "mm/page_alloc.o": {
+      "sha256": "2c8cd516d5c81a843b783c7ae097af518c9034304a63d738d164ace6d8fa2873",
+      "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g633-armv7-rcu-zone-guard/mm/page_alloc.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped"
+    }
+  },
+  "previous_false_config": "g674-inode-aba-safety had EXPERIMENT disabled: earlier mm/vma.o ARM32 check did NOT compile the guarded code",
+  "active_test_config": "g633-armv7-rcu-zone-guard enables SM_T311_RCU_HOT4K_EXPERIMENT, PAGE_RCU_FREE and DEBUG_FS",
+  "changed_source_negative_controls": {
+    "runtime_key_default_ON": [
+      "SMT311_runtime_key_default_FALSE"
+    ],
+    "toggle_no_enable": [
+      "debugfs_toggle_sets_reader_key"
+    ],
+    "reader_before_RCU_count_check": [
+      "reader_active_decision_before_enter_RCU"
+    ],
+    "writer_skips_GP_if_key_OFF": [
+      "writer_does_NOT_observe_runtime_key_before_GP"
+    ],
+    "writer_omits_GP": [
+      "writable_count_published_before_writer_grace",
+      "writer_GP_before_VMA_publication"
+    ],
+    "writer_publishes_before_GP": [
+      "writable_count_published_before_writer_grace",
+      "writer_GP_before_VMA_publication"
+    ],
+    "revert_writer_AS_flag_check": [
+      "writer_ext4_scope",
+      "writer_does_NOT_observe_runtime_key_before_GP"
+    ],
+    "remove_shared_writable_counter": [
+      "writable_count_published_before_writer_grace"
+    ]
+  },
+  "herd7_models": {
+    "skip_grace_if_runtime_OFF": {
+      "model": "tools/memory-model/litmus-tests/SMT311+ToggleOffWriterSkipG684.litmus",
+      "observation": "Observation SMT311+ToggleOffWriterSkipG684 Sometimes 1 8",
+      "litmus_sha256": "8f47abcbb9ac21a7f184afa145fe7331a40854c0120c7cb4da80711a344b14ca",
+      "normalized_stdout_sha256": "dbcf72c9eb41df74980e199212d5b5a004f67890a56c0b3b12c426cf2ab97bc9",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 8
+    },
+    "each_writer_independent_GP": {
+      "model": "tools/memory-model/litmus-tests/SMT311+ToggleAllWritersGraceG684.litmus",
+      "observation": "Observation SMT311+ToggleAllWritersGraceG684 Never 0 8",
+      "litmus_sha256": "0d3bf583cd713dfd6c3dfac3f6fddb93c21cb326ffb8d0495efdbee4b463eab2",
+      "normalized_stdout_sha256": "9d2782c422fd8a26bf9ca26821769254fdbbea7155c48410f9b512d64d540905",
+      "outcome": "Never",
+      "positive": 0,
+      "negative": 8
+    },
+    "skip_grace_with_memory_barrier": {
+      "model": "tools/memory-model/litmus-tests/SMT311+ToggleOffWriterBarrierG684.litmus",
+      "observation": "Observation SMT311+ToggleOffWriterBarrierG684 Sometimes 1 8",
+      "litmus_sha256": "b04ee36abda28aa8669571ec48878eea375aac264a64dc1e44defa4e014c861b",
+      "normalized_stdout_sha256": "122cc588581cc6706fdbd9ced6ce6ed9e26ea5426967572f7823ea7c6c777d79",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 8
+    }
+  },
+  "finding": "Even adding a toggle-side RCU GP alone does not protect against an in-flight writer that saw OFF, skipped its own GP, and can publish a writable VMA after readers begin ON.",
+  "consequence": "Cannot simply add if (!static_key_enabled(lockless_read_key)) skip GP to ext4 mmap. Current conservative G683 per-map GP remains STAGED while OFF overhead and activation proof are unresolved.",
+  "limitations": [
+    "Toy scalar key/count/VMA state with real LKMM, not actual mm_struct, static-key atomic API, or ARMv7 cache model.",
+    "An allowed LKMM observation is an unsoundness witness for the naive gate, not evidence of physical UAF.",
+    "Disallowing the condition when each writer waits is NOT a full safety proof.",
+    "No cost or global lockdep proof and no physical RCU ON test.",
+    "Full writer-drain/activation protocol must be proved before avoiding GP in OFF mode."
+  ],
+  "source_runtime_changes": "NONE",
+  "staged_not_installed": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/vma.c"
+  ],
+  "safety": {
+    "S0": "PASS",
+    "S1": "ACTIVE",
+    "S2": "BLOCKED",
+    "S3": "BLOCKED",
+    "S4": "BLOCKED",
+    "S5": "BLOCKED",
+    "S6": "BLOCKED",
+    "S7": "PARTIAL",
+    "S8": "ACTIVE"
+  }
+}

@@ -1,0 +1,15 @@
+# SM-T311 legacy GNSS HAL — dnsproxyd socket used by SUPL fallback.
+# This does not enable Enforcing or change GPS hardware operation.
+allow hal_gnss_default dnsproxyd_socket:sock_file write;
+allow hal_gnss_default netd:unix_stream_socket connectto;
+
+# GNSS bridge uses the vendor Binder driver after the ordered service restart.
+# 2026-10-10: actual AVC /dev/binderfs/vndbinder { read write open ioctl map }.
+# Standard narrowly scoped macro; DOES NOT enable SELinux Enforcing.
+# G755: AOSP GNSS 1.0 service.cpp explicitly calls
+# ProcessState::initWithDriver("/dev/vndbinder"). On the actual tablet
+# SELinux Enforcing denied read on the correctly labeled BinderFS vndbinder
+# node at every boot, so libbinder fell back to /dev/binder. Allow ONLY this
+# GNSS HAL to use its intended vendor Binder character device. No generic
+# device, global binder or permissive policy changes.
+allow hal_gnss_default vndbinder_device:chr_file { getattr open read write ioctl map };

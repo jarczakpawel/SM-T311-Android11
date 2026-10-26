@@ -1,0 +1,2276 @@
+diff --git a/core/java/com/android/internal/os/KernelCpuUidTimeReader.java b/core/java/com/android/internal/os/KernelCpuUidTimeReader.java
+index f7fad2c5bbaa16ff356dabacc542d1ec3c083e0d..ca61e1e5088dfa1f7e6076e73b6894ce7b7f2979 100644
+--- a/core/java/com/android/internal/os/KernelCpuUidTimeReader.java
++++ b/core/java/com/android/internal/os/KernelCpuUidTimeReader.java
+@@ -31,6 +31,7 @@ import com.android.internal.os.KernelCpuProcStringReader.ProcFileIterator;
+ import com.android.internal.os.KernelCpuUidBpfMapReader.BpfMapIterator;
+ 
+ import java.io.BufferedReader;
++import java.io.File;
+ import java.io.FileWriter;
+ import java.io.IOException;
+ import java.nio.CharBuffer;
+@@ -290,6 +291,14 @@ public abstract class KernelCpuUidTimeReader<T> {
+          * @param endUid   the last uid to remove
+          */
+         private void removeUidsFromKernelModule(int startUid, int endUid) {
++            // G844: Android 11's legacy uid_cputime module is absent from
++            // upstream Linux 7.3. Keep the UID cache cleanup in removeUid(s),
++            // but do not repeatedly open a missing writable proc interface.
++            // Check each time so a late-mounted proc implementation still
++            // receives the same UID removal writes as before.
++            if (!new File(REMOVE_UID_PROC_FILE).exists()) {
++                return;
++            }
+             Slog.d(mTag, "Removing uids " + startUid + "-" + endUid);
+             final int oldMask = StrictMode.allowThreadDiskWritesMask();
+             try (FileWriter writer = new FileWriter(REMOVE_UID_PROC_FILE)) {
+diff --git a/libs/hwui/pipeline/skia/ShaderCache.cpp b/libs/hwui/pipeline/skia/ShaderCache.cpp
+index 66aa8c2037991c61d09e4561bb1cb372dd85f9d5..e4667e9f04ac5d0d1ff8edf793dfd8930c6baad6 100644
+--- a/libs/hwui/pipeline/skia/ShaderCache.cpp
++++ b/libs/hwui/pipeline/skia/ShaderCache.cpp
+@@ -32,7 +32,10 @@ namespace skiapipeline {
+ // Cache size limits.
+ static const size_t maxKeySize = 1024;
+ static const size_t maxValueSize = 512 * 1024;
+-static const size_t maxTotalSize = 1024 * 1024;
++// G1725: 1 MiB allowed too few persisted GL program binaries on lt013g.
++// Keep each blob capped at 512 KiB and bound the complete cache to 2 MiB.
++// No change to Skia's 256-entry in-process program cache or EGL behavior.
++static const size_t maxTotalSize = 2 * 1024 * 1024;
+ 
+ ShaderCache::ShaderCache() {
+     // There is an "incomplete FileBlobCache type" compilation error, if ctor is moved to header.
+diff --git a/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp b/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
+index 24a6228242a57c18c4bf95d82fbe02a21b6529c2..18531e46b0e6b7bb582cdb473917a1d39981e63a 100644
+--- a/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
++++ b/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
+@@ -36,6 +36,8 @@
+ #include <SkImageInfo.h>
+ 
+ #include <cutils/properties.h>
++#include <log/log.h>
++#include <utils/Timers.h>
+ #include <strings.h>
+ 
+ using namespace android::uirenderer::renderthread;
+@@ -75,7 +77,10 @@ bool SkiaOpenGLPipeline::draw(const Frame& frame, const SkRect& screenDirty, con
+                               bool opaque, const LightInfo& lightInfo,
+                               const std::vector<sp<RenderNode>>& renderNodes,
+                               FrameInfoVisualizer* profiler) {
++    const bool probe = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t startNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+     mEglManager.damageFrame(frame, dirty);
++    const int64_t damageNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     SkColorType colorType = getSurfaceColorType();
+     // setup surface for fbo0
+@@ -99,11 +104,13 @@ bool SkiaOpenGLPipeline::draw(const Frame& frame, const SkRect& screenDirty, con
+     sk_sp<SkSurface> surface(SkSurface::MakeFromBackendRenderTarget(
+             mRenderThread.getGrContext(), backendRT, this->getSurfaceOrigin(), colorType,
+             mSurfaceColorSpace, &props));
++    const int64_t surfaceNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     LightingInfo::updateLighting(lightGeometry, lightInfo);
+     renderFrame(*layerUpdateQueue, dirty, renderNodes, opaque, contentDrawBounds, surface,
+                 SkMatrix::I());
+     layerUpdateQueue->clear();
++    const int64_t renderNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     // Draw visual debugging features
+     if (CC_UNLIKELY(Properties::showDirtyRegions ||
+@@ -119,6 +126,21 @@ bool SkiaOpenGLPipeline::draw(const Frame& frame, const SkRect& screenDirty, con
+         dumpResourceCacheUsage();
+     }
+ 
++    if (probe) {
++        const int64_t endNs = systemTime(SYSTEM_TIME_MONOTONIC);
++        if (endNs - startNs > 8000000LL) {
++            static unsigned int logged = 0;
++            if (logged++ < 192) {
++                ALOGI("T311_HWUI_GL_DRAW damage_us=%lld surface_us=%lld "
++                      "render_us=%lld post_us=%lld total_us=%lld",
++                      static_cast<long long>((damageNs - startNs) / 1000),
++                      static_cast<long long>((surfaceNs - damageNs) / 1000),
++                      static_cast<long long>((renderNs - surfaceNs) / 1000),
++                      static_cast<long long>((endNs - renderNs) / 1000),
++                      static_cast<long long>((endNs - startNs) / 1000));
++            }
++        }
++    }
+     return true;
+ }
+ 
+diff --git a/libs/hwui/pipeline/skia/SkiaPipeline.cpp b/libs/hwui/pipeline/skia/SkiaPipeline.cpp
+index 5088494d6a0729d0ae70dd34abe26b4194f11eec..102bca0e1c93ec135b56af346a04eeded804d934 100644
+--- a/libs/hwui/pipeline/skia/SkiaPipeline.cpp
++++ b/libs/hwui/pipeline/skia/SkiaPipeline.cpp
+@@ -27,6 +27,8 @@
+ #include <SkSerialProcs.h>
+ #include <SkTypeface.h>
+ #include <android-base/properties.h>
++#include <log/log.h>
++#include <utils/Timers.h>
+ #include <unistd.h>
+ 
+ #include <sstream>
+@@ -429,6 +431,9 @@ void SkiaPipeline::renderFrame(const LayerUpdateQueue& layers, const SkRect& cli
+                                const std::vector<sp<RenderNode>>& nodes, bool opaque,
+                                const Rect& contentDrawBounds, sk_sp<SkSurface> surface,
+                                const SkMatrix& preTransform) {
++    // G1676: bounded, default-OFF timing only. No changes to draw or EGL state.
++    const bool profileStages = base::GetBoolProperty("debug.t311.hwui_draw_stages", false);
++    const int64_t startNs = profileStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+     bool previousSkpEnabled = Properties::skpCaptureEnabled;
+     if (mPictureCapturedCallback) {
+         Properties::skpCaptureEnabled = true;
+@@ -437,22 +442,42 @@ void SkiaPipeline::renderFrame(const LayerUpdateQueue& layers, const SkRect& cli
+     // Initialize the canvas for the current frame, that might be a recording canvas if SKP
+     // capture is enabled.
+     SkCanvas* canvas = tryCapture(surface.get(), nodes[0].get(), layers);
++    const int64_t capturedNs = profileStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     // draw all layers up front
+     renderLayersImpl(layers, opaque);
++    const int64_t layersNs = profileStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     renderFrameImpl(clip, nodes, opaque, contentDrawBounds, canvas, preTransform);
++    const int64_t rootNs = profileStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     endCapture(surface.get());
+ 
+     if (CC_UNLIKELY(Properties::debugOverdraw)) {
+         renderOverdraw(clip, nodes, contentDrawBounds, surface, preTransform);
+     }
++    const int64_t endCaptureNs = profileStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     ATRACE_NAME("flush commands");
+     surface->getCanvas()->flush();
++    const int64_t flushedNs = profileStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     Properties::skpCaptureEnabled = previousSkpEnabled;
++    if (profileStages && flushedNs - startNs > 8000000LL) {
++        static unsigned int logged = 0;
++        if (logged++ < 192) {
++            ALOGI("T311_HWUI_SKIA_FRAME capture_us=%lld layers_us=%lld "
++                  "root_us=%lld post_us=%lld flush_us=%lld total_us=%lld "
++                  "nodes=%zu layer_entries=%zu",
++                  static_cast<long long>((capturedNs - startNs) / 1000),
++                  static_cast<long long>((layersNs - capturedNs) / 1000),
++                  static_cast<long long>((rootNs - layersNs) / 1000),
++                  static_cast<long long>((endCaptureNs - rootNs) / 1000),
++                  static_cast<long long>((flushedNs - endCaptureNs) / 1000),
++                  static_cast<long long>((flushedNs - startNs) / 1000),
++                  nodes.size(), layers.entries().size());
++        }
++    }
+ }
+ 
+ namespace {
+diff --git a/libs/hwui/renderthread/CanvasContext.cpp b/libs/hwui/renderthread/CanvasContext.cpp
+index 667a7517a24c76c0d4ac2b92d49b62f2e91e59dc..c5dd79feff1ff3d064fd6128affeb4c5a600df64 100644
+--- a/libs/hwui/renderthread/CanvasContext.cpp
++++ b/libs/hwui/renderthread/CanvasContext.cpp
+@@ -17,6 +17,7 @@
+ #include "CanvasContext.h"
+ 
+ #include <apex/window.h>
++#include <cutils/properties.h>
+ #include <fcntl.h>
+ #include <strings.h>
+ #include <sys/stat.h>
+@@ -471,23 +472,31 @@ void CanvasContext::draw() {
+ 
+     mCurrentFrameInfo->markIssueDrawCommandsStart();
+ 
++    // G1649: diagnostic-only stage timings; no change to drawing, fences or buffers.
++    const bool probeStages = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t stageStartNs = probeStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+     Frame frame = mRenderPipeline->getFrame();
++    const int64_t stageFrameNs = probeStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+     setPresentTime();
+ 
+     SkRect windowDirty = computeDirtyRect(frame, &dirty);
++    const int64_t stagePrepareNs = probeStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     bool drew = mRenderPipeline->draw(frame, windowDirty, dirty, mLightGeometry, &mLayerUpdateQueue,
+                                       mContentDrawBounds, mOpaque, mLightInfo, mRenderNodes,
+                                       &(profiler()));
++    const int64_t stageDrawNs = probeStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     int64_t frameCompleteNr = getFrameNumber();
+ 
+     waitOnFences();
++    const int64_t stageFenceNs = probeStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     bool requireSwap = false;
+     int error = OK;
+     bool didSwap =
+             mRenderPipeline->swapBuffers(frame, drew, windowDirty, mCurrentFrameInfo, &requireSwap);
++    const int64_t stageSwapNs = probeStages ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+ 
+     mIsDirty = false;
+ 
+@@ -548,6 +557,25 @@ void CanvasContext::draw() {
+     // TODO: Use a fence for real completion?
+     mCurrentFrameInfo->markFrameCompleted();
+ 
++    if (probeStages) {
++        const int64_t stageEndNs = systemTime(SYSTEM_TIME_MONOTONIC);
++        if (stageEndNs - stageStartNs > 17000000LL) {
++            static unsigned int stageLogs = 0;
++            if (stageLogs++ < 192) {
++                ALOGI("T311_HWUI_DRAW_STAGE getframe_us=%lld prep_us=%lld "
++                      "pipeline_us=%lld fences_us=%lld swap_us=%lld bookkeeping_us=%lld "
++                      "total_us=%lld swapped=%d",
++                      static_cast<long long>((stageFrameNs - stageStartNs) / 1000),
++                      static_cast<long long>((stagePrepareNs - stageFrameNs) / 1000),
++                      static_cast<long long>((stageDrawNs - stagePrepareNs) / 1000),
++                      static_cast<long long>((stageFenceNs - stageDrawNs) / 1000),
++                      static_cast<long long>((stageSwapNs - stageFenceNs) / 1000),
++                      static_cast<long long>((stageEndNs - stageSwapNs) / 1000),
++                      static_cast<long long>((stageEndNs - stageStartNs) / 1000), didSwap);
++            }
++        }
++    }
++
+ #if LOG_FRAMETIME_MMA
+     float thisFrame = mCurrentFrameInfo->duration(FrameInfoIndex::IssueDrawCommandsStart,
+                                                   FrameInfoIndex::FrameCompleted) /
+diff --git a/libs/hwui/renderthread/DrawFrameTask.cpp b/libs/hwui/renderthread/DrawFrameTask.cpp
+index 1e593388d0636bcecc8385278e61797b93cc9c6f..e1c5bcc9a2681fab285254530885c94a688bfa3a 100644
+--- a/libs/hwui/renderthread/DrawFrameTask.cpp
++++ b/libs/hwui/renderthread/DrawFrameTask.cpp
+@@ -16,6 +16,8 @@
+ 
+ #include "DrawFrameTask.h"
+ 
++#include <cutils/properties.h>
++#include <time.h>
+ #include <utils/Log.h>
+ #include <utils/Trace.h>
+ 
+@@ -84,6 +86,12 @@ void DrawFrameTask::postAndWait() {
+ void DrawFrameTask::run() {
+     ATRACE_NAME("DrawFrame");
+ 
++    const bool probe = property_get_bool("debug.t311.hwui_rt_probe", false);
++    const int64_t queuedNs = probe ? mSyncQueued : 0;
++    const int64_t dispatchNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++    timespec cpuStart = {};
++    if (probe) clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuStart);
++
+     bool canUnblockUiThread;
+     bool canDrawThisFrame;
+     {
+@@ -97,6 +105,8 @@ void DrawFrameTask::run() {
+         }
+     }
+ 
++    const int64_t syncDoneNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
++
+     // Grab a copy of everything we need
+     CanvasContext* context = mContext;
+     std::function<void(int64_t)> callback = std::move(mFrameCallback);
+@@ -123,6 +133,30 @@ void DrawFrameTask::run() {
+     if (!canUnblockUiThread) {
+         unblockUiThread();
+     }
++
++    if (probe) {
++        const int64_t endNs = systemTime(SYSTEM_TIME_MONOTONIC);
++        const int64_t queuedUs = (dispatchNs - queuedNs) / 1000;
++        const int64_t syncUs = (syncDoneNs - dispatchNs) / 1000;
++        const int64_t drawUs = (endNs - syncDoneNs) / 1000;
++        const int64_t overlapUs = mLastTaskEndNs > queuedNs
++                ? (mLastTaskEndNs - queuedNs) / 1000 : 0;
++        mLastTaskEndNs = endNs;
++        if (queuedUs > 8000 || drawUs > 17000) {
++            static unsigned int logged = 0;
++            if (logged++ < 192) {
++                timespec cpuEnd = {};
++                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuEnd);
++                const int64_t cpuUs = (cpuEnd.tv_sec - cpuStart.tv_sec) * 1000000LL +
++                        (cpuEnd.tv_nsec - cpuStart.tv_nsec) / 1000;
++                ALOGI("T311_HWUI_RT queue_us=%lld sync_us=%lld draw_us=%lld "
++                      "cpu_us=%lld prev_overlap_us=%lld",
++                      static_cast<long long>(queuedUs), static_cast<long long>(syncUs),
++                      static_cast<long long>(drawUs), static_cast<long long>(cpuUs),
++                      static_cast<long long>(overlapUs));
++            }
++        }
++    }
+ }
+ 
+ bool DrawFrameTask::syncFrameState(TreeInfo& info) {
+diff --git a/libs/hwui/renderthread/DrawFrameTask.h b/libs/hwui/renderthread/DrawFrameTask.h
+index 696cfaef3cd7b75932c0f35a714e77e09357f0ea..4e238b14ee186c3055dcd2c31144859ca5af7706 100644
+--- a/libs/hwui/renderthread/DrawFrameTask.h
++++ b/libs/hwui/renderthread/DrawFrameTask.h
+@@ -102,6 +102,7 @@ private:
+ 
+     int mSyncResult;
+     int64_t mSyncQueued;
++    int64_t mLastTaskEndNs = 0;
+ 
+     int64_t mFrameInfo[UI_THREAD_FRAME_INFO_SIZE];
+ 
+diff --git a/libs/hwui/renderthread/EglManager.cpp b/libs/hwui/renderthread/EglManager.cpp
+index 7982ab664c1be7e4ba196a807bdb86aab9c21f10..a43418cb3e12c49629bad7e7bca4baabb7fc7891 100644
+--- a/libs/hwui/renderthread/EglManager.cpp
++++ b/libs/hwui/renderthread/EglManager.cpp
+@@ -22,6 +22,7 @@
+ #include <log/log.h>
+ #include <sync/sync.h>
+ #include <utils/Trace.h>
++#include <utils/Timers.h>
+ 
+ #include <string>
+ #include <vector>
+@@ -438,13 +439,33 @@ EGLint EglManager::queryBufferAge(EGLSurface surface) {
+ 
+ Frame EglManager::beginFrame(EGLSurface surface) {
+     LOG_ALWAYS_FATAL_IF(surface == EGL_NO_SURFACE, "Tried to beginFrame on EGL_NO_SURFACE!");
++    const bool probe = property_get_bool("debug.t311.hwui_draw_stages", false);
++    const int64_t startNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+     makeCurrent(surface);
++    const int64_t currentNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+     Frame frame;
+     frame.mSurface = surface;
+     eglQuerySurface(mEglDisplay, surface, EGL_WIDTH, &frame.mWidth);
+     eglQuerySurface(mEglDisplay, surface, EGL_HEIGHT, &frame.mHeight);
++    const int64_t sizeNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+     frame.mBufferAge = queryBufferAge(surface);
++    const int64_t ageNs = probe ? systemTime(SYSTEM_TIME_MONOTONIC) : 0;
+     eglBeginFrame(mEglDisplay, surface);
++    if (probe) {
++        const int64_t endNs = systemTime(SYSTEM_TIME_MONOTONIC);
++        if (endNs - startNs > 8000000LL) {
++            static unsigned int logged = 0;
++            if (logged++ < 192) {
++                ALOGI("T311_HWUI_EGL_BEGIN current_us=%lld size_us=%lld "
++                      "age_us=%lld begin_us=%lld total_us=%lld",
++                      static_cast<long long>((currentNs - startNs) / 1000),
++                      static_cast<long long>((sizeNs - currentNs) / 1000),
++                      static_cast<long long>((ageNs - sizeNs) / 1000),
++                      static_cast<long long>((endNs - ageNs) / 1000),
++                      static_cast<long long>((endNs - startNs) / 1000));
++            }
++        }
++    }
+     return frame;
+ }
+ 
+diff --git a/packages/SystemUI/res/values/bools.xml b/packages/SystemUI/res/values/bools.xml
+index 499e24e6ecbd27a30c523babc42a3c689577642f..1c1db55b5e73bc9e93b7c9cd2036a13b1b60cc75 100644
+--- a/packages/SystemUI/res/values/bools.xml
++++ b/packages/SystemUI/res/values/bools.xml
+@@ -18,4 +18,10 @@
+ <resources>
+     <!-- Whether to show the user switcher in quick settings when only a single user is present. -->
+     <bool name="qs_show_user_switcher_for_single_user">false</bool>
++    <bool name="config_limitSquareImageWallpaperSurface">false</bool>
++    <bool name="config_skipUnsupportedWindowBlurAnimations">false</bool>
++    <!-- Only device-verified shade stacks may skip redundant RenderNode damage. -->
++    <bool name="config_skipRedundantShadeOutlineDamage">false</bool>
++    <!-- Disabled except on tested low-memory devices: skip identical notification background geometry invalidations. -->
++    <bool name="config_skipUnchangedNotificationBackgroundGeometryDamage">false</bool>
+ </resources>
+diff --git a/packages/SystemUI/res/values/lineage_config.xml b/packages/SystemUI/res/values/lineage_config.xml
+index b17044b1bcc69d64e22fd6b4533108f4338be1ed..162eb981040684eebf76f05a14af48935cf3f017 100644
+--- a/packages/SystemUI/res/values/lineage_config.xml
++++ b/packages/SystemUI/res/values/lineage_config.xml
+@@ -31,6 +31,7 @@
+ 
+     <!-- If not zero, limits the internal screen recorder's framerate to the set value. -->
+     <integer name="config_screenRecorderMaxFramerate">0</integer>
++    <integer name="config_screenRecorderMaxDimension">0</integer>
+ 
+     <!-- Whether usage of the proximity sensor during doze is supported -->
+     <bool name="doze_proximity_sensor_supported">true</bool>
+diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardSimPinView.java b/packages/SystemUI/src/com/android/keyguard/KeyguardSimPinView.java
+index 6be80c49bd066980b927351a6834707e85aa1f85..3db265d3ec98a2db9a3464b3c655fc80abc6b572 100644
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardSimPinView.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardSimPinView.java
+@@ -139,6 +139,8 @@ public class KeyguardSimPinView extends KeyguardPinBasedInputView {
+             return;
+         }
+ 
++        if ("lt013g".equals(android.os.Build.DEVICE)) return;
++
+         // Sending empty PIN here to query the number of remaining PIN attempts
+         new CheckSimPin("", mSubId) {
+             void onSimCheckResponse(final PinResult result) {
+diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardSimPukView.java b/packages/SystemUI/src/com/android/keyguard/KeyguardSimPukView.java
+index 0e9b301f03d0c848eebf2e63ed85d8c0dcb3015b..9ab132e39639e4059e73a8cde13ef249f194447c 100644
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardSimPukView.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardSimPukView.java
+@@ -192,6 +192,8 @@ public class KeyguardSimPukView extends KeyguardPinBasedInputView {
+         }
+         mSimImageView.setImageTintList(ColorStateList.valueOf(color));
+ 
++        if ("lt013g".equals(android.os.Build.DEVICE)) return;
++
+         // Sending empty PUK here to query the number of remaining PIN attempts
+         new CheckSimPuk("", "", mSubId) {
+             void onSimLockChangedResponse(final PinResult result) {
+diff --git a/packages/SystemUI/src/com/android/systemui/glwallpaper/ImageWallpaperRenderer.java b/packages/SystemUI/src/com/android/systemui/glwallpaper/ImageWallpaperRenderer.java
+index 1a0356c4446d66264a37ebd51f52fe281bbabb7d..ea107412c504d3f160aae240b08c869b7008348c 100644
+--- a/packages/SystemUI/src/com/android/systemui/glwallpaper/ImageWallpaperRenderer.java
++++ b/packages/SystemUI/src/com/android/systemui/glwallpaper/ImageWallpaperRenderer.java
+@@ -24,6 +24,7 @@ import static android.opengl.GLES20.glViewport;
+ import android.app.WallpaperManager;
+ import android.content.Context;
+ import android.graphics.Bitmap;
++import android.graphics.Point;
+ import android.graphics.Rect;
+ import android.util.Log;
+ import android.util.Size;
+@@ -46,6 +47,7 @@ public class ImageWallpaperRenderer implements GLWallpaperRenderer {
+     private final ImageGLWallpaper mWallpaper;
+     private final Rect mSurfaceSize = new Rect();
+     private final WallpaperTexture mTexture;
++    private final Context mContext;
+ 
+     public ImageWallpaperRenderer(Context context) {
+         final WallpaperManager wpm = context.getSystemService(WallpaperManager.class);
+@@ -53,6 +55,7 @@ public class ImageWallpaperRenderer implements GLWallpaperRenderer {
+             Log.w(TAG, "WallpaperManager not available");
+         }
+ 
++        mContext = context;
+         mTexture = new WallpaperTexture(wpm);
+         mProgram = new ImageGLProgram(context);
+         mWallpaper = new ImageGLWallpaper(mProgram);
+@@ -94,6 +97,15 @@ public class ImageWallpaperRenderer implements GLWallpaperRenderer {
+     public Size reportSurfaceSize() {
+         mTexture.use(null /* consumer */);
+         mSurfaceSize.set(mTexture.getTextureDimensions());
++        if (mContext.getResources().getBoolean(R.bool.config_limitSquareImageWallpaperSurface)
++                && mContext.getDisplay() != null) {
++            final Point displaySize = new Point();
++            mContext.getDisplay().getRealSize(displaySize);
++            final int[] surfaceSize = WallpaperSurfaceSizeCalculator.calculate(
++                    mSurfaceSize.width(), mSurfaceSize.height(), displaySize.x, displaySize.y,
++                    true);
++            mSurfaceSize.set(0, 0, surfaceSize[0], surfaceSize[1]);
++        }
+         return new Size(mSurfaceSize.width(), mSurfaceSize.height());
+     }
+ 
+diff --git a/packages/SystemUI/src/com/android/systemui/glwallpaper/WallpaperSurfaceSizeCalculator.java b/packages/SystemUI/src/com/android/systemui/glwallpaper/WallpaperSurfaceSizeCalculator.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..8276358b9bf9610ddf1338c10b8fce0322525481
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/glwallpaper/WallpaperSurfaceSizeCalculator.java
+@@ -0,0 +1,19 @@
++package com.android.systemui.glwallpaper;
++
++final class WallpaperSurfaceSizeCalculator {
++    private WallpaperSurfaceSizeCalculator() {}
++
++    static int[] calculate(int wallpaperWidth, int wallpaperHeight,
++            int displayWidth, int displayHeight, boolean enabled) {
++        if (!enabled || wallpaperWidth <= 0 || wallpaperHeight <= 0
++                || displayWidth <= 0 || displayHeight <= 0
++                || wallpaperWidth != wallpaperHeight) {
++            return new int[] {wallpaperWidth, wallpaperHeight};
++        }
++        final int displayLongEdge = Math.max(displayWidth, displayHeight);
++        if (wallpaperWidth <= displayLongEdge) {
++            return new int[] {wallpaperWidth, wallpaperHeight};
++        }
++        return new int[] {displayLongEdge, displayLongEdge};
++    }
++}
+diff --git a/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java b/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
+index 8ec3db59117d416eabe2038a2090420a52829940..4ac9a089c048ae02f17a47fed2e91940d603e3a7 100644
+--- a/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
++++ b/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
+@@ -28,12 +28,16 @@ import android.graphics.Bitmap;
+ import android.graphics.drawable.Icon;
+ import android.media.MediaRecorder;
+ import android.net.Uri;
++import android.os.Build;
+ import android.os.Bundle;
+ import android.os.IBinder;
+ import android.os.RemoteException;
+ import android.os.UserHandle;
+ import android.provider.Settings;
+ import android.util.Log;
++import android.view.IWindowManager;
++import android.view.WindowManager;
++import android.view.WindowManagerGlobal;
+ import android.widget.Toast;
+ 
+ import com.android.internal.annotations.VisibleForTesting;
+@@ -76,6 +80,16 @@ public class RecordingService extends Service implements MediaRecorder.OnInfoLis
+     private boolean mShowTaps;
+     private boolean mOriginalShowTaps;
+     private ScreenMediaRecorder mRecorder;
++    // G908: a single AVC MP4 track has fixed rectangular dimensions.
++    // Lock the CURRENT on-screen orientation for the recording lifetime on
++    // SM-T311. In a sample 640x1024 MP4 the source changed layout at 17.56s,
++    // letterboxed the landscape view until 24.10s, then filled the portrait
++    // track with a rotated landscape view until 25.88s. These transitions
++    // were already encoded into the file: Gallery cannot correct them.
++    // Preserve the caller's original manual/automatic rotation policy.
++    private boolean mTemporaryRotationLock;
++    private boolean mOriginalAutoRotation;
++    private int mOriginalRotation;
+     private final Executor mLongExecutor;
+     private final UiEventLogger mUiEventLogger;
+     private final NotificationManager mNotificationManager;
+@@ -206,11 +220,13 @@ public class RecordingService extends Service implements MediaRecorder.OnInfoLis
+      */
+     private void startRecording() {
+         try {
++            lockCurrentRotationForRecording();
+             getRecorder().start();
+             mController.updateState(true);
+             createRecordingNotification();
+             mUiEventLogger.log(Events.ScreenRecordEvent.SCREEN_RECORD_START);
+         } catch (IOException | RemoteException | IllegalStateException e) {
++            restoreAutoRotation();
+             Toast.makeText(this,
+                     R.string.screenrecord_start_error, Toast.LENGTH_LONG)
+                     .show();
+@@ -320,13 +336,66 @@ public class RecordingService extends Service implements MediaRecorder.OnInfoLis
+ 
+     private void stopRecording(int userId) {
+         setTapsVisible(mOriginalShowTaps);
+-        if (getRecorder() != null) {
+-            getRecorder().end();
+-            saveRecording(userId);
+-        } else {
+-            Log.e(TAG, "stopRecording called, but recorder was null");
++        try {
++            if (getRecorder() != null) {
++                getRecorder().end();
++                saveRecording(userId);
++            } else {
++                Log.e(TAG, "stopRecording called, but recorder was null");
++            }
++        } finally {
++            restoreAutoRotation();
++            mController.updateState(false);
++        }
++    }
++
++    private void lockCurrentRotationForRecording() throws RemoteException {
++        final boolean auto = Settings.System.getInt(getContentResolver(),
++                Settings.System.ACCELEROMETER_ROTATION, 0) == 1;
++        // For other devices retain stock semantics: only temporarily freeze
++        // when auto-rotation had been enabled by the user.
++        if (!"lt013g".equals(Build.DEVICE) && !auto) {
++            return;
+         }
+-        mController.updateState(false);
++        WindowManager windowManager = getSystemService(WindowManager.class);
++        final int orientation = windowManager.getDefaultDisplay().getRotation();
++        IWindowManager wm = WindowManagerGlobal.getWindowManagerService();
++        wm.freezeRotation(orientation);
++        mOriginalAutoRotation = auto;
++        mOriginalRotation = orientation;
++        mTemporaryRotationLock = true;
++        Log.i(TAG, "G908_RECORDING_ROTATION_FIXED=" + orientation
++                + " originalAuto=" + auto + " device=" + Build.DEVICE);
++    }
++
++    private void restoreAutoRotation() {
++        if (!mTemporaryRotationLock) {
++            return;
++        }
++        // Clear only once. Repeated STOP_FROM_NOTIF and onDestroy calls must
++        // never switch the user's rotation setting a second time.
++        mTemporaryRotationLock = false;
++        try {
++            IWindowManager wm = WindowManagerGlobal.getWindowManagerService();
++            if (mOriginalAutoRotation) {
++                wm.thawRotation();
++            } else {
++                // AOSP DisplayRotation.thawRotation() unconditionally enables
++                // auto-rotation. Restore a previously MANUALLY locked user to
++                // their original rotation instead of changing their setting.
++                wm.freezeRotation(mOriginalRotation);
++            }
++            Log.i(TAG, "G908_RECORDING_ROTATION_RESTORED originalAuto="
++                    + mOriginalAutoRotation + " rotation=" + mOriginalRotation);
++        } catch (RemoteException e) {
++            Log.e(TAG, "Unable to restore recording rotation policy", e);
++        }
++    }
++
++    @Override
++    public void onDestroy() {
++        restoreAutoRotation();
++        super.onDestroy();
+     }
+ 
+     private void saveRecording(int userId) {
+diff --git a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
+index 330475a4189e30bbcf89ea598d2c986230b36413..faf785e41a9149aa2ea06b042e35e7362d677dec 100644
+--- a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
++++ b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
+@@ -32,7 +32,6 @@ import android.hardware.display.VirtualDisplay;
+ import android.media.MediaCodecInfo;
+ import android.media.MediaMuxer;
+ import android.media.MediaRecorder;
+-import android.media.ThumbnailUtils;
+ import android.media.projection.IMediaProjection;
+ import android.media.projection.IMediaProjectionManager;
+ import android.media.projection.MediaProjection;
+@@ -63,7 +62,7 @@ import java.util.Date;
+ public class ScreenMediaRecorder {
+     private static final int TOTAL_NUM_TRACKS = 1;
+     private static final int VIDEO_FRAME_RATE = 30;
+-    private static final int VIDEO_FRAME_RATE_TO_RESOLUTION_RATIO = 6;
++    private static final int VIDEO_FRAME_RATE_TO_RESOLUTION_RATIO = 8;
+     private static final int AUDIO_BIT_RATE = 196000;
+     private static final int AUDIO_SAMPLE_RATE = 44100;
+     private static final int MAX_DURATION_MS = 60 * 60 * 1000;
+@@ -76,6 +75,11 @@ public class ScreenMediaRecorder {
+     private MediaProjection mMediaProjection;
+     private Surface mInputSurface;
+     private VirtualDisplay mVirtualDisplay;
++    // Connect the virtual display only after the hardware encoder is started.
++    // Surface frames submitted before MediaRecorder.start() are discarded.
++    private int mRecordingWidth;
++    private int mRecordingHeight;
++    private int mRecordingDensityDpi;
+     private MediaRecorder mMediaRecorder;
+     private int mUser;
+     private ScreenRecordingMuxer mMuxer;
+@@ -131,6 +135,26 @@ public class ScreenMediaRecorder {
+         wm.getDefaultDisplay().getRealMetrics(metrics);
+         int screenWidth = metrics.widthPixels;
+         int screenHeight = metrics.heightPixels;
++        final int maxRecordDimension = mContext.getResources().getInteger(
++                R.integer.config_screenRecorderMaxDimension);
++        final int longestDimension = Math.max(screenWidth, screenHeight);
++        if (maxRecordDimension >= 16 && longestDimension > maxRecordDimension) {
++            // G885: Do not record the 800x1280 rectangular SM-T311 panel
++            // into the old square canvas. Exynos MFC/Gallery was validated
++            // at 640x1024; 670x1072 had stalled playback (G820). Both axes
++            // must be macroblock-aligned to avoid unqualified MFC sizes.
++            // Landscape starts at 1024x640, portrait at 640x1024.
++            // MediaRecorder cannot swap encoded dimensions mid-MP4, so a
++            // later physical rotation is letterboxed proportionally by the
++            // Android display projection; no crop or stretched duplicate.
++            final int maxAlignedDimension = maxRecordDimension & ~15;
++            screenWidth = Math.max(16,
++                    (int) (((long) screenWidth * maxAlignedDimension
++                            / longestDimension) & ~15L));
++            screenHeight = Math.max(16,
++                    (int) (((long) screenHeight * maxAlignedDimension
++                            / longestDimension) & ~15L));
++        }
+         int refereshRate = (int) wm.getDefaultDisplay().getRefreshRate();
+         if (mMaxRefreshRate != 0 && refereshRate > mMaxRefreshRate) refereshRate = mMaxRefreshRate;
+         int vidBitRate = screenHeight * screenWidth * refereshRate / VIDEO_FRAME_RATE
+@@ -138,7 +162,8 @@ public class ScreenMediaRecorder {
+         mMediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+         mMediaRecorder.setVideoEncodingProfileLevel(
+                 MediaCodecInfo.CodecProfileLevel.AVCProfileMain,
+-                MediaCodecInfo.CodecProfileLevel.AVCLevel3);
++                maxRecordDimension > 0 ? MediaCodecInfo.CodecProfileLevel.AVCLevel4
++                        : MediaCodecInfo.CodecProfileLevel.AVCLevel3);
+         mMediaRecorder.setVideoSize(screenWidth, screenHeight);
+         mMediaRecorder.setVideoFrameRate(refereshRate);
+         mMediaRecorder.setVideoEncodingBitRate(vidBitRate);
+@@ -155,17 +180,10 @@ public class ScreenMediaRecorder {
+ 
+         mMediaRecorder.setOutputFile(mTempVideoFile);
+         mMediaRecorder.prepare();
+-        // Create surface
+         mInputSurface = mMediaRecorder.getSurface();
+-        mVirtualDisplay = mMediaProjection.createVirtualDisplay(
+-                "Recording Display",
+-                screenWidth,
+-                screenHeight,
+-                metrics.densityDpi,
+-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+-                mInputSurface,
+-                null,
+-                null);
++        mRecordingWidth = screenWidth;
++        mRecordingHeight = screenHeight;
++        mRecordingDensityDpi = metrics.densityDpi;
+ 
+         mMediaRecorder.setOnInfoListener(mListener);
+         if (mAudioSource == INTERNAL ||
+@@ -185,6 +203,20 @@ public class ScreenMediaRecorder {
+         Log.d(TAG, "start recording");
+         prepare();
+         mMediaRecorder.start();
++        // G757: Android's MediaRecorder discards frames delivered before
++        // start(). Previously the virtual display was created by prepare(),
++        // often leaving the encoder without its first frame until another
++        // UI repaint. Establish the mirror only with an active encoder.
++        // Do not duplicate frames, rotate the MP4 or use a square canvas.
++        mVirtualDisplay = mMediaProjection.createVirtualDisplay(
++                "Recording Display",
++                mRecordingWidth,
++                mRecordingHeight,
++                mRecordingDensityDpi,
++                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
++                mInputSurface,
++                null,
++                null);
+         recordInternalAudio();
+     }
+ 
+@@ -259,9 +291,9 @@ public class ScreenMediaRecorder {
+         Files.copy(mTempVideoFile.toPath(), os);
+         os.close();
+         if (mTempAudioFile != null) mTempAudioFile.delete();
+-        DisplayMetrics metrics = mContext.getResources().getDisplayMetrics();
+-        Size size = new Size(metrics.widthPixels, metrics.heightPixels);
+-        SavedRecording recording = new SavedRecording(itemUri, mTempVideoFile, size);
++        // The MediaStore item is complete. Ask MediaProvider for a bounded thumbnail
++        // instead of opening the private app cache path in mediaserver.
++        SavedRecording recording = new SavedRecording(itemUri, new Size(320, 320));
+         mTempVideoFile.delete();
+         return recording;
+     }
+@@ -274,13 +306,14 @@ public class ScreenMediaRecorder {
+         private Uri mUri;
+         private Bitmap mThumbnailBitmap;
+ 
+-        protected SavedRecording(Uri uri, File file, Size thumbnailSize) {
++        protected SavedRecording(Uri uri, Size thumbnailSize) {
+             mUri = uri;
+             try {
+-                mThumbnailBitmap = ThumbnailUtils.createVideoThumbnail(
+-                        file, thumbnailSize, null);
++                mThumbnailBitmap = mContext.getContentResolver().loadThumbnail(
++                        uri, thumbnailSize, null);
+             } catch (IOException e) {
+-                Log.e(TAG, "Error creating thumbnail", e);
++                // The video is already saved; an unavailable preview must not affect it.
++                Log.w(TAG, "Saved video without thumbnail", e);
+             }
+         }
+ 
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/BlurUtils.kt b/packages/SystemUI/src/com/android/systemui/statusbar/BlurUtils.kt
+index c70d3847bd6f628a1129289d39c60b5f6bbfe37b..4906f9c67fed8a4125b56bdb5566eae7547a2688 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/BlurUtils.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/BlurUtils.kt
+@@ -44,6 +44,13 @@ open class BlurUtils @Inject constructor(
+             .getBoolean("ro.surface_flinger.supports_background_blur", false)
+     private val blurDisabledSysProp = SystemProperties
+             .getBoolean("persist.sys.sf.disable_blurs", false)
++    // Android 11's depth springs otherwise keep running for a blur effect that
++    // SurfaceFlinger cannot draw. Default off; opt in only on verified devices.
++    private val skipUnsupportedBlurAnimations = resources.getBoolean(
++            R.bool.config_skipUnsupportedWindowBlurAnimations)
++
++    fun suppressUnsupportedBlurAnimations(): Boolean =
++            skipUnsupportedBlurAnimations && !supportsBlursOnWindows()
+ 
+     init {
+         dumpManager.registerDumpable(javaClass.name, this)
+@@ -53,6 +60,9 @@ open class BlurUtils @Inject constructor(
+      * Translates a ratio from 0 to 1 to a blur radius in pixels.
+      */
+     fun blurRadiusOfRatio(ratio: Float): Int {
++        if (suppressUnsupportedBlurAnimations()) {
++            return 0
++        }
+         if (ratio == 0f) {
+             return 0
+         }
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/NotificationShadeDepthController.kt b/packages/SystemUI/src/com/android/systemui/statusbar/NotificationShadeDepthController.kt
+index 0445c9879ac5d280925244e79e752df265f8abcd..f0c63c123ea65cef8c689550ee8acd8bd4f40d98 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/NotificationShadeDepthController.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/NotificationShadeDepthController.kt
+@@ -468,6 +468,14 @@ class NotificationShadeDepthController @Inject constructor(
+         }
+ 
+         fun animateTo(newRadius: Int, viewToBlur: View? = null) {
++            // Do not enqueue a spring and Choreographer frame for invisible
++            // zero-radius blur on devices without SurfaceFlinger blur support.
++            if (newRadius == 0 && radius == 0 && !springAnimation.isRunning &&
++                    blurUtils.suppressUnsupportedBlurAnimations()) {
++                pendingRadius = 0
++                view = viewToBlur
++                return
++            }
+             if (pendingRadius == newRadius && view == viewToBlur) {
+                 return
+             }
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java b/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
+index 62d596b60a89fe23699c6ad56a6fc03ed7e75a4a..f0a841571c75e4082f7ef390a7888e0a4ccaa9d8 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
+@@ -39,6 +39,7 @@ import com.android.systemui.statusbar.notification.ActivityLaunchAnimator;
+ public class NotificationBackgroundView extends View {
+ 
+     private final boolean mDontModifyCorners;
++    private final boolean mSkipUnchangedGeometryDamage;
+     private Drawable mBackground;
+     private int mClipTopAmount;
+     private int mActualHeight;
+@@ -62,6 +63,8 @@ public class NotificationBackgroundView extends View {
+         super(context, attrs);
+         mDontModifyCorners = getResources().getBoolean(
+                 R.bool.config_clipNotificationsToOutline);
++        mSkipUnchangedGeometryDamage = getResources().getBoolean(
++                R.bool.config_skipUnchangedNotificationBackgroundGeometryDamage);
+     }
+ 
+     @Override
+@@ -165,6 +168,9 @@ public class NotificationBackgroundView extends View {
+         if (mExpandAnimationRunning) {
+             return;
+         }
++        if (mSkipUnchangedGeometryDamage && mActualHeight == actualHeight) {
++            return;
++        }
+         mActualHeight = actualHeight;
+         invalidate();
+     }
+@@ -174,11 +180,17 @@ public class NotificationBackgroundView extends View {
+     }
+ 
+     public void setClipTopAmount(int clipTopAmount) {
++        if (mSkipUnchangedGeometryDamage && mClipTopAmount == clipTopAmount) {
++            return;
++        }
+         mClipTopAmount = clipTopAmount;
+         invalidate();
+     }
+ 
+     public void setClipBottomAmount(int clipBottomAmount) {
++        if (mSkipUnchangedGeometryDamage && mClipBottomAmount == clipBottomAmount) {
++            return;
++        }
+         mClipBottomAmount = clipBottomAmount;
+         invalidate();
+     }
+@@ -274,6 +286,9 @@ public class NotificationBackgroundView extends View {
+     }
+ 
+     public void setBackgroundTop(int backgroundTop) {
++        if (mSkipUnchangedGeometryDamage && mBackgroundTop == backgroundTop) {
++            return;
++        }
+         mBackgroundTop = backgroundTop;
+         invalidate();
+     }
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java b/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
+index 6986ad754596b7a8747102a8e30c238f0b8bab2d..951d11be09180516104876e294f79d01b2ead772 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
+@@ -210,6 +210,7 @@ public class NotificationStackScrollLayout extends ViewGroup implements ScrollAd
+     private int mCurrentStackHeight = Integer.MAX_VALUE;
+     private final Paint mBackgroundPaint = new Paint();
+     private final boolean mShouldDrawNotificationBackground;
++    private final boolean mSkipRedundantOutlineDamage;
+     private boolean mHighPriorityBeforeSpeedBump;
+     private final boolean mAllowLongPress;
+     private boolean mDismissRtl;
+@@ -578,6 +579,8 @@ public class NotificationStackScrollLayout extends ViewGroup implements ScrollAd
+         Resources res = getResources();
+ 
+         mAllowLongPress = allowLongPress;
++        mSkipRedundantOutlineDamage = res.getBoolean(
++                R.bool.config_skipRedundantShadeOutlineDamage);
+ 
+         mRoundnessManager = notificationRoundnessManager;
+ 
+@@ -1521,7 +1524,13 @@ public class NotificationStackScrollLayout extends ViewGroup implements ScrollAd
+             setClipBounds(null);
+         }
+ 
+-        setClipToOutline(clipToOutline);
++        // View.setClipToOutline() in Android 11 calls damageInParent() even
++        // when the stored flag is identical. During shade gestures we can
++        // skip that redundant damage if no outline-clipping state changed.
++        // Other Android targets retain the original behavior by default.
++        if (!mSkipRedundantOutlineDamage || getClipToOutline() != clipToOutline) {
++            setClipToOutline(clipToOutline);
++        }
+     }
+ 
+     /**
+diff --git a/services/core/java/com/android/server/adb/AdbDebuggingManager.java b/services/core/java/com/android/server/adb/AdbDebuggingManager.java
+index 95da946496e869b9f3d449b11a6131051b828072..f6cede08529fdeba3213346b527cd139d187126a 100644
+--- a/services/core/java/com/android/server/adb/AdbDebuggingManager.java
++++ b/services/core/java/com/android/server/adb/AdbDebuggingManager.java
+@@ -602,30 +602,56 @@ public class AdbDebuggingManager {
+         private NotificationManager mNotificationManager;
+         private boolean mAdbNotificationShown;
+ 
++        private boolean mWifiReceiverRegistered;
++        private void suspendAdbWifi() {
++            if (!mAdbWifiEnabled) return;
++            mAdbWifiEnabled = false;
++            setAdbConnectionInfo(null);
++            if (mThread != null) mThread.sendResponse(MSG_DISABLE_ADBDWIFI);
++            onAdbdWifiServerDisconnected(-1);
++            stopAdbDebuggingThread();
++            if (mConnectionPortPoller != null) {
++                mConnectionPortPoller.cancelAndWait();
++                mConnectionPortPoller = null;
++            }
++            SystemProperties.set(WIFI_PERSISTENT_CONFIG_PROPERTY, "0");
++        }
++
+         private final BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
+             @Override
+             public void onReceive(Context context, Intent intent) {
+                 String action = intent.getAction();
++                if (!mAdbWifiEnabled) {
++                    if (WifiManager.NETWORK_STATE_CHANGED_ACTION.equals(action)) {
++                        NetworkInfo state = (NetworkInfo) intent.getParcelableExtra(
++                                WifiManager.EXTRA_NETWORK_INFO);
++                        if (state != null && state.getType() == ConnectivityManager.TYPE_WIFI
++                                && state.isConnected() && Settings.Global.getInt(mContentResolver,
++                                Settings.Global.ADB_WIFI_ENABLED, 0) == 1) {
++                            mHandler.sendEmptyMessage(MSG_ADBDWIFI_ENABLE);
++                        }
++                    }
++                    return;
++                }
+                 // We only care about when wifi is disabled, and when there is a wifi network
+                 // change.
+                 if (WifiManager.WIFI_STATE_CHANGED_ACTION.equals(action)) {
+                     int state = intent.getIntExtra(
+                             WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_DISABLED);
+                     if (state == WifiManager.WIFI_STATE_DISABLED) {
+-                        Slog.i(TAG, "Wifi disabled. Disabling adbwifi.");
+-                        Settings.Global.putInt(mContentResolver,
+-                                Settings.Global.ADB_WIFI_ENABLED, 0);
++                        Slog.i(TAG, "Wifi disabled. Suspending adbwifi.");
++                        suspendAdbWifi();
+                     }
+                 } else if (WifiManager.NETWORK_STATE_CHANGED_ACTION.equals(action)) {
+                     // We only care about wifi type connections
+                     NetworkInfo networkInfo = (NetworkInfo) intent.getParcelableExtra(
+                             WifiManager.EXTRA_NETWORK_INFO);
+-                    if (networkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
++                    if (networkInfo != null
++                            && networkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
+                         // Check for network disconnect
+                         if (!networkInfo.isConnected()) {
+-                            Slog.i(TAG, "Network disconnected. Disabling adbwifi.");
+-                            Settings.Global.putInt(mContentResolver,
+-                                    Settings.Global.ADB_WIFI_ENABLED, 0);
++                            Slog.i(TAG, "Network disconnected. Suspending adbwifi.");
++                            suspendAdbWifi();
+                             return;
+                         }
+ 
+@@ -634,23 +660,23 @@ public class AdbDebuggingManager {
+                         WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                         if (wifiInfo == null || wifiInfo.getNetworkId() == -1) {
+                             Slog.i(TAG, "Not connected to any wireless network."
+-                                    + " Not enabling adbwifi.");
+-                            Settings.Global.putInt(mContentResolver,
+-                                    Settings.Global.ADB_WIFI_ENABLED, 0);
++                                    + " Suspending adbwifi.");
++                            suspendAdbWifi();
++                            return;
+                         }
+ 
+                         // Check for network change
+                         String bssid = wifiInfo.getBSSID();
+                         if (bssid == null || bssid.isEmpty()) {
+-                            Slog.e(TAG, "Unable to get the wifi ap's BSSID. Disabling adbwifi.");
+-                            Settings.Global.putInt(mContentResolver,
+-                                    Settings.Global.ADB_WIFI_ENABLED, 0);
++                            Slog.e(TAG, "Unable to get the wifi ap's BSSID. Suspending adbwifi.");
++                            suspendAdbWifi();
++                            return;
+                         }
+                         synchronized (mAdbConnectionInfo) {
+                             if (!bssid.equals(mAdbConnectionInfo.getBSSID())) {
+-                                Slog.i(TAG, "Detected wifi network change. Disabling adbwifi.");
+-                                Settings.Global.putInt(mContentResolver,
+-                                        Settings.Global.ADB_WIFI_ENABLED, 0);
++                                Slog.i(TAG, "Detected wifi network change. Suspending adbwifi.");
++                                suspendAdbWifi();
++                                mHandler.sendEmptyMessage(MSG_ADBDWIFI_ENABLE);
+                             }
+                         }
+                     }
+@@ -993,16 +1019,20 @@ public class AdbDebuggingManager {
+                     break;
+                 }
+                 case MSG_ADBDWIFI_ENABLE: {
+-                    if (mAdbWifiEnabled) {
++                    if (Settings.Global.getInt(mContentResolver,
++                            Settings.Global.ADB_WIFI_ENABLED, 0) != 1 || mAdbWifiEnabled) {
+                         break;
+                     }
+ 
+-                    AdbConnectionInfo currentInfo = getCurrentWifiApInfo();
+-                    if (currentInfo == null) {
+-                        Settings.Global.putInt(mContentResolver,
+-                                Settings.Global.ADB_WIFI_ENABLED, 0);
+-                        break;
++                    if (!mWifiReceiverRegistered) {
++                        IntentFilter intentFilter =
++                                new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION);
++                        intentFilter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
++                        mContext.registerReceiver(mBroadcastReceiver, intentFilter);
++                        mWifiReceiverRegistered = true;
+                     }
++                    AdbConnectionInfo currentInfo = getCurrentWifiApInfo();
++                    if (currentInfo == null) break;
+ 
+                     if (!verifyWifiNetwork(currentInfo.getBSSID(),
+                             currentInfo.getSSID())) {
+@@ -1015,11 +1045,6 @@ public class AdbDebuggingManager {
+                     }
+ 
+                     setAdbConnectionInfo(currentInfo);
+-                    IntentFilter intentFilter =
+-                            new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION);
+-                    intentFilter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
+-                    mContext.registerReceiver(mBroadcastReceiver, intentFilter);
+-
+                     SystemProperties.set(WIFI_PERSISTENT_CONFIG_PROPERTY, "1");
+                     mConnectionPortPoller =
+                             new AdbDebuggingManager.AdbConnectionPortPoller(mPortListener);
+@@ -1032,18 +1057,11 @@ public class AdbDebuggingManager {
+                     break;
+                 }
+                 case MSG_ADBDWIFI_DISABLE:
+-                    if (!mAdbWifiEnabled) {
+-                        break;
+-                    }
+-                    mAdbWifiEnabled = false;
+-                    setAdbConnectionInfo(null);
+-                    mContext.unregisterReceiver(mBroadcastReceiver);
+-
+-                    if (mThread != null) {
+-                        mThread.sendResponse(MSG_DISABLE_ADBDWIFI);
++                    if (mWifiReceiverRegistered) {
++                        mContext.unregisterReceiver(mBroadcastReceiver);
++                        mWifiReceiverRegistered = false;
+                     }
+-                    onAdbdWifiServerDisconnected(-1);
+-                    stopAdbDebuggingThread();
++                    suspendAdbWifi();
+                     break;
+                 case MSG_ADBWIFI_ALLOW:
+                     if (mAdbWifiEnabled) {
+@@ -1065,11 +1083,13 @@ public class AdbDebuggingManager {
+                     setAdbConnectionInfo(newInfo);
+                     Settings.Global.putInt(mContentResolver,
+                             Settings.Global.ADB_WIFI_ENABLED, 1);
+-                    IntentFilter intentFilter =
+-                            new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION);
+-                    intentFilter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
+-                    mContext.registerReceiver(mBroadcastReceiver, intentFilter);
+-
++                    if (!mWifiReceiverRegistered) {
++                        IntentFilter intentFilter =
++                                new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION);
++                        intentFilter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
++                        mContext.registerReceiver(mBroadcastReceiver, intentFilter);
++                        mWifiReceiverRegistered = true;
++                    }
+                     SystemProperties.set(WIFI_PERSISTENT_CONFIG_PROPERTY, "1");
+                     mConnectionPortPoller =
+                             new AdbDebuggingManager.AdbConnectionPortPoller(mPortListener);
+@@ -1116,6 +1136,13 @@ public class AdbDebuggingManager {
+                     break;
+                 }
+                 case MSG_PAIR_PAIRING_CODE: {
++                    // A cancelled native pairing waiter must finish before a
++                    // new pairing session can replace the global JNI waiter.
++                    if (mPairingThread != null && mPairingThread.isAlive()) {
++                        Slog.e(TAG, "Pairing thread still active; refusing overlapping request");
++                        onPairingResult(null);
++                        break;
++                    }
+                     String pairingCode = createPairingCode(PAIRING_CODE_LENGTH);
+                     updateUIPairCode(pairingCode);
+                     mPairingThread = new PairingThread(pairingCode, null);
+@@ -1123,6 +1150,11 @@ public class AdbDebuggingManager {
+                     break;
+                 }
+                 case MSG_PAIR_QR_CODE: {
++                    if (mPairingThread != null && mPairingThread.isAlive()) {
++                        Slog.e(TAG, "Pairing thread still active; refusing overlapping QR request");
++                        onPairingResult(null);
++                        break;
++                    }
+                     Bundle bundle = (Bundle) msg.obj;
+                     String serviceName = bundle.getString("serviceName");
+                     String password = bundle.getString("password");
+@@ -1134,12 +1166,20 @@ public class AdbDebuggingManager {
+                     if (mPairingThread != null) {
+                         mPairingThread.cancelPairing();
+                         try {
+-                            mPairingThread.join();
++                            // Never block the system_server foreground handler forever.
++                            // An uncancelled native wait previously triggered Watchdog.
++                            mPairingThread.join(1500);
+                         } catch (InterruptedException e) {
+-                            Slog.w(TAG, "Error while waiting for pairing thread to quit.");
+-                            e.printStackTrace();
++                            Thread.currentThread().interrupt();
++                            Slog.w(TAG, "Interrupted while cancelling adb pairing", e);
++                        }
++                        if (mPairingThread.isAlive()) {
++                            // Preserve ownership: a later pairing must not replace the
++                            // still-running global native waiter. UI may retry when done.
++                            Slog.e(TAG, "ADB pairing cancel timed out; keeping thread handle");
++                        } else {
++                            mPairingThread = null;
+                         }
+-                        mPairingThread = null;
+                     }
+                     break;
+                 case MSG_WIFI_DEVICE_CONNECTED: {
+@@ -1948,27 +1988,19 @@ public class AdbDebuggingManager {
+                 parser.setInput(keyStream, StandardCharsets.UTF_8.name());
+                 // Check for supported keystore version.
+                 XmlUtils.beginDocument(parser, XML_KEYSTORE_START_TAG);
+-                if (parser.next() != XmlPullParser.END_DOCUMENT) {
+-                    String tagName = parser.getName();
+-                    if (tagName == null || !XML_KEYSTORE_START_TAG.equals(tagName)) {
+-                        Slog.e(TAG, "Expected " + XML_KEYSTORE_START_TAG + ", but got tag="
+-                                + tagName);
+-                        return keyMap;
+-                    }
+-                    int keystoreVersion = Integer.parseInt(
+-                            parser.getAttributeValue(null, XML_ATTRIBUTE_VERSION));
+-                    if (keystoreVersion > MAX_SUPPORTED_KEYSTORE_VERSION) {
+-                        Slog.e(TAG, "Keystore version=" + keystoreVersion
+-                                + " not supported (max_supported="
+-                                + MAX_SUPPORTED_KEYSTORE_VERSION + ")");
+-                        return keyMap;
+-                    }
++                int keystoreVersion = Integer.parseInt(
++                        parser.getAttributeValue(null, XML_ATTRIBUTE_VERSION));
++                if (keystoreVersion > MAX_SUPPORTED_KEYSTORE_VERSION) {
++                    Slog.e(TAG, "Keystore version=" + keystoreVersion
++                            + " not supported (max_supported="
++                            + MAX_SUPPORTED_KEYSTORE_VERSION + ")");
++                    return keyMap;
+                 }
+-                while (parser.next() != XmlPullParser.END_DOCUMENT) {
++                while (true) {
++                    XmlUtils.nextElement(parser);
++                    if (parser.getEventType() == XmlPullParser.END_DOCUMENT) break;
+                     String tagName = parser.getName();
+-                    if (tagName == null) {
+-                        break;
+-                    } else if (!tagName.equals(XML_TAG_ADB_KEY)) {
++                    if (!tagName.equals(XML_TAG_ADB_KEY)) {
+                         XmlUtils.skipCurrentTag(parser);
+                         continue;
+                     }
+@@ -2071,27 +2103,19 @@ public class AdbDebuggingManager {
+                 parser.setInput(keyStream, StandardCharsets.UTF_8.name());
+                 // Check for supported keystore version.
+                 XmlUtils.beginDocument(parser, XML_KEYSTORE_START_TAG);
+-                if (parser.next() != XmlPullParser.END_DOCUMENT) {
+-                    String tagName = parser.getName();
+-                    if (tagName == null || !XML_KEYSTORE_START_TAG.equals(tagName)) {
+-                        Slog.e(TAG, "Expected " + XML_KEYSTORE_START_TAG + ", but got tag="
+-                                + tagName);
+-                        return trustedNetworks;
+-                    }
+-                    int keystoreVersion = Integer.parseInt(
+-                            parser.getAttributeValue(null, XML_ATTRIBUTE_VERSION));
+-                    if (keystoreVersion > MAX_SUPPORTED_KEYSTORE_VERSION) {
+-                        Slog.e(TAG, "Keystore version=" + keystoreVersion
+-                                + " not supported (max_supported="
+-                                + MAX_SUPPORTED_KEYSTORE_VERSION);
+-                        return trustedNetworks;
+-                    }
++                int keystoreVersion = Integer.parseInt(
++                        parser.getAttributeValue(null, XML_ATTRIBUTE_VERSION));
++                if (keystoreVersion > MAX_SUPPORTED_KEYSTORE_VERSION) {
++                    Slog.e(TAG, "Keystore version=" + keystoreVersion
++                            + " not supported (max_supported="
++                            + MAX_SUPPORTED_KEYSTORE_VERSION);
++                    return trustedNetworks;
+                 }
+-                while (parser.next() != XmlPullParser.END_DOCUMENT) {
++                while (true) {
++                    XmlUtils.nextElement(parser);
++                    if (parser.getEventType() == XmlPullParser.END_DOCUMENT) break;
+                     String tagName = parser.getName();
+-                    if (tagName == null) {
+-                        break;
+-                    } else if (!tagName.equals(XML_TAG_WIFI_ACCESS_POINT)) {
++                    if (!tagName.equals(XML_TAG_WIFI_ACCESS_POINT)) {
+                         XmlUtils.skipCurrentTag(parser);
+                         continue;
+                     }
+diff --git a/services/core/java/com/android/server/adb/AdbService.java b/services/core/java/com/android/server/adb/AdbService.java
+index 5b16daa5e835e865b38e610899883e80c6d72fe6..7c5156c53692514c8b763dd5f21f7b47a96c637d 100644
+--- a/services/core/java/com/android/server/adb/AdbService.java
++++ b/services/core/java/com/android/server/adb/AdbService.java
+@@ -257,6 +257,8 @@ public class AdbService extends IAdbManager.Stub {
+ 
+         // make sure the ADB_ENABLED setting value matches the current state
+         try {
++            mIsAdbWifiEnabled = Settings.Global.getInt(mContentResolver,
++                    Settings.Global.ADB_WIFI_ENABLED, mIsAdbWifiEnabled ? 1 : 0) == 1;
+             Settings.Global.putInt(mContentResolver,
+                     Settings.Global.ADB_ENABLED, mIsAdbUsbEnabled ? 1 : 0);
+             Settings.Global.putInt(mContentResolver,
+diff --git a/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java b/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
+index 8d1d3afab5c5f62c7f7e8d9835605ee530856885..ebcc61084dd58c7df1788891eca3886fe546c1a3 100644
+--- a/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
++++ b/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
+@@ -1994,36 +1994,101 @@ public class GnssLocationProvider extends AbstractLocationProvider implements
+         sendMessage(INJECT_NTP_TIME, 0, null);
+     }
+ 
++    private static boolean isValidRefLocationPlmn(String plmn) {
++        return plmn != null && plmn.matches("[0-9]{5,6}");
++    }
++
++    private static boolean isValidRefLocationCell(int lac, int cid) {
++        return lac >= 0 && lac <= 65535 && cid >= 0 && cid <= 268435455;
++    }
++
++    private boolean mG419RefLocationLogged;
++
+     @NativeEntryPoint
+     private void requestRefLocation() {
+         TelephonyManager phone = (TelephonyManager)
+                 mContext.getSystemService(Context.TELEPHONY_SERVICE);
+-        final int phoneType = phone.getPhoneType();
+-        if (phoneType == TelephonyManager.PHONE_TYPE_GSM) {
+-            GsmCellLocation gsm_cell = (GsmCellLocation) phone.getCellLocation();
+-            if ((gsm_cell != null) && (phone.getNetworkOperator() != null)
+-                    && (phone.getNetworkOperator().length() > 3)) {
++        final int subId = SubscriptionManager.getDefaultDataSubscriptionId();
++        if (SubscriptionManager.isValidSubscriptionId(subId)) {
++            phone = phone.createForSubscriptionId(subId);
++        }
++        if (phone.getPhoneType() != TelephonyManager.PHONE_TYPE_GSM) {
++            return;
++        }
++
++        final android.telephony.ServiceState state = phone.getServiceState();
++        String operator = phone.getNetworkOperator();
++        if (!isValidRefLocationPlmn(operator) && state != null) {
++            operator = state.getOperatorNumeric();
++        }
++        if (!isValidRefLocationPlmn(operator) && state != null && !state.getRoaming()) {
++            operator = phone.getSimOperator();
++        }
++        if (state != null) {
++            for (int domain : new int[] {android.telephony.NetworkRegistrationInfo.DOMAIN_CS,
++                    android.telephony.NetworkRegistrationInfo.DOMAIN_PS}) {
++                final android.telephony.NetworkRegistrationInfo registration =
++                        state.getNetworkRegistrationInfo(domain,
++                                android.telephony.AccessNetworkConstants.TRANSPORT_TYPE_WWAN);
++                if (registration == null || !registration.isRegistered()) continue;
++                final android.telephony.CellIdentity identity = registration.getCellIdentity();
+                 int type;
+-                int mcc = Integer.parseInt(phone.getNetworkOperator().substring(0, 3));
+-                int mnc = Integer.parseInt(phone.getNetworkOperator().substring(3));
+-                int networkType = phone.getNetworkType();
+-                if (networkType == TelephonyManager.NETWORK_TYPE_UMTS
+-                        || networkType == TelephonyManager.NETWORK_TYPE_HSDPA
+-                        || networkType == TelephonyManager.NETWORK_TYPE_HSUPA
+-                        || networkType == TelephonyManager.NETWORK_TYPE_HSPA
+-                        || networkType == TelephonyManager.NETWORK_TYPE_HSPAP) {
++                int lac;
++                int cid;
++                String registeredPlmn = null;
++                if (identity instanceof android.telephony.CellIdentityWcdma) {
++                    final android.telephony.CellIdentityWcdma cell =
++                            (android.telephony.CellIdentityWcdma) identity;
+                     type = AGPS_REF_LOCATION_TYPE_UMTS_CELLID;
+-                } else {
++                    lac = cell.getLac();
++                    cid = cell.getCid();
++                    registeredPlmn = cell.getMobileNetworkOperator();
++                } else if (identity instanceof android.telephony.CellIdentityGsm) {
++                    final android.telephony.CellIdentityGsm cell =
++                            (android.telephony.CellIdentityGsm) identity;
+                     type = AGPS_REF_LOCATION_TYPE_GSM_CELLID;
++                    lac = cell.getLac();
++                    cid = cell.getCid();
++                    registeredPlmn = cell.getMobileNetworkOperator();
++                } else {
++                    continue;
+                 }
+-                native_agps_set_ref_location_cellid(type, mcc, mnc,
+-                        gsm_cell.getLac(), gsm_cell.getCid());
+-            } else {
+-                Log.e(TAG, "Error getting cell location info.");
++                if (!isValidRefLocationCell(lac, cid)) continue;
++                final String actualPlmn = isValidRefLocationPlmn(registeredPlmn)
++                        ? registeredPlmn : operator;
++                if (!isValidRefLocationPlmn(actualPlmn)) continue;
++                native_agps_set_ref_location_cellid(type,
++                        Integer.parseInt(actualPlmn.substring(0, 3)),
++                        Integer.parseInt(actualPlmn.substring(3)), lac, cid);
++                if (!mG419RefLocationLogged) {
++                    mG419RefLocationLogged = true;
++                    Log.i(TAG, "SMT311_G420_REFLOC registered_serving_cell type=" + type
++                            + " (identity redacted)");
++                }
++                return;
+             }
+-        } else if (phoneType == TelephonyManager.PHONE_TYPE_CDMA) {
+-            Log.e(TAG, "CDMA not supported.");
+         }
++        final android.telephony.CellLocation oldLocation = phone.getCellLocation();
++        if (oldLocation instanceof GsmCellLocation) {
++            final GsmCellLocation gsm = (GsmCellLocation) oldLocation;
++            if (isValidRefLocationPlmn(operator)
++                    && isValidRefLocationCell(gsm.getLac(), gsm.getCid())) {
++                final int mcc = Integer.parseInt(operator.substring(0, 3));
++                final int mnc = Integer.parseInt(operator.substring(3));
++                final int rat = phone.getNetworkType();
++                final boolean umts = rat == TelephonyManager.NETWORK_TYPE_UMTS
++                        || rat == TelephonyManager.NETWORK_TYPE_HSDPA
++                        || rat == TelephonyManager.NETWORK_TYPE_HSUPA
++                        || rat == TelephonyManager.NETWORK_TYPE_HSPA
++                        || rat == TelephonyManager.NETWORK_TYPE_HSPAP;
++                native_agps_set_ref_location_cellid(umts ? AGPS_REF_LOCATION_TYPE_UMTS_CELLID
++                        : AGPS_REF_LOCATION_TYPE_GSM_CELLID,
++                        mcc, mnc, gsm.getLac(), gsm.getCid());
++                return;
++            }
++        }
++
++        Log.w(TAG, "SMT311_G419_REFLOC registered_cell_unavailable");
+     }
+ 
+     // Implements method nfwNotifyCb() in IGnssVisibilityControlCallback.hal.
+diff --git a/services/core/java/com/android/server/location/gps_debug.conf b/services/core/java/com/android/server/location/gps_debug.conf
+index 34ce96f3c8b3aa34bd4599525edd6bc4ce224eb4..91bda452606f96ed36b5fd58482fb378e3ecc3b4 100644
+--- a/services/core/java/com/android/server/location/gps_debug.conf
++++ b/services/core/java/com/android/server/location/gps_debug.conf
+@@ -50,3 +50,12 @@
+ # Set bit 0x2 if NI GPS functionalities are to be locked
+ # default - non is locked for backward compatibility
+ #GPS_LOCK = 0
++
++# SM-T311 original BCM4752 SuplTlsEnable=false and stock gps.conf port 7276.
++SUPL_HOST=supl.google.com
++SUPL_PORT=7276
++
++# SM-T311 (G357): verified factory BCM4752 LTO 4-day GLONASS v2 endpoint over TLS.
++XTRA_SERVER_1=https://gllto.glpals.com/4day/glo/v2/latest/lto2.dat
++XTRA_SERVER_2=https://gllto.glpals.com/4day/glo/v2/latest/lto2.dat
++XTRA_SERVER_3=https://gllto.glpals.com/4day/glo/v2/latest/lto2.dat
+diff --git a/services/core/java/com/android/server/wm/Session.java b/services/core/java/com/android/server/wm/Session.java
+index 0e0ae1f55a1f0b366798b1e234b55a73b04416f4..663599cf396d3f031aa2bb0e957cbbdb885cc5d5 100644
+--- a/services/core/java/com/android/server/wm/Session.java
++++ b/services/core/java/com/android/server/wm/Session.java
+@@ -360,6 +360,14 @@ class Session extends IWindowSession.Stub implements IBinder.DeathRecipient {
+ 
+     private void actionOnWallpaper(IBinder window,
+             BiConsumer<WallpaperController, WindowState> action) {
++        // G846: A window being removed during FallbackHome -> Launcher startup
++        // may send a final wallpaper zoom/offset update with a null token.
++        // There is no wallpaper owner to update. Do not call the strict WMS
++        // lookup with null; it raises a system_server WTF during boot.
++        // Non-null invalid/foreign tokens still take the normal strict path.
++        if (window == null) {
++            return;
++        }
+         final WindowState windowState = mService.windowForClientLocked(this, window, true);
+         action.accept(windowState.getDisplayContent().mWallpaperController, windowState);
+     }
+diff --git a/services/core/jni/com_android_server_adb_AdbDebuggingManager.cpp b/services/core/jni/com_android_server_adb_AdbDebuggingManager.cpp
+index 9c834aaece8592c510e9c119dbdd7a5e5439fcb9..3378350b4b7160570050549c06ecda47607cd68f 100644
+--- a/services/core/jni/com_android_server_adb_AdbDebuggingManager.cpp
++++ b/services/core/jni/com_android_server_adb_AdbDebuggingManager.cpp
+@@ -125,6 +125,19 @@ static void native_pairing_cancel(JNIEnv* /* env */, jclass /* clazz */) {
+     if (sServer != nullptr) {
+         sServer.reset();
+     }
++    // pairing_server_destroy() may stop its worker without reporting a
++    // ResultCallback. Native pairing_wait otherwise sleeps indefinitely in
++    // cv_.wait() and the Java foreground handler blocks in Thread.join().
++    // Keep the waiter alive until its Java thread has completed.
++    if (sWaiter != nullptr) {
++        {
++            std::lock_guard<std::mutex> lock(sWaiter->mutex_);
++            if (!sWaiter->is_valid_.has_value()) {
++                sWaiter->is_valid_ = false;
++            }
++        }
++        sWaiter->cv_.notify_all();
++    }
+ }
+ 
+ static jboolean native_pairing_wait(JNIEnv* env, jobject thiz) {
+diff --git a/services/usb/java/com/android/server/usb/UsbDeviceManager.java b/services/usb/java/com/android/server/usb/UsbDeviceManager.java
+index 8a6731e2e5ee6764ddfbc1ce277f46199d1cee15..221cf36271cd77e1ecc79e0d916de31cd2b90bd9 100644
+--- a/services/usb/java/com/android/server/usb/UsbDeviceManager.java
++++ b/services/usb/java/com/android/server/usb/UsbDeviceManager.java
+@@ -138,6 +138,11 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+             "/sys/class/android_usb/android0/functions";
+     private static final String STATE_PATH =
+             "/sys/class/android_usb/android0/state";
++    // SM-T311 DWC2/ConfigFS on Linux 6.12, absent legacy android_usb sysfs.
++    private static final String T311_UDC_STATE_PATH =
++            "/sys/class/udc/12480000.usb/state";
++    private static final String T311_UDC_UEVENT_MATCH =
++            "DEVPATH=/devices/platform/soc/12480000.usb/udc/12480000.usb";
+     private static final String RNDIS_ETH_ADDR_PATH =
+             "/sys/class/android_usb/android0/f_rndis/ethaddr";
+     private static final String AUDIO_SOURCE_PCM_PATH =
+@@ -165,6 +170,11 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+     private static final int MSG_FUNCTION_SWITCH_TIMEOUT = 17;
+     private static final int MSG_GADGET_HAL_REGISTERED = 18;
+     private static final int MSG_RESET_USB_GADGET = 19;
++    private static final int MSG_T311_USB_REATTACH = 20;
++    // The HAL may still have a pending 3s function switch or 5s enumeration.
++    private static final int T311_USB_REATTACH_DELAY_MS = 6000;
++    private static final int T311_USB_REATTACH_BUSY_DELAY_MS = 2000;
++    private static final int T311_USB_REATTACH_MAX_DEFERRALS = 3;
+ 
+     private static final int AUDIO_MODE_SOURCE = 1;
+ 
+@@ -214,12 +224,30 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+     /*
+      * Listens for uevent messages from the kernel to monitor the USB state
+      */
++    // Convert the modern kernel UDC states to Android's legacy USB event names.
++    private static String readGadgetConnectionState() throws java.io.IOException {
++        if (new File(STATE_PATH).exists()) {
++            return FileUtils.readTextFile(new File(STATE_PATH), 0, null).trim();
++        }
++        String udc = FileUtils.readTextFile(new File(T311_UDC_STATE_PATH), 0, null).trim();
++        if ("configured".equals(udc)) return "CONFIGURED";
++        if ("not attached".equals(udc)) return "DISCONNECTED";
++        return "CONNECTED";
++    }
++
+     private final class UsbUEventObserver extends UEventObserver {
+         @Override
+         public void onUEvent(UEventObserver.UEvent event) {
+             if (DEBUG) Slog.v(TAG, "USB UEVENT: " + event.toString());
+ 
+             String state = event.get("USB_STATE");
++            if (state == null && T311_UDC_UEVENT_MATCH.equals("DEVPATH=" + event.get("DEVPATH"))) {
++                try {
++                    state = readGadgetConnectionState();
++                } catch (java.io.IOException e) {
++                    Slog.w(TAG, "Unable to read SM-T311 UDC state", e);
++                }
++            }
+             String accessory = event.get("ACCESSORY");
+             if (state != null) {
+                 mHandler.updateState(state);
+@@ -357,6 +385,9 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+         // Watch for USB configuration changes
+         mUEventObserver = new UsbUEventObserver();
+         mUEventObserver.startObserving(USB_STATE_MATCH);
++        if (new File(T311_UDC_STATE_PATH).exists()) {
++            mUEventObserver.startObserving(T311_UDC_UEVENT_MATCH);
++        }
+         mUEventObserver.startObserving(ACCESSORY_START_MATCH);
+     }
+ 
+@@ -458,6 +489,10 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+         private int mUsbNotificationId;
+         private boolean mAdbNotificationShown;
+         private boolean mUsbCharging;
++        // One actual gadget reset per failed physical attach/configuration episode.
++        // A self-generated DISCONNECTED uevent must not cause a reset loop.
++        private boolean mT311ReattachAttempted;
++        private int mT311ReattachDeferrals;
+         private boolean mHideUsbNotification;
+         private boolean mSupportsAllCombinations;
+         private boolean mScreenLocked;
+@@ -799,12 +834,28 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+             return functions;
+         }
+ 
++        private void scheduleT311UsbReattach() {
++            if (!SystemProperties.get("ro.product.device", "").equals("lt013g")
++                    || !mBootCompleted || !mUsbCharging || mConnected
++                    || mT311ReattachAttempted || hasMessages(MSG_T311_USB_REATTACH)) {
++                return;
++            }
++            sendEmptyMessageDelayed(MSG_T311_USB_REATTACH, T311_USB_REATTACH_DELAY_MS);
++        }
++
+         @Override
+         public void handleMessage(Message msg) {
+             switch (msg.what) {
+                 case MSG_UPDATE_STATE:
+                     mConnected = (msg.arg1 == 1);
+                     mConfigured = (msg.arg2 == 1);
++                    if (SystemProperties.get("ro.product.device", "").equals("lt013g")
++                            && mConfigured) {
++                        // A successful enumeration closes the failed-attach episode.
++                        removeMessages(MSG_T311_USB_REATTACH);
++                        mT311ReattachAttempted = false;
++                        mT311ReattachDeferrals = 0;
++                    }
+ 
+                     updateUsbNotification(false);
+                     updateAdbNotification(false);
+@@ -829,6 +880,9 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                     } else {
+                         mPendingBootBroadcast = true;
+                     }
++                    // DWC2 may report DISCONNECTED while battery broadcasts
++                    // remain USB-powered across a quick cable unplug/replug.
++                    if (!mConnected) scheduleT311UsbReattach();
+                     break;
+                 case MSG_UPDATE_PORT_STATE:
+                     SomeArgs args = (SomeArgs) msg.obj;
+@@ -863,6 +917,37 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                 case MSG_UPDATE_CHARGING_STATE:
+                     mUsbCharging = (msg.arg1 == 1);
+                     updateUsbNotification(false);
++                    if (SystemProperties.get("ro.product.device", "").equals("lt013g")) {
++                        if (!mUsbCharging) {
++                            removeMessages(MSG_T311_USB_REATTACH);
++                            mT311ReattachAttempted = false;
++                            mT311ReattachDeferrals = 0;
++                        } else {
++                            // Refresh missed UDC events even if power stayed USB.
++                            scheduleT311UsbReattach();
++                        }
++                    }
++                    break;
++                case MSG_T311_USB_REATTACH:
++                    if (!mBootCompleted || !mUsbCharging || mConnected || mHostConnected
++                            || mSourcePower || mT311ReattachAttempted) {
++                        break;
++                    }
++                    if (hasMessages(MSG_FUNCTION_SWITCH_TIMEOUT)
++                            || hasMessages(MSG_SET_FUNCTIONS_TIMEOUT)) {
++                        // A previous HAL request must finish first. Do not drop
++                        // the only attempt just because the HAL is still busy.
++                        if (++mT311ReattachDeferrals <= T311_USB_REATTACH_MAX_DEFERRALS) {
++                            sendEmptyMessageDelayed(MSG_T311_USB_REATTACH,
++                                    T311_USB_REATTACH_BUSY_DELAY_MS);
++                        } else {
++                            Slog.w(TAG, "SM-T311 USB reattach: HAL busy, no forced restart");
++                        }
++                        break;
++                    }
++                    mT311ReattachAttempted = true;
++                    Slog.w(TAG, "SM-T311 USB attached but gadget is disconnected; reapply once");
++                    setEnabledFunctions(mCurrentFunctions, true);
+                     break;
+                 case MSG_UPDATE_HOST_STATE:
+                     Iterator devices = (Iterator) msg.obj;
+@@ -879,6 +964,12 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                             Slog.i(TAG, pair.getKey() + " = " + pair.getValue());
+                         }
+                         UsbDevice device = (UsbDevice) pair.getValue();
++                        // SM-T311: this internal Comneon HSIC WWAN modem is always
++                        // on the EHCI bus. It must not suppress the external USB
++                        // charging/MTP chooser like a physically attached hub.
++                        if (device.getVendorId() == 5401 && device.getProductId() == 32) {
++                            continue;
++                        }
+                         int configurationCount = device.getConfigurationCount() - 1;
+                         while (configurationCount >= 0) {
+                             UsbConfiguration config = device.getConfiguration(configurationCount);
+@@ -972,6 +1063,7 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                 case MSG_BOOT_COMPLETED:
+                     mBootCompleted = true;
+                     finishBoot();
++                    scheduleT311UsbReattach();
+                     break;
+                 case MSG_USER_SWITCHED: {
+                     if (mCurrentUser != msg.arg1) {
+@@ -1281,19 +1373,28 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+             dump.write("audio_accessory_connected", UsbHandlerProto.AUDIO_ACCESSORY_CONNECTED,
+                     mAudioAccessoryConnected);
+ 
+-            try {
+-                writeStringIfNotNull(dump, "kernel_state", UsbHandlerProto.KERNEL_STATE,
+-                        FileUtils.readTextFile(new File(STATE_PATH), 0, null).trim());
+-            } catch (Exception e) {
+-                Slog.e(TAG, "Could not read kernel state", e);
++            // Legacy android_usb is absent on ConfigFS/DWC2 boards such as SM-T311.
++            // Use the exact same UDC state translation as the USB uevent observer.
++            // An optional diagnostic path must never produce a spurious error or
++            // interrupt the rest of the USB dump on a healthy gadget.
++            if (new File(STATE_PATH).exists() || new File(T311_UDC_STATE_PATH).exists()) {
++                try {
++                    writeStringIfNotNull(dump, "kernel_state", UsbHandlerProto.KERNEL_STATE,
++                            readGadgetConnectionState());
++                } catch (java.io.IOException e) {
++                    Slog.w(TAG, "Unable to read available USB kernel state", e);
++                }
+             }
+ 
+-            try {
+-                writeStringIfNotNull(dump, "kernel_function_list",
+-                        UsbHandlerProto.KERNEL_FUNCTION_LIST,
+-                        FileUtils.readTextFile(new File(FUNCTIONS_PATH), 0, null).trim());
+-            } catch (Exception e) {
+-                Slog.e(TAG, "Could not read kernel function list", e);
++            // Legacy android_usb exposes this file, modern ConfigFS does not.
++            if (new File(FUNCTIONS_PATH).exists()) {
++                try {
++                    writeStringIfNotNull(dump, "kernel_function_list",
++                            UsbHandlerProto.KERNEL_FUNCTION_LIST,
++                            FileUtils.readTextFile(new File(FUNCTIONS_PATH), 0, null).trim());
++                } catch (Exception e) {
++                    Slog.e(TAG, "Could not read kernel function list", e);
++                }
+             }
+ 
+             dump.end(token);
+@@ -1344,7 +1445,7 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                 mCurrentFunctions = UsbManager.FUNCTION_NONE;
+                 mCurrentUsbFunctionsReceived = true;
+ 
+-                String state = FileUtils.readTextFile(new File(STATE_PATH), 0, null).trim();
++                String state = readGadgetConnectionState();
+                 updateState(state);
+             } catch (Exception e) {
+                 Slog.e(TAG, "Error initializing UsbHandler", e);
+@@ -1722,7 +1823,7 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                     mCurrentUsbFunctionsRequested = true;
+                     mGadgetProxy.getCurrentUsbFunctions(new UsbGadgetCallback());
+                 }
+-                String state = FileUtils.readTextFile(new File(STATE_PATH), 0, null).trim();
++                String state = readGadgetConnectionState();
+                 updateState(state);
+             } catch (NoSuchElementException e) {
+                 Slog.e(TAG, "Usb gadget hal not found", e);
+diff --git a/services/usb/java/com/android/server/usb/UsbHostManager.java b/services/usb/java/com/android/server/usb/UsbHostManager.java
+index 140a95d611004be1a5fc2b3f3fbfc6ebb9a8f574..8b7146add4a49a1eaa1a7004e9148681dd2f1ed4 100644
+--- a/services/usb/java/com/android/server/usb/UsbHostManager.java
++++ b/services/usb/java/com/android/server/usb/UsbHostManager.java
+@@ -120,6 +120,25 @@ public class UsbHostManager {
+             return (new StringBuilder(sFormat.format(new Date(mTimestamp)))).toString();
+         }
+ 
++        /**
++         * Some connected-history entries have no descriptors (CONNECT_BADPARSE
++         * or CONNECT_BADDEVICE).  They are useful diagnostic records, but must
++         * not crash dumpsys usb.  Do not mutate live UsbDevice records.
++         */
++        private UsbDescriptorParser parserForDump() {
++            if (mDescriptors == null || mDescriptors.length < 18) {
++                return null;
++            }
++            try {
++                UsbDescriptorParser parser = new UsbDescriptorParser(
++                        mDeviceAddress, mDescriptors);
++                return parser.getDeviceDescriptor() != null ? parser : null;
++            } catch (RuntimeException e) {
++                Slog.w(TAG, "Skipping malformed USB descriptor history", e);
++                return null;
++            }
++        }
++
+         void dump(@NonNull DualDumpOutputStream dump, String idName, long id) {
+             long token = dump.start(idName, id);
+ 
+@@ -128,8 +147,11 @@ public class UsbHostManager {
+             dump.write("timestamp", UsbConnectionRecordProto.TIMESTAMP, mTimestamp);
+ 
+             if (mMode != DISCONNECT) {
+-                UsbDescriptorParser parser = new UsbDescriptorParser(mDeviceAddress, mDescriptors);
+-
++                UsbDescriptorParser parser = parserForDump();
++                if (parser == null) {
++                    dump.end(token);
++                    return;
++                }
+                 UsbDeviceDescriptor deviceDescriptor = parser.getDeviceDescriptor();
+ 
+                 dump.write("manufacturer", UsbConnectionRecordProto.MANUFACTURER,
+@@ -148,8 +170,11 @@ public class UsbHostManager {
+         void dumpShort(IndentingPrintWriter pw) {
+             if (mMode != DISCONNECT) {
+                 pw.println(formatTime() + " Connect " + mDeviceAddress + " mode:" + mMode);
+-                UsbDescriptorParser parser = new UsbDescriptorParser(mDeviceAddress, mDescriptors);
+-
++                UsbDescriptorParser parser = parserForDump();
++                if (parser == null) {
++                    pw.println("USB descriptors unavailable or malformed");
++                    return;
++                }
+                 UsbDeviceDescriptor deviceDescriptor = parser.getDeviceDescriptor();
+ 
+                 pw.println("manfacturer:0x" + Integer.toHexString(deviceDescriptor.getVendorID())
+@@ -164,7 +189,11 @@ public class UsbHostManager {
+         void dumpTree(IndentingPrintWriter pw) {
+             if (mMode != DISCONNECT) {
+                 pw.println(formatTime() + " Connect " + mDeviceAddress + " mode:" + mMode);
+-                UsbDescriptorParser parser = new UsbDescriptorParser(mDeviceAddress, mDescriptors);
++                UsbDescriptorParser parser = parserForDump();
++                if (parser == null) {
++                    pw.println("USB descriptors unavailable or malformed");
++                    return;
++                }
+                 StringBuilder stringBuilder = new StringBuilder();
+                 UsbDescriptorsTree descriptorTree = new UsbDescriptorsTree();
+                 descriptorTree.parse(parser);
+@@ -181,7 +210,11 @@ public class UsbHostManager {
+         void dumpList(IndentingPrintWriter pw) {
+             if (mMode != DISCONNECT) {
+                 pw.println(formatTime() + " Connect " + mDeviceAddress + " mode:" + mMode);
+-                UsbDescriptorParser parser = new UsbDescriptorParser(mDeviceAddress, mDescriptors);
++                UsbDescriptorParser parser = parserForDump();
++                if (parser == null) {
++                    pw.println("USB descriptors unavailable or malformed");
++                    return;
++                }
+                 StringBuilder stringBuilder = new StringBuilder();
+                 TextReportCanvas canvas = new TextReportCanvas(parser, stringBuilder);
+                 for (UsbDescriptor descriptor : parser.getDescriptors()) {
+@@ -201,6 +234,10 @@ public class UsbHostManager {
+         void dumpRaw(IndentingPrintWriter pw) {
+             if (mMode != DISCONNECT) {
+                 pw.println(formatTime() + " Connect " + mDeviceAddress + " mode:" + mMode);
++                if (mDescriptors == null) {
++                    pw.println("Raw USB descriptors unavailable");
++                    return;
++                }
+                 int length = mDescriptors.length;
+                 pw.println("Raw Descriptors " + length + " bytes");
+                 int dataOffset = 0;
+diff --git a/services/usb/java/com/android/server/usb/UsbService.java b/services/usb/java/com/android/server/usb/UsbService.java
+index 14c7f04b9e82fee34356516e0414f72ecace511b..793b2303bbb74d27f77c9d3b40b5e38837aae520 100644
+--- a/services/usb/java/com/android/server/usb/UsbService.java
++++ b/services/usb/java/com/android/server/usb/UsbService.java
+@@ -174,7 +174,12 @@ public class UsbService extends IUsbManager.Stub {
+         if (pm.hasSystemFeature(PackageManager.FEATURE_USB_HOST)) {
+             mHostManager = new UsbHostManager(context, mAlsaManager, mPermissionManager);
+         }
+-        if (new File("/sys/class/android_usb").exists()) {
++        // SM-T311 Linux 6.12 uses the UDC / ConfigFS gadget, not the obsolete
++        // android_usb sysfs class.  Without this fallback UsbDeviceManager is
++        // never created, so no MTP/PTP, USB chooser or connection notification
++        // exists even though the gadget HAL and ADB function are operational.
++        if (new File("/sys/class/android_usb").exists()
++                || new File("/sys/class/udc/12480000.usb").exists()) {
+             mDeviceManager = new UsbDeviceManager(context, mAlsaManager, mSettingsManager,
+                     mPermissionManager);
+         }
+diff --git a/telephony/common/com/google/android/mms/pdu/PduParser.java b/telephony/common/com/google/android/mms/pdu/PduParser.java
+index 5340245ae869b03546100993874990bcf6f6d0ce..aadb970fd7f0a03108ddb981d1eaa713b2685edf 100755
+--- a/telephony/common/com/google/android/mms/pdu/PduParser.java
++++ b/telephony/common/com/google/android/mms/pdu/PduParser.java
+@@ -53,6 +53,16 @@ public class PduParser {
+      */
+     private static final int THE_FIRST_PART = 0;
+     private static final int THE_LAST_PART = 1;
++    /**
++     * Maximum nesting depth allowed when parsing recursive multipart parts.
++     * Prevents malicious payloads from causing a StackOverflowError.
++     * Value 30 is chosen because real-world MMS nesting depth is typically
++     * less than 5, leaving a safe margin while avoiding stack exhaustions.
++     * Android background thread stacks are limited (256KB-512KB). A recursion
++     * depth of 30 prevents crashes from StackOverflowError.
++     */
++    private static final int MAX_PARSING_DEPTH = 30;
++
+ 
+     /**
+      * The pdu data.
+@@ -836,16 +846,34 @@ public class PduParser {
+      * @return parts in PduBody structure
+      */
+     protected PduBody parseParts(ByteArrayInputStream pduDataStream) {
++        return parseParts(pduDataStream, 0);
++    }
++
++    private PduBody parseParts(ByteArrayInputStream pduDataStream, int depth) {
+         if (pduDataStream == null) {
+             return null;
+         }
++        if (depth > MAX_PARSING_DEPTH) {
++            Log.e(LOG_TAG, "parseParts: recursion depth limit exceeded (depth: " + depth + ")");
++            return null;
++        }
+ 
+         int count = parseUnsignedInt(pduDataStream); // get the number of parts
+         PduBody body = new PduBody();
+ 
+         for (int i = 0 ; i < count ; i++) {
+             int headerLength = parseUnsignedInt(pduDataStream);
++            if (isInvalidLength(headerLength, pduDataStream)) {
++                Log.e(LOG_TAG, "parseParts: Invalid header length: " + headerLength
++                        + " (available: " + pduDataStream.available() + ")");
++                return null;
++            }
+             int dataLength = parseUnsignedInt(pduDataStream);
++            if (isInvalidLength(dataLength, pduDataStream)) {
++                Log.e(LOG_TAG, "parseParts: Invalid data length: " + dataLength
++                        + " (available: " + pduDataStream.available() + ")");
++                return null;
++            }
+             PduPart part = new PduPart();
+             int startPos = pduDataStream.available();
+             if (startPos <= 0) {
+@@ -900,12 +928,24 @@ public class PduParser {
+ 
+             /* get part's data */
+             if (dataLength > 0) {
++                // Ensure the declared data length does not exceed actual available stream bytes.
++                // Prevents OutOfMemoryError allocations or ArrayIndexOutOfBoundsException.
++                if (dataLength > pduDataStream.available()) {
++                    Log.e(LOG_TAG, "parseParts: dataLength " + dataLength
++                            + " exceeds available stream bytes: " + pduDataStream.available());
++                    return null;
++                }
+                 byte[] partData = new byte[dataLength];
+                 String partContentType = new String(part.getContentType());
+                 pduDataStream.read(partData, 0, dataLength);
+                 if (partContentType.equalsIgnoreCase(ContentType.MULTIPART_ALTERNATIVE)) {
+                     // parse "multipart/vnd.wap.multipart.alternative".
+-                    PduBody childBody = parseParts(new ByteArrayInputStream(partData));
++                    PduBody childBody = parseParts(new ByteArrayInputStream(partData), depth + 1);
++                    if (childBody == null || childBody.getPartsNum() == 0) {
++                        Log.e(LOG_TAG, "parseParts: nested multipart alternative "
++                                + "parsing failed or empty");
++                        return null;
++                    }
+                     // take the first part of children.
+                     part = childBody.getPart(0);
+                 } else {
+@@ -956,6 +996,19 @@ public class PduParser {
+         }
+     }
+ 
++    /**
++     * Checks if the given length is invalid for the current input stream.
++     * A length is considered invalid if it is negative or if it exceeds the number of
++     * bytes available in the stream.
++     *
++     * @param length the length to validate
++     * @param pduDataStream the input stream to check availability against
++     * @return {@code true} if the length is invalid, {@code false} otherwise
++     */
++    private static boolean isInvalidLength(int length, ByteArrayInputStream pduDataStream) {
++        return length < 0 || length > pduDataStream.available();
++    }
++
+     /**
+      * Parse unsigned integer.
+      *
+@@ -1328,13 +1381,16 @@ public class PduParser {
+      */
+     protected static int skipWapValue(ByteArrayInputStream pduDataStream, int length) {
+         assert(null != pduDataStream);
+-        byte[] area = new byte[length];
+-        int readLen = pduDataStream.read(area, 0, length);
+-        if (readLen < length) { //The actually read length is lower than the length
++        if (isInvalidLength(length, pduDataStream)) {
++            Log.e(LOG_TAG, "skipWapValue: Invalid length: " + length
++                    + " (available: " + pduDataStream.available() + ")");
+             return -1;
+-        } else {
+-            return readLen;
+         }
++        // Hardening: Use skip() instead of allocating a byte array to avoid unnecessary
++        // memory allocation, preventing potential OutOfMemoryErrors (OOME).
++        // ByteArrayInputStream.skip() is safe and does not allocate.
++        long skipped = pduDataStream.skip(length);
++        return (skipped < length) ? -1 : (int) skipped;
+     }
+ 
+     /**
+@@ -1368,12 +1424,25 @@ public class PduParser {
+         assert(null != pduDataStream);
+         assert(length > 0);
+ 
++        // G775: The WAP header contains an untrusted length. It must be
++        // bounded by the remaining PDU before entering a parameter loop.
++        // Otherwise an out-of-range length can force billions of iterations
++        // on EOF (and flood logcat), even after skipWapValue returns -1.
++        if (length == null || length <= 0 || isInvalidLength(length, pduDataStream)) {
++            Log.e(LOG_TAG, "parseContentTypeParams: Invalid length: " + length
++                    + " (available: " + pduDataStream.available() + ")");
++            return;
++        }
++
+         int startPos = pduDataStream.available();
+         int tempPos = 0;
+         int lastLen = length;
+-        while(0 < lastLen) {
++        while (0 < lastLen) {
++            if (pduDataStream.available() == 0) {
++                Log.e(LOG_TAG, "parseContentTypeParams: Premature end of PDU");
++                return;
++            }
+             int param = pduDataStream.read();
+-            assert(-1 != param);
+             lastLen--;
+ 
+             switch (param) {
+@@ -1401,7 +1470,9 @@ public class PduParser {
+ 
+                         if (index < PduContentTypes.contentTypes.length) {
+                             byte[] type = (PduContentTypes.contentTypes[index]).getBytes();
+-                            map.put(PduPart.P_TYPE, type);
++                            if (map != null) {
++                                map.put(PduPart.P_TYPE, type);
++                            }
+                         } else {
+                             //not support this type, ignore it.
+                         }
+@@ -1464,14 +1535,16 @@ public class PduParser {
+                             (END_STRING_FLAG == firstValue)) {
+                         //Text-String (extension-charset)
+                         byte[] charsetStr = parseWapString(pduDataStream, TYPE_TEXT_STRING);
+-                        try {
+-                            int charsetInt = CharacterSets.getMibEnumValue(
+-                                    new String(charsetStr));
+-                            map.put(PduPart.P_CHARSET, charsetInt);
+-                        } catch (UnsupportedEncodingException e) {
+-                            // Not a well-known charset, use "*".
+-                            Log.e(LOG_TAG, Arrays.toString(charsetStr), e);
+-                            map.put(PduPart.P_CHARSET, CharacterSets.ANY_CHARSET);
++                        if (charsetStr != null && map != null) {
++                            try {
++                                int charsetInt = CharacterSets.getMibEnumValue(
++                                        new String(charsetStr));
++                                map.put(PduPart.P_CHARSET, charsetInt);
++                            } catch (UnsupportedEncodingException e) {
++                                // Not a well-known charset, use "*".
++                                Log.e(LOG_TAG, Arrays.toString(charsetStr), e);
++                                map.put(PduPart.P_CHARSET, CharacterSets.ANY_CHARSET);
++                            }
+                         }
+                     } else {
+                         //Well-known-charset
+@@ -1509,9 +1582,9 @@ public class PduParser {
+                     }
+                 if (-1 == skipWapValue(pduDataStream, lastLen)) {
+                     Log.e(LOG_TAG, "Corrupt Content-Type");
+-                } else {
+-                    lastLen = 0;
++                    return; // Malformed input: never keep looping on EOF.
+                 }
++                lastLen = 0;
+                 break;
+             }
+         }
+@@ -1585,8 +1658,15 @@ public class PduParser {
+         } else if (cur <= TEXT_MAX) {
+             contentType = parseWapString(pduDataStream, TYPE_TEXT_STRING);
+         } else {
+-            contentType =
+-                (PduContentTypes.contentTypes[parseShortInteger(pduDataStream)]).getBytes();
++            // Parse the content type index from the stream (returns a value 0-127).
++            int index = parseShortInteger(pduDataStream);
++            // Ensure the index is within the bounds of the well-known content types table (0-82).
++            if (index < PduContentTypes.contentTypes.length) {
++                contentType = (PduContentTypes.contentTypes[index]).getBytes();
++            } else {
++                // Fallback to default "*/*" if the index is out of bounds to prevent AIOOBE crash.
++                contentType = (PduContentTypes.contentTypes[0]).getBytes();
++            }
+         }
+ 
+         return contentType;
+@@ -1691,8 +1771,11 @@ public class PduParser {
+                             } else {
+                                 pduDataStream.reset();
+                                 /* Token-text */
+-                                part.setContentDisposition(parseWapString(pduDataStream
+-                                        , TYPE_TEXT_STRING));
++                                byte[] contentDisposition = parseWapString(pduDataStream
++                                        , TYPE_TEXT_STRING);
++                                if (null != contentDisposition) {
++                                    part.setContentDisposition(contentDisposition);
++                                }
+                             }
+ 
+                             /* get filename parameter and skip other parameters */
+@@ -1700,14 +1783,25 @@ public class PduParser {
+                             if (thisStartPos - thisEndPos < len) {
+                                 value = pduDataStream.read();
+                                 if (value == PduPart.P_FILENAME) { //filename is text-string
+-                                    part.setFilename(parseWapString(pduDataStream
+-                                            , TYPE_TEXT_STRING));
++                                    byte[] filename = parseWapString(pduDataStream
++                                            , TYPE_TEXT_STRING);
++                                    if (null != filename) {
++                                        part.setFilename(filename);
++                                    }
+                                 }
+ 
+                                 /* skip other parameters */
+                                 thisEndPos = pduDataStream.available();
+                                 if (thisStartPos - thisEndPos < len) {
+                                     int last = len - (thisStartPos - thisEndPos);
++                                    if (isInvalidLength(last, pduDataStream)) {
++                                        Log.e(LOG_TAG, "parsePartHeaders: Invalid temp length: "
++                                                + last
++                                                + " (available: "
++                                                + pduDataStream.available()
++                                                + ")");
++                                        return false;
++                                    }
+                                     byte[] temp = new byte[last];
+                                     pduDataStream.read(temp, 0, last);
+                                 }
+@@ -1734,7 +1828,7 @@ public class PduParser {
+                 byte[] tempValue = parseWapString(pduDataStream, TYPE_TEXT_STRING);
+ 
+                 // Check the header whether it is "Content-Transfer-Encoding".
+-                if (true ==
++                if (null != tempHeader && null != tempValue &&
+                     PduPart.CONTENT_TRANSFER_ENCODING.equalsIgnoreCase(new String(tempHeader))) {
+                     part.setContentTransferEncoding(tempValue);
+                 }
+diff --git a/tests/TelephonyCommonTests/src/com/android/internal/telephony/tests/PduParserTest.java b/tests/TelephonyCommonTests/src/com/android/internal/telephony/tests/PduParserTest.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..dcb776b2e33c5e8f405f07209b88cafaf164a0c1
+--- /dev/null
++++ b/tests/TelephonyCommonTests/src/com/android/internal/telephony/tests/PduParserTest.java
+@@ -0,0 +1,67 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.internal.telephony.tests;
++
++import static org.junit.Assert.assertNull;
++
++import androidx.test.ext.junit.runners.AndroidJUnit4;
++
++import com.google.android.mms.pdu.PduParser;
++
++import org.junit.Test;
++import org.junit.runner.RunWith;
++
++@RunWith(AndroidJUnit4.class)
++public class PduParserTest {
++
++    // AIOOBE Trigger (14 bytes)
++    private static final byte[] AIOOBE_PAYLOAD = {
++        (byte) 0x8C, (byte) 0x84, (byte) 0x8D, (byte) 0x90, (byte) 0x85, (byte) 0x01, (byte) 0x01,
++        (byte) 0x84, (byte) 0xA3, (byte) 0x01, (byte) 0x01, (byte) 0x01, (byte) 0xA6, (byte) 0x00
++    };
++
++    // NPE Trigger (14 bytes)
++    private static final byte[] NPE_PAYLOAD = {
++        (byte) 0x8C, (byte) 0x84, (byte) 0x8D, (byte) 0x90, (byte) 0x85, (byte) 0x01, (byte) 0x01,
++        (byte) 0x84, (byte) 0xA3, (byte) 0x01, (byte) 0x01, (byte) 0x01, (byte) 0xA6, (byte) 0x01
++    };
++
++    // OOM Trigger (17 bytes)
++    private static final byte[] OOM_PAYLOAD = {
++        (byte) 0x8C, (byte) 0x84, (byte) 0x8D, (byte) 0x90, (byte) 0x85, (byte) 0x01, (byte) 0x01,
++        (byte) 0x84, (byte) 0xA3, (byte) 0x01, (byte) 0x01, (byte) 0x87, (byte) 0xFF, (byte) 0xFF,
++        (byte) 0xFF, (byte) 0x7F, (byte) 0x83
++    };
++
++    @Test(timeout = 2000)
++    public void testAioobePayload() {
++        PduParser parser = new PduParser(AIOOBE_PAYLOAD, true);
++        assertNull(parser.parse());
++    }
++
++    @Test(timeout = 2000)
++    public void testNpePayload() {
++        PduParser parser = new PduParser(NPE_PAYLOAD, true);
++        assertNull(parser.parse());
++    }
++
++    @Test(timeout = 2000)
++    public void testOomPayload() {
++        PduParser parser = new PduParser(OOM_PAYLOAD, true);
++        assertNull(parser.parse());
++    }
++}
+diff --git a/tests/TelephonyCommonTests/src/com/google/android/mms/pdu/PduParserTest.java b/tests/TelephonyCommonTests/src/com/google/android/mms/pdu/PduParserTest.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..8cc6314d1dccc521a9de53da97da5ad412607e58
+--- /dev/null
++++ b/tests/TelephonyCommonTests/src/com/google/android/mms/pdu/PduParserTest.java
+@@ -0,0 +1,173 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.google.android.mms.pdu;
++
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.fail;
++
++import androidx.test.ext.junit.runners.AndroidJUnit4;
++import androidx.test.filters.SmallTest;
++
++import org.junit.Test;
++import org.junit.runner.RunWith;
++
++@RunWith(AndroidJUnit4.class)
++public class PduParserTest {
++
++    // G779: Exercise the actual public MMS parser, not the protected
++    // helper (Android's production framework may strip that helper).
++    // This positive huge uintvar originally caused repeated EOF logging.
++    @Test(timeout = 2000)
++    public void testParseContentTypeParams_oversizedLengthReturnsImmediately() {
++        byte[] pdu = new byte[] {
++                (byte) 0x84, (byte) 0x1F, (byte) 0x87, (byte) 0xFF,
++                (byte) 0xFF, (byte) 0xFF, (byte) 0x7F, (byte) 0x83,
++                (byte) 0xFF
++        };
++        new PduParser(pdu, false).parse();
++    }
++
++    @Test(timeout = 2000)
++    public void testParseContentTypeParams_truncatedWapInputReturnsImmediately() {
++        byte[] pdu = new byte[] {
++                (byte) 0x84, (byte) 0x1F, (byte) 0x87, (byte) 0xFF,
++                (byte) 0xFF, (byte) 0xFF, (byte) 0x7E, (byte) 0x83
++        };
++        new PduParser(pdu, false).parse();
++    }
++
++    @Test(timeout = 2000)
++    @SmallTest
++    public void testParse_malformedHugeHeaderLength_doesNotOOM() {
++        byte[] pduData = new byte[] {
++            // Headers (Send-Req)
++            (byte) 0x8C, (byte) 0x80, // Message-Type: Send-Req
++            (byte) 0x98, (byte) '1', (byte) '2', (byte) '3', (byte) 0x00, // Transaction-ID: "123"
++            (byte) 0x8D, (byte) 0x90, // MMS-Version: 1.0
++            (byte) 0x89, (byte) 0x01, (byte) 0x81, // From: insert-address-token
++            (byte) 0x84, (byte) 0xA3, // Content-Type: multipart/mixed
++
++            // Body (Multipart)
++            (byte) 0x01, // Part count = 1
++            // Part 1
++            // Part Header Length: 0x7FFFFFFF
++            (byte) 0x87, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0x7F,
++            (byte) 0x00, // Part Data Length: 0
++            (byte) 0x83, // Part Content-Type: text/plain
++        };
++
++        PduParser parser = new PduParser(pduData, false);
++        assertNull(parser.parse()); // Should return null instead of throwing OOM
++    }
++
++    @Test(timeout = 2000)
++    @SmallTest
++    public void testParse_invalidContentTypeIndex_doesNotThrowAIOOBE() {
++        byte[] pduData = new byte[] {
++            // Headers (Send-Req)
++            (byte) 0x8C, (byte) 0x80, // Message-Type: Send-Req
++            (byte) 0x98, (byte) '1', (byte) '2', (byte) '3', (byte) 0x00, // Transaction-ID: "123"
++            (byte) 0x8D, (byte) 0x90, // MMS-Version: 1.0
++            (byte) 0x89, (byte) 0x01, (byte) 0x81, // From: insert-address-token
++            (byte) 0x84, (byte) 0xD3, // Content-Type: index 83 (invalid, max is 82)
++        };
++
++        PduParser parser = new PduParser(pduData, false);
++        try {
++            parser.parse();
++        } catch (ArrayIndexOutOfBoundsException e) {
++            org.junit.Assert.fail("Should not throw ArrayIndexOutOfBoundsException");
++        }
++    }
++
++    @Test(timeout = 2000)
++    @SmallTest
++    public void testParse_elementDescriptorWithParams_doesNotThrowNPE() {
++        byte[] pduData = new byte[] {
++            // Headers (Send-Req)
++            (byte) 0x8C, (byte) 0x80, // Message-Type: Send-Req
++            (byte) 0x98, (byte) '1', (byte) '2', (byte) '3', (byte) 0x00, // Transaction-ID: "123"
++            (byte) 0x8D, (byte) 0x90, // MMS-Version: 1.0
++            (byte) 0x89, (byte) 0x01, (byte) 0x81, // From: insert-address-token
++            (byte) 0x84, (byte) 0xA3, // Content-Type: multipart/mixed
++
++            // ELEMENT_DESCRIPTOR (which passes null map)
++            (byte) 0xB2,
++            (byte) 0x03, // Value-length
++            (byte) 0xA3, // Media-type: multipart/mixed
++            (byte) 0x83, // Parameter: P_TYPE
++            (byte) 0x80, // Parameter value: index 0
++        };
++
++        PduParser parser = new PduParser(pduData, false);
++        try {
++            parser.parse();
++        } catch (NullPointerException e) {
++            org.junit.Assert.fail("Should not throw NullPointerException");
++        }
++    }
++
++    @Test(timeout = 2000)
++    @SmallTest
++    public void testParse_emptyCharset_doesNotThrowNPE() {
++        byte[] pduData = new byte[] {
++            // Headers (Send-Req)
++            (byte) 0x8C, (byte) 0x80, // Message-Type: Send-Req
++            (byte) 0x98, (byte) '1', (byte) '2', (byte) '3', (byte) 0x00, // Transaction-ID: "123"
++            (byte) 0x8D, (byte) 0x90, // MMS-Version: 1.0
++            (byte) 0x89, (byte) 0x01, (byte) 0x81, // From: insert-address-token
++            (byte) 0x84, // Content-Type
++            // Value for Content-Type (with parameters)
++            (byte) 0x03, // Value-length
++            (byte) 0xA3, // Media-type: multipart/mixed
++            (byte) 0x81, // Parameter: P_CHARSET
++            (byte) 0x00, // Parameter value: empty string
++        };
++
++        PduParser parser = new PduParser(pduData, false);
++        try {
++            parser.parse();
++        } catch (NullPointerException e) {
++            org.junit.Assert.fail("Should not throw NullPointerException");
++        }
++    }
++
++    @Test(timeout = 2000)
++    @SmallTest
++    public void testPduParserUnderflowOOM() {
++        // CONTENT_TYPE (0x84), LENGTH_QUOTE (0x1F), uintvar for Integer.MIN_VALUE,
++        // well-known type (0x83)
++        byte[] pdu = new byte[] {
++                (byte) 0x84,
++                (byte) 0x1F,
++                (byte) 0x88,
++                (byte) 0x80,
++                (byte) 0x80,
++                (byte) 0x80,
++                (byte) 0x00,
++                (byte) 0x83
++        };
++
++        try {
++            PduParser parser = new PduParser(pdu, false);
++            // This should not crash with OOM.
++            parser.parse();
++        } catch (OutOfMemoryError e) {
++            fail("Triggered OutOfMemoryError due to integer underflow!");
++        }
++    }
++}

@@ -1,0 +1,40 @@
+# SM-T311 Android 11 baseline memory profile.
+# No ro.config.low_ram=true at this stage.
+
+pm.dexopt.shared=quicken
+pm.dexopt.downgrade_after_inactive_days=10
+
+dalvik.vm.heapgrowthlimit=128m
+dalvik.vm.heapsize=256m
+
+# BEGIN SM-T311 V59 MAINLINE GRAPHICS PROPERTIES
+ro.hardware.egl=mesa
+ro.hardware.gralloc=minigbm_exynos
+ro.hardware.hwcomposer=drm_minigbm
+ro.opengles.version=131072
+debug.hwui.renderer=skiagl
+# G1786: final quiet release behavior must live in SYSTEM/build.prop;
+# the physically pinned BOOT/ROOT default.prop is deliberately unchanged.
+# Keep the source-proven GLPB fallback but do not enable profiling by default.
+debug.t311.hwui_draw_stages=0
+debug.t311.mesa_glpb=0
+persist.traced.enable=0
+# Limit APM-only diagnostics without changing audio policy or RIL audio HAL.
+log.tag.APM_AudioPolicyManager=W
+# END SM-T311 V59 MAINLINE GRAPHICS PROPERTIES
+
+# BEGIN SM-T311 A3 WORKING MEMORY BASELINE
+# Proven on the booting 2026-07-30 userspace. Do not enable ro.config.low_ram.
+ro.lmk.use_psi=true
+ro.lmk.use_new_strategy=true
+ro.lmk.use_minfree_levels=false
+ro.lmk.critical_upgrade=true
+ro.lmk.upgrade_pressure=40
+ro.lmk.downgrade_pressure=60
+ro.lmk.kill_heaviest_task=false
+ro.lmk.swap_free_low_percentage=10
+ro.lmk.psi_partial_stall_ms=200
+ro.lmk.psi_complete_stall_ms=700
+ro.lmk.thrashing_limit=30
+ro.lmk.thrashing_limit_decay=50
+# END SM-T311 A3 WORKING MEMORY BASELINE

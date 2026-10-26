@@ -1,0 +1,16 @@
+# SM-T311 legacy XMM6262 radio — scoped accesses observed in AVC audit.
+# The Samsung RIL uses the TelephonyProvider's modem network-info database.
+# The shipped ril-daemon init service already requests DAC_OVERRIDE and real
+# rild capability AVCs confirm SELinux was independently blocking it.
+allow rild radio_data_file:dir { search getattr open read write add_name remove_name };
+allow rild radio_data_file:file { create getattr open read write ioctl lock setattr unlink };
+allow rild radio_data_file:lnk_file { getattr read };
+
+typeattribute rild lt013g_radio_dac_override_allowed;
+allow rild self:capability dac_override;
+
+# G291: XMM6262 modem control uses the existing dedicated USB/HSIC sysfs type.
+allow rild sysfs_lt013g_modem_state:file { getattr open read write };
+
+# Observed G298: stock modem's IPv6 Router Advertisement sysctl.
+allow rild proc_net:file write;

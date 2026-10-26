@@ -1,0 +1,59 @@
+{
+  "stage": "G706",
+  "verification": "Real ARM32 host .config + target GCC preprocessing exact pageflag enum, linked vmlinux global size and disassembly",
+  "pageflag_values": {
+    "G686_EXP": {
+      "PG_locked": 0,
+      "PG_dropbehind": 19,
+      "PG_rcu_free": 20,
+      "PG_mlocked": 21,
+      "PG_hwpoison": null,
+      "__NR_PAGEFLAGS": 22
+    },
+    "G700_OFF": {
+      "PG_locked": 0,
+      "PG_dropbehind": 19,
+      "PG_rcu_free": null,
+      "PG_mlocked": 20,
+      "PG_hwpoison": null,
+      "__NR_PAGEFLAGS": 21
+    }
+  },
+  "pageflag_names_table_bytes": {
+    "G686_EXP": 184,
+    "G700_OFF": 176
+  },
+  "checks": {
+    "G705_previous_positive_and_mutation_gates": true,
+    "preprocessed_real_ARM32_ON_enum_22": true,
+    "preprocessed_real_ARM32_OFF_enum_21": true,
+    "PG_rcu_free_only_in_exp_at_bit20": true,
+    "PG_mlocked_shifts_21_to_20": true,
+    "preexisting_pageflags_below_rcu_free_stable": true,
+    "no_memory_failure_or_arch_extra_flags_in_either": true,
+    "user_UAPI_KPF_HWPOISON_stays_19": true,
+    "internal_KPF_MLOCKED_remains_33": true,
+    "stable_page_flags_maps_public_bit_to_dynamic_kernel_PG": true,
+    "no_public_KPF_RCU_FREE_number": true,
+    "static_pageflag_name_table_consistent_with_enum": true,
+    "real_ARM32_stable_page_flags_function_size_unchanged": true,
+    "FUSE_source_uses_proper_flag_accessor": true,
+    "FUSE_real_ARM32_flag_mask_shift_observed": true,
+    "pageflags_internal_unused_bits_derive_NR_PAGEFLAGS": true,
+    "G700_RELEASE_BOOT_exact_pinned_digest": true
+  },
+  "negative_controls": {
+    "remove_PG_rcu_free_from_experiment": true,
+    "change_internal_MLOCKED_bit_mapping": true,
+    "remove_user_visible_mapping": true,
+    "remove_ARM32_mlocked_mask_evidence": true
+  },
+  "public_KPF_MLOCKED": 33,
+  "public_KPF_HWPOISON": 19,
+  "internal_pg_mlocked_shift_IS_ABI_break_for_external_module_using_raw_layout": "POSSIBLE; external modules not audited",
+  "public_proc_kpageflags_numbering_compiled_mapping": "SOURCE CONFIRMED, NOT TESTED ON G700 DEVICE",
+  "G700_kernel_boot_sha256": "aec9655acc727ab01d0bde3711414f9606c58c5fdcafb6ae5c52a2d3346edc7f",
+  "physical_G700_booted": false,
+  "runtime_ABI_proven": false,
+  "flash_authorized": false
+}

@@ -1,0 +1,44 @@
+{
+  "label": "G661 source-derived writer/reader lifetime graph, NOT proof of same-address ABA safety",
+  "kernel_runtime_base": "a2fca4558",
+  "checks_pass": 24,
+  "checks": {
+    "readside_unlocked_speculative_xarray": true,
+    "readside_flag_before_size_before_slot": true,
+    "readside_mapping_and_normal_zone_after_slot": true,
+    "single_delete_tag_clear_only_on_exiting": true,
+    "single_delete_slot_changed_before_mapping_null": true,
+    "batch_delete_exiting_tag_exception": true,
+    "batch_delete_null_slot_while_locked": true,
+    "replacement_slot_under_xarray_lock": true,
+    "replacement_old_last_put_after_slot_unlock": true,
+    "addition_checks_conflicts_with_xarray_lock": true,
+    "migration_freeze_before_xarray_replace": true,
+    "migration_unfreeze_after_replacement": true,
+    "migrated_new_folio_not_assumed_tagged": true,
+    "migration_old_page_last_put_exists": true,
+    "final_truncate_sets_exiting_and_cycles_lock": true,
+    "inode_destroy_after_mapping_teardown": true,
+    "folio_mark_tag_and_mapping_bit": true,
+    "deferred_free_flag_cleared_before_enqueue": true,
+    "expedited_free_grace_before_recycling": true,
+    "work_handler_recycles_after_rcu_work_callback": true,
+    "split_propagates_rcu_bit_before_untail": true,
+    "hwpoison_release_waits_for_grace": true,
+    "hwpoison_unmap_waits_for_grace": true,
+    "arm32_isize_seqcount": true
+  },
+  "negative_controls": {
+    "remove_reader_slot_reload": true,
+    "remove_expedited_grace": true,
+    "remove_migration_freeze": true
+  },
+  "constraints": [
+    "The initial XArray reader does not take xa_lock; writer-side xa_lock does not serialize its first load.",
+    "A folio unmarked before first read can be freed and reallocated before the speculative flag test; same-address generation confusion is not ruled out by this audit.",
+    "Marked old folios take RCU deferred-free routes unless a special lifetime exception is exercised; exact coverage still requires manual and formal proof.",
+    "folio_migrate_flags does not transfer PG_rcu_free to the new folio; old flagged folio still needs deferred lifetime coverage.",
+    "Source-string checks are not a complete callgraph, allocator provenance model, or proof of correct memory ordering.",
+    "S1 ACTIVE, S2 BLOCKED, S3 BLOCKED, S4-6 BLOCKED, S7 PARTIAL; physical RCU ON remains prohibited."
+  ]
+}

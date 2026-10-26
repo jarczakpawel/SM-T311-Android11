@@ -1,0 +1,81 @@
+{
+  "stage": "G696",
+  "scope": "OFFLINE BOOT packaging, never flash",
+  "source_and_actual_8MiB_binary_guards": {
+    "G650_base_exact_sha": true,
+    "G696_candidate_exact_sha": true,
+    "G696_android_v0_geometry": true,
+    "G650_android_v0_geometry": true,
+    "boot_image_8MiB": true,
+    "G650_ram_sha_expected": true,
+    "G696_ram_sha_expected": true,
+    "ramdisk_bytes_unmodified": true,
+    "DTB_vendor_board_pinned": true,
+    "candidate_has_pinned_zImage": true,
+    "new_kernel_is_zImage_plus_board_DTB": true,
+    "G650_old_kernel_DTB_suffix": true,
+    "base_header_unchanged_except_size_and_hash": true,
+    "no_unsafe_config_selected": true,
+    "all_core_device_config_settings_remain_y": true,
+    "source_config_delta_exactly_29": true,
+    "manifest_flash_policy_explicitly_NO": true,
+    "manifest_does_NOT_claim_live_p9_SHA": true,
+    "manifest_does_NOT_claim_modem_hardware_certification": true,
+    "manifest_does_NOT_claim_TWRP_preflight": true,
+    "packer_uses_pinned_exact_base": true,
+    "packer_asserts_byte_identical_G650_roundtrip": true,
+    "packer_has_six_corruption_controls": true,
+    "no_OTA_or_TWRP_payload_generated": true
+  },
+  "positive_gates": 24,
+  "mutated_inputs_rejected": {
+    "changed_magic": [
+      "G696_candidate_exact_sha",
+      "G696_android_v0_geometry",
+      "G696_ram_sha_expected",
+      "ramdisk_bytes_unmodified",
+      "new_kernel_is_zImage_plus_board_DTB",
+      "base_header_unchanged_except_size_and_hash"
+    ],
+    "ramdisk_corrupted": [
+      "G696_candidate_exact_sha",
+      "G696_android_v0_geometry",
+      "G696_ram_sha_expected",
+      "ramdisk_bytes_unmodified",
+      "new_kernel_is_zImage_plus_board_DTB",
+      "base_header_unchanged_except_size_and_hash"
+    ],
+    "changed_candidate_hash": [
+      "G696_candidate_exact_sha"
+    ],
+    "pretend_live_boot_hash_checked": [
+      "manifest_does_NOT_claim_live_p9_SHA"
+    ],
+    "pretend_modem_certified": [
+      "manifest_does_NOT_claim_modem_hardware_certification"
+    ],
+    "allow_flash": [
+      "manifest_flash_policy_explicitly_NO"
+    ],
+    "lost_device_config_gate": [
+      "all_core_device_config_settings_remain_y"
+    ],
+    "lie_about_config_delta": [
+      "source_config_delta_exactly_29"
+    ],
+    "drop_original_kernel_roundtrip_check": [
+      "packer_asserts_byte_identical_G650_roundtrip"
+    ]
+  },
+  "candidate_sha256": "ba9aed97fe7a028fc9ff5b540c916b251a7cd064a9fbf4055b5eb3f7af254204",
+  "physical_live_boot_sha_confirmed": false,
+  "flash_authorized": false,
+  "RIL_GNSS_modules_runtime_compatibility_proven": false,
+  "boot_process_measured": false,
+  "four_source_paths_staged_not_deployed": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

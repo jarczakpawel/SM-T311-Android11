@@ -1,0 +1,20 @@
+permissive lt013g_gps_legacy;
+allow lt013g_gps_legacy vendor_data_file:dir mounton;
+allow lt013g_gps_legacy socket_device:dir mounton;
+allow lt013g_gps_legacy lt013g_gps_scratch_data_file:file mounton;
+allow lt013g_gps_legacy device:dir mounton;
+allow lt013g_gps_legacy sysfs:dir { getattr open read search mounton };
+allow lt013g_gps_legacy sysfs:file { getattr open read };
+allow lt013g_gps_legacy unlabeled:dir search;
+# G382: no longer grant setattr on Android platform Binder; only the
+# private lt013g-gps Binder node may be chmod/chowned by the launcher.
+allow lt013g_gps_legacy dnsproxyd_socket:sock_file getattr;
+allow lt013g_gps_legacy fwmarkd_socket:sock_file getattr;
+allow hal_graphics_allocator_default gpu_device:dir r_dir_perms;
+allow hal_graphics_composer_default vndbinder_device:chr_file { getattr open read write ioctl map };
+allow hal_graphics_composer_default self:netlink_kobject_uevent_socket { create bind getattr read write setopt getopt };
+allow hal_thermal_default sysfs:dir r_dir_perms;
+allow hal_thermal_default self:netlink_kobject_uevent_socket getopt;
+allow rild block_device:dir search;
+allow audioserver system_server_tmpfs:file { getattr open read write map };
+allow system_server audioserver_tmpfs:file { getattr open read write map };

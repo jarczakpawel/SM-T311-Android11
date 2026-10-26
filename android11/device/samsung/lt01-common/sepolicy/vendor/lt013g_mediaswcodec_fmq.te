@@ -1,0 +1,2 @@
+allow mediaswcodec system_server_tmpfs:file { getattr map read write };
+allow mediaswcodec appdomain_tmpfs:file { getattr map read write };

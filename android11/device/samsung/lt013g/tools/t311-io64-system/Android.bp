@@ -1,0 +1,10 @@
+cc_binary {
+    name: "t311_io64_system",
+    srcs: ["copy.c"],
+    static_executable: true,
+    static_libs: ["libc"],
+    stl: "none",
+    compile_multilib: "32",
+    cflags: ["-Wall", "-Wextra", "-Werror", "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE64_SOURCE"],
+    strip: { none: true },
+}

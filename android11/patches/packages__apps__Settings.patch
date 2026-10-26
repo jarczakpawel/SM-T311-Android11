@@ -1,0 +1,50 @@
+diff --git a/src/com/android/settings/development/EnableVerboseVendorLoggingPreferenceController.java b/src/com/android/settings/development/EnableVerboseVendorLoggingPreferenceController.java
+index e1db74d54c7acc8e44fc31c15e2dd22763d83836..ed583d353f1df009ee49561b41a02c160e8ff03a 100644
+--- a/src/com/android/settings/development/EnableVerboseVendorLoggingPreferenceController.java
++++ b/src/com/android/settings/development/EnableVerboseVendorLoggingPreferenceController.java
+@@ -19,6 +19,7 @@ package com.android.settings.development;
+ import android.annotation.Nullable;
+ import android.content.Context;
+ import android.hardware.dumpstate.V1_0.IDumpstateDevice;
++import android.os.Build;
+ import android.os.RemoteException;
+ import android.util.Log;
+ 
+@@ -132,13 +133,26 @@ public class EnableVerboseVendorLoggingPreferenceController
+         return false;
+     }
+ 
+-    /** Return a {@IDumpstateDevice} instance or null if service is not available. */
++    /**
++     * Look up the optional vendor dumpstate HAL without waiting for registration.
++     * On SM-T311 no dumpstate HAL is declared; getService(true) used to sleep
++     * indefinitely on the preference-worker thread. DashboardFragment then
++     * synchronously waited on that worker and Developer options ANRed.
++     */
+     @VisibleForTesting
+     @Nullable IDumpstateDevice getDumpstateDeviceService() {
++        // The 2013 SM-T311 (lt013g) does not register a vendor dumpstate HAL.
++        // Even getService(false) blocks inside this device's libhidlbase when
++        // the optional v1.0 service is absent (confirmed 17:58 Settings ANR).
++        // Avoid ANY HIDL call for a device that cannot provide this feature.
++        if ("lt013g".equals(Build.DEVICE)) {
++            mDumpstateHalVersion = DUMPSTATE_HAL_VERSION_UNKNOWN;
++            return null;
++        }
+         IDumpstateDevice service = null;
+         try {
+             service = android.hardware.dumpstate.V1_1.IDumpstateDevice
+-                    .getService(true /* retry */);
++                    .getService(false /* retry */);
+             mDumpstateHalVersion = DUMPSTATE_HAL_VERSION_1_1;
+         } catch (NoSuchElementException | RemoteException e) {
+         }
+@@ -146,7 +160,7 @@ public class EnableVerboseVendorLoggingPreferenceController
+         if (service == null) {
+             try {
+                 service = android.hardware.dumpstate.V1_0.IDumpstateDevice
+-                        .getService(true /* retry */);
++                        .getService(false /* retry */);
+                 mDumpstateHalVersion = DUMPSTATE_HAL_VERSION_1_0;
+             } catch (NoSuchElementException | RemoteException e) {
+             }

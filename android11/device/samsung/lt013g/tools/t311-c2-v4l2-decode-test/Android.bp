@@ -1,0 +1,13 @@
+cc_binary {
+    name: "T311C2V4L2DecodeTest",
+    srcs: ["t311_c2_v4l2_decode_test.cpp"],
+    shared_libs: ["liblog", "libmediandk"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+cc_binary {
+    name: "T311C2FlushTest",
+    srcs: ["t311_c2_flush_test.cpp"],
+    shared_libs: ["liblog", "libmediandk", "libcrypto"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}

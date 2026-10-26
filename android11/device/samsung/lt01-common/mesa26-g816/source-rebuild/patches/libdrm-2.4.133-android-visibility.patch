@@ -1,0 +1,13 @@
+--- a/libdrm_macros.h
++++ b/libdrm_macros.h
+@@ -23,7 +23,9 @@
+ #ifndef LIBDRM_LIBDRM_H
+ #define LIBDRM_LIBDRM_H
+ 
+-#if HAVE_VISIBILITY
++/* Android Clang11 supports default/hidden visibility (verified as ARM ELF),
++ * but the libdrm Meson function-attribute cross-check returns false. */
++#if HAVE_VISIBILITY || defined(__ANDROID__)
+ #  define drm_private __attribute__((visibility("hidden")))
+ #  define drm_public  __attribute__((visibility("default")))
+ #else

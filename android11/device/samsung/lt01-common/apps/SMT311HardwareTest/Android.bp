@@ -1,0 +1,11 @@
+// Copyright (C) 2026 Pawel Jarczak
+android_app {
+    name: "SMT311HardwareTest",
+    srcs: ["src/**/*.java"],
+    manifest: "AndroidManifest.xml",
+    sdk_version: "current",
+    min_sdk_version: "24",
+    optimize: {
+        enabled: false,
+    },
+}

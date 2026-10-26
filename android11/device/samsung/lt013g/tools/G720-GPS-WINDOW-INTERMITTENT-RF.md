@@ -1,0 +1,13 @@
+# G720 — correct G719 no-CN0 conclusion, signal returns at same window
+
+Historical G718 original NMEA GSV had all C/N0 blank, true for that bounded session. It is NOT a persistent device state or proof of antenna defect. G720 physically ran GPSTest **on the same tablet and at the same window** for 2m42s, and original gpsd NMEA yielded **GPS C/N0 peak23 dB-Hz**, **GLONASS C/N0 peak24 dB-Hz**, GPS in-view max12, no samples ≥25, GSA mode1 no fix, GGA quality0/used00, RMC V; no location or TTFF. App force-stopped and provider OFF. No new GNSS HAL/kernel version between G718 and G720. This rules out permanent absence of GNSS RF reception.
+
+Historical Android GnssStatus G385 16 Oct on an earlier 6.12 kernel measured max32 dB-Hz, two ≥25; 20 Oct G583/585 on Linux7.3 measured max10/11 dB-Hz from desk BEFORE G717's SUPL stale request update. Differences in NMEA vs native, orientation, propagation, sky and location preclude direct throughput/antenna claims. User's report of previous weaker signals on desk is supported. Original kernel BCM4752 power driver source is identical SHA in current Linux7.3 and prior 6.12, GPS DTS pinmux and LPO are identical except new USB OTG property elsewhere.
+
+New source correction to existing `tools/g719-readonly-nmea-health.sh`: optional numeric **recent seconds 1..3600** uses logcat `-v epoch` and drops older than current timestamp cutoff BEFORE NMEA AWK. No argument now explicitly marks full-buffer output as archived/stale. All diagnostics remain read-only, do not print coordinates or start GNSS. Current Android user data, GPS HAL and configs untouched. `tools/test_g719_gps_nmea_health.py` 5/5 existing host AWK PASS.
+
+Physical new script SHA256 `9a26bec9ac24b610e9dbe9054fd490659b3a7fc2ff73f78b5fd41f529baa3989`; `sh /data/local/tmp/g719-readonly-nmea-health.sh 900` resulted 175 GSV, 182 positive C/N0 max24 dB-Hz, while a 5s window after GPSTest stop returned `INSUFFICIENT_NMEA`, not a false RF failure.
+
+New assistance evidence from G718 log: `G357_LTO_BRIDGE_INJECT bytes=73775 rc=0` repeatedly — vendor bridge reports successful delivery to OEM interface, though actual ephemeris application and first fix remain unproven. Do not claim no attempted injection.
+
+NEXT: physical open sky, if useful C/N0 but no GGA fix then check real receiver ephemerides/LTO/AGPS; if weak also outdoors then antenna contacts, RF LNA / oscillator26MHz (as in factory SM-T311 service manual), not simply kernel 32kHz LPO. Do not patch Android HIDL GnssMetrics (carrier frequency absent in legacy HIDL). S0 PASS, S1–3 RETIRED, S4 REMOVED, S5 BLOCKED, S6 PARTIAL, S7 ACTIVE, S8 ACTIVE. No backup, vendor/boot/recovery writes, calls/PIN or audio.

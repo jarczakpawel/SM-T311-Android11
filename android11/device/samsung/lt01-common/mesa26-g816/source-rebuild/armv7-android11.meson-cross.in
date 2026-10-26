@@ -1,0 +1,21 @@
+[binaries]
+c = ['@@ANDROID_ROOT@@/prebuilts/clang/host/linux-x86/clang-r383902/bin/clang', '--target=armv7a-linux-androideabi29', '--sysroot=@@ANDROID_ROOT@@/out/soong/ndk/sysroot', '-isystem', '@@ANDROID_ROOT@@/out/soong/ndk/sysroot/usr/include/arm-linux-androideabi', '-B', '@@ANDROID_ROOT@@/prebuilts/ndk/r21/platforms/android-29/arch-arm/usr/lib', '-L', '@@ANDROID_LINK_LIBDIR@@', '-L', '@@ANDROID_ROOT@@/prebuilts/ndk/r21/platforms/android-29/arch-arm/usr/lib', '-rtlib=compiler-rt', '-unwindlib=none', '-fuse-ld=lld', '-march=armv7-a', '-mfpu=neon', '-mfloat-abi=softfp']
+cpp = ['@@ANDROID_ROOT@@/prebuilts/clang/host/linux-x86/clang-r383902/bin/clang++', '--target=armv7a-linux-androideabi29', '--sysroot=@@ANDROID_ROOT@@/out/soong/ndk/sysroot', '-isystem', '@@ANDROID_ROOT@@/out/soong/ndk/sysroot/usr/include/arm-linux-androideabi', '-isystem', '@@ANDROID_ROOT@@/prebuilts/clang/host/linux-x86/clang-r383902/include/c++/v1', '-B', '@@ANDROID_ROOT@@/prebuilts/ndk/r21/platforms/android-29/arch-arm/usr/lib', '-L', '@@ANDROID_LINK_LIBDIR@@', '-L', '@@ANDROID_ROOT@@/prebuilts/ndk/r21/platforms/android-29/arch-arm/usr/lib', '-rtlib=compiler-rt', '-unwindlib=none', '-fuse-ld=lld', '-march=armv7-a', '-mfpu=neon', '-mfloat-abi=softfp', '-stdlib=libc++']
+ar = '@@ANDROID_ROOT@@/prebuilts/clang/host/linux-x86/clang-r383902/bin/llvm-ar'
+strip = '@@ANDROID_ROOT@@/prebuilts/clang/host/linux-x86/clang-r383902/bin/llvm-strip'
+pkg-config = '/usr/bin/pkg-config'
+
+[host_machine]
+system = 'android'
+cpu_family = 'arm'
+cpu = 'armv7'
+endian = 'little'
+
+[properties]
+needs_exe_wrapper = true
+
+[built-in options]
+# Android 11 Bionic's linux/time.h already declares struct timespec.
+# Mesa's cross-compile has_header_symbol probe can't see it in time.h alone.
+c_args = ['-DHAVE_STRUCT_TIMESPEC=1', '-DHAVE_DLFCN_H=1', '-DHAVE_FUNC_ATTRIBUTE_PACKED=1']
+cpp_args = ['-DHAVE_STRUCT_TIMESPEC=1', '-DHAVE_DLFCN_H=1', '-DHAVE_FUNC_ATTRIBUTE_PACKED=1']

@@ -1,0 +1,384 @@
+diff --git a/src/com/android/gallery3d/app/GestureControllerOverlay.java b/src/com/android/gallery3d/app/GestureControllerOverlay.java
+index 9060490c408ca7281ad6f057a560b1ef9e20eb4b..3b3958f3c203a563ac9bc15fda13f1be75897d6b 100755
+--- a/src/com/android/gallery3d/app/GestureControllerOverlay.java
++++ b/src/com/android/gallery3d/app/GestureControllerOverlay.java
+@@ -55,6 +55,10 @@ public class GestureControllerOverlay extends FrameLayout implements
+     private float mStartBrightness = -1.0f;
+     private double mStartVolumePercent = -1.0f;
+     private int mStartVideoTime = -1;
++    // G892: horizontal playback gestures previously executed MediaPlayer.seekTo
++    // for every MOVE event, saturating the tiny Samsung Codec2 buffer pool.
++    // Preview while dragging and commit only once when the gesture ends.
++    private int mPendingSeekTime = -1;
+ 
+     private TextView mCurrentIndicator;
+     private Drawable mBrightnessDrawable;
+@@ -190,6 +194,14 @@ public class GestureControllerOverlay extends FrameLayout implements
+ 
+     @Override
+     public void onGestureDone(boolean notStart) {
++        // One decoder seek per completed horizontal gesture. The time bar's
++        // own ACTION_UP handling is independent and already once-per-drag.
++        if (mPendingSeekTime >= 0) {
++            if (mListener != null) {
++                mListener.onSeekEnd(mPendingSeekTime, 0, 0);
++            }
++            mPendingSeekTime = -1;
++        }
+         mStartBrightness = -1.0f;
+         mStartVolumePercent = -1.0f;
+         mStartVideoTime = -1;
+@@ -296,6 +308,9 @@ public class GestureControllerOverlay extends FrameLayout implements
+ 
+         if (mStartVideoTime < 0) {
+             mStartVideoTime = ((TimeBarNew) mTimeBar).getCurrentTime();
++            if (mListener != null) {
++                mListener.onSeekStart();
++            }
+         }
+ 
+         int targetTime = mStartVideoTime + (int) (MAX_VIDEO_STEP_TIME * adjustPercent);
+@@ -320,9 +335,9 @@ public class GestureControllerOverlay extends FrameLayout implements
+             }
+         }
+ 
+-        if (mListener != null) {
+-            mListener.onSeekEnd(targetTime, 0, 0);
+-        }
++        // Do not make an expensive hardware seek here. The corresponding
++        // one-shot onGestureDone callback handles it on ACTION_UP.
++        mPendingSeekTime = targetTime;
+         if (mTimeBar != null) {
+             mTimeBar.setTime(targetTime, totalTime, 0, 0);
+         }
+diff --git a/src/com/android/gallery3d/app/MoviePlayer.java b/src/com/android/gallery3d/app/MoviePlayer.java
+index 7db8dcfa045cc8aaa030e7c631a37e2777387842..b38dba1925df591e3c6aab39f65bbf2f8cac520b 100755
+--- a/src/com/android/gallery3d/app/MoviePlayer.java
++++ b/src/com/android/gallery3d/app/MoviePlayer.java
+@@ -36,6 +36,7 @@ import android.net.Uri;
+ import android.os.Build;
+ import android.os.Bundle;
+ import android.os.Handler;
++import android.os.SystemClock;
+ import android.view.KeyEvent;
+ import android.view.MotionEvent;
+ import android.view.SurfaceView;
+@@ -119,6 +120,31 @@ public class MoviePlayer implements
+     private final View mRootView;
+     private final Bookmarker mBookmarker;
+     private final Handler mHandler = new Handler();
++    // G884: a prepared MediaPlayer is NOT proof that its first frame is
++    // actually on the SurfaceView. Keep the cover until VIDEO_RENDERING_START,
++    // with a bounded fallback for old Exynos decoders that skip that callback.
++    private final Runnable mFirstFrameTimeout = new Runnable() {
++        @Override public void run() {
++            revealFirstVideoFrame(false);
++        }
++    };
++    private boolean mFirstFrameCoverPending;
++
++    private void revealFirstVideoFrame(boolean animate) {
++        if (!mFirstFrameCoverPending) return;
++        mFirstFrameCoverPending = false;
++        mHandler.removeCallbacks(mFirstFrameTimeout);
++        mCoverView.animate().cancel();
++        if (animate) {
++            mCoverView.animate().alpha(0f).setDuration(140).withEndAction(() -> {
++                mCoverView.setVisibility(View.GONE);
++                mCoverView.setAlpha(1f);
++            }).start();
++        } else {
++            mCoverView.setAlpha(1f);
++            mCoverView.setVisibility(View.GONE);
++        }
++    }
+     private final AudioBecomingNoisyReceiver mAudioBecomingNoisyReceiver;
+     private final MovieControllerOverlayNew mController;
+     private final GestureControllerOverlay mGestureController;
+@@ -135,6 +161,9 @@ public class MoviePlayer implements
+ 
+     // If the time bar is being dragged.
+     private boolean mDragging;
++    // G891: read-only, low-volume latency metrics for explicit user seek only.
++    private long mSeekRequestedUptimeMs = -1;
++    private int mSeekRequestedPositionMs;
+ 
+     // If the time bar is visible.
+     private boolean mShowing;
+@@ -249,6 +278,7 @@ public class MoviePlayer implements
+ 
+         mVideoView.setOnErrorListener(this);
+         mVideoView.setOnCompletionListener(this);
++        mVideoView.setOnSeekCompleteListener(this);
+         mVideoView.setTimerProgress(mTimerController);
+ 
+         if (mVirtualizer != null) {
+@@ -277,11 +307,12 @@ public class MoviePlayer implements
+         mVideoView.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+             @Override
+             public void onPrepared(MediaPlayer player) {
+-                if (!mVideoView.canSeekForward() || !mVideoView.canSeekBackward()) {
+-                    mController.setSeekable(false);
+-                } else {
+-                    mController.setSeekable(true);
+-                }
++                // G882: on Android 11 the Stagefright seekable metadata may
++                // incorrectly claim local MediaStore MP4 files are not
++                // seekable. A known local file with a positive duration can
++                // always request an exact decoder-backed seek; do not disable
++                // the entire scrubber based on legacy metadata flags.
++                mController.setSeekable(canSeekLocalRecording());
+                 setProgress();
+             }
+         });
+@@ -562,11 +593,16 @@ public class MoviePlayer implements
+     // second by mProgressChecker and also from places where the time bar needs
+     // to be updated immediately.
+     private int setProgress() {
++        // G882: preserve the drag preview; periodic progress updates must
++        // not yank the thumb back to the old decoder position during scrubs.
++        if (mDragging) {
++            return 0;
++        }
+         int position = mVideoView.getCurrentPosition();
+         int duration = mVideoView.getDuration();
+         mController.setTimes(position, duration, 0, 0);
+ 
+-        if (mDragging || (!mShowing && !mIsOnlyAudio)) {
++        if (!mShowing && !mIsOnlyAudio) {
+             return 0;
+         }
+         if (mControllerRewindAndForwardExt != null
+@@ -728,6 +764,13 @@ public class MoviePlayer implements
+         }
+     }
+ 
++    // G882: only local seekable-duration files bypass broken vendor metadata;
++    // streaming / live video keeps its original restrictions.
++    private boolean canSeekLocalRecording() {
++        return (isLocalFile() && mVideoView.getDuration() > 0)
++                || (mVideoView.canSeekBackward() && mVideoView.canSeekForward());
++    }
++
+     @Override
+     public void onSeekStart() {
+         mDragging = true;
+@@ -735,21 +778,45 @@ public class MoviePlayer implements
+ 
+     @Override
+     public void onSeekMove(int time) {
+-        if (mVideoView.canSeek()) {
+-            mVideoView.seekTo(time);
+-        }
++        // Do not submit a hardware decoder seek for every finger movement.
++        // V4L2/Codec2 has a tiny buffer pool and stalls when flooded with
++        // asynchronous seek requests. TimeBar itself previews the position.
+     }
+ 
+     @Override
+     public void onSeekEnd(int time, int start, int end) {
+-        mDragging = false;
+-        if (mVideoView.canSeek()) {
+-            mVideoView.seekTo(time);
++        if (canSeekLocalRecording()) {
++            mSeekRequestedUptimeMs = SystemClock.uptimeMillis();
++            mSeekRequestedPositionMs = time;
++            Log.i(TAG, "G891_SEEK_REQUEST requestedMs=" + time
++                    + " currentMs=" + mVideoView.getCurrentPosition()
++                    + " durationMs=" + mVideoView.getDuration());
++            if (isLocalFile() && mVideoView.getDuration() > 0
++                    && mVideoView.getMediaPlayer() != null) {
++                // A local clip with only the initial IDR cannot jump to the
++                // target on SEEK_PREVIOUS_SYNC. SEEK_CLOSEST can decode from
++                // the nearest sync point and reach the requested frame.
++                // Submit once on release, never for every dragging pixel.
++                mVideoView.getMediaPlayer().seekTo((long) time,
++                        MediaPlayer.SEEK_CLOSEST);
++            } else {
++                mVideoView.seekTo(time);
++            }
+         }
++        mDragging = false;
++        setProgress();
+     }
+ 
+     @Override
+     public void onSeekComplete(MediaPlayer mp) {
++        if (mSeekRequestedUptimeMs >= 0) {
++            final int actual = mp.getCurrentPosition();
++            final long latency = SystemClock.uptimeMillis() - mSeekRequestedUptimeMs;
++            Log.i(TAG, "G891_SEEK_COMPLETE requestedMs=" + mSeekRequestedPositionMs
++                    + " actualMs=" + actual + " deltaMs="
++                    + (actual - mSeekRequestedPositionMs) + " latencyMs=" + latency);
++            mSeekRequestedUptimeMs = -1;
++        }
+         setProgress();
+     }
+ 
+@@ -772,10 +839,13 @@ public class MoviePlayer implements
+         if (LOG) {
+             Log.v(TAG, "onInfo() what:" + what + " extra:" + extra);
+         }
++        if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
++            revealFirstVideoFrame(true);
++        }
+         if (what == MediaPlayer.MEDIA_INFO_NOT_SEEKABLE && mOverlayExt != null) {
+             boolean flag = (extra == 1);
+             mOverlayExt.setCanPause(flag);
+-            mOverlayExt.setCanScrubbing(flag);
++            mOverlayExt.setCanScrubbing(canSeekLocalRecording() || flag);
+         } else if (what == MediaPlayer.MEDIA_INFO_METADATA_UPDATE && mServerTimeoutExt != null) {
+             Log.e(TAG, "setServerTimeout " + extra);
+             mServerTimeoutExt.setTimeout(extra * 1000);
+@@ -798,13 +868,26 @@ public class MoviePlayer implements
+         if (LOG) {
+             Log.v(TAG, "onPrepared(" + mp + ")");
+         }
+-        mCoverView.setVisibility(View.GONE);
++        // G884: the old code removed the opaque cover at PREPARED, before
++        // the Exynos decoder delivered its first pixel, causing a sudden
++        // black/surface flash. Await the actual first rendered video frame.
++        mHandler.removeCallbacks(mFirstFrameTimeout);
++        mCoverView.animate().cancel();
++        mCoverView.setAlpha(1f);
++        if (isLocalFile() && !mIsOnlyAudio) {
++            mFirstFrameCoverPending = true;
++            mCoverView.setVisibility(View.VISIBLE);
++            mHandler.postDelayed(mFirstFrameTimeout, 2000);
++        } else {
++            mFirstFrameCoverPending = false;
++            mCoverView.setVisibility(View.GONE);
++        }
+         if (!isLocalFile()) {
+             mOverlayExt.setPlayingInfo(isLiveStreaming());
+         }
+         getVideoInfo(mp);
+         boolean canPause = mVideoView.canPause();
+-        boolean canSeek = mVideoView.canSeek();
++        boolean canSeek = canSeekLocalRecording();
+         mOverlayExt.setCanPause(canPause);
+         mOverlayExt.setCanScrubbing(canSeek);
+         mController.setPlayPauseReplayResume();
+diff --git a/src/com/android/gallery3d/data/LocalAlbum.java b/src/com/android/gallery3d/data/LocalAlbum.java
+index 3ebea816f9ebbe9e0c41d1cc051e40096b2fec7b..0234e48f7d1eed928932ca37936abe0c5608c8b8 100644
+--- a/src/com/android/gallery3d/data/LocalAlbum.java
++++ b/src/com/android/gallery3d/data/LocalAlbum.java
+@@ -20,6 +20,7 @@ import android.content.ContentResolver;
+ import android.content.res.Resources;
+ import android.database.Cursor;
+ import android.net.Uri;
++import android.os.Bundle;
+ import android.os.Environment;
+ import android.provider.MediaStore;
+ import android.provider.MediaStore.Images;
+@@ -119,22 +120,25 @@ public class LocalAlbum extends MediaSet {
+     @Override
+     public ArrayList<MediaItem> getMediaItem(int start, int count) {
+         DataManager dataManager = mApplication.getDataManager();
+-        Uri uri = mBaseUri.buildUpon()
+-                .appendQueryParameter("limit", start + "," + count).build();
++        // G858: Android 11 MediaProvider treats ?limit=offset,count in the
++        // URI as an abusive legacy query and logs a recovery warning for every
++        // page fetch. Express identical SQL pagination and ordering via the
++        // stable ContentResolver query Bundle instead.
++        Bundle queryArgs = new Bundle();
++        queryArgs.putString(ContentResolver.QUERY_ARG_SQL_LIMIT, start + "," + count);
++        queryArgs.putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, mOrderClause);
++        if (mWhereClause != null) {
++            queryArgs.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, mWhereClause);
++        }
++        if (mBucketId != -1) {
++            queryArgs.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,
++                    new String[]{String.valueOf(mBucketId)});
++        }
+         ArrayList<MediaItem> list = new ArrayList<MediaItem>();
+         GalleryUtils.assertNotInRenderThread();
+-        Cursor cursor;
+-        if (mBucketId == -1) {
+-            cursor = mResolver.query(uri, mProjection, mWhereClause, null,
+-                    mOrderClause);
+-        } else {
+-            cursor = mResolver.query(
+-                uri, mProjection, mWhereClause,
+-                new String[]{String.valueOf(mBucketId)},
+-                mOrderClause);
+-        }
++        Cursor cursor = mResolver.query(mBaseUri, mProjection, queryArgs, null);
+         if (cursor == null) {
+-            Log.w(TAG, "query fail: " + uri);
++            Log.w(TAG, "query fail: " + mBaseUri);
+             return list;
+         }
+ 
+diff --git a/src/org/codeaurora/gallery3d/video/CodeauroraVideoView.java b/src/org/codeaurora/gallery3d/video/CodeauroraVideoView.java
+index 415972aeed6204ec3be4e9f5039c595488f72590..ee6f24b050bf87d7036206d15419d0f6041a6e7f 100644
+--- a/src/org/codeaurora/gallery3d/video/CodeauroraVideoView.java
++++ b/src/org/codeaurora/gallery3d/video/CodeauroraVideoView.java
+@@ -82,6 +82,9 @@ public class CodeauroraVideoView extends SurfaceView implements MediaPlayerContr
+     private MediaController mMediaController;
+     private OnCompletionListener mOnCompletionListener;
+     private MediaPlayer.OnPreparedListener mOnPreparedListener;
++    // G891: report real seek completion from the player actually created by
++    // this VideoView, including after surface recreation or media reopening.
++    private MediaPlayer.OnSeekCompleteListener mOnSeekCompleteListener;
+     private MediaPlayer.OnBufferingUpdateListener mOnBufferingUpdateListener;
+     private MediaPlayer.OnVideoSizeChangedListener mVideoSizeListener;
+     private MediaPlayer.OnPreparedListener mPreparedListener;
+@@ -483,6 +486,7 @@ public class CodeauroraVideoView extends SurfaceView implements MediaPlayerContr
+             mMediaPlayer.setOnPreparedListener(mPreparedListener);
+             mMediaPlayer.setOnVideoSizeChangedListener(mSizeChangedListener);
+             mMediaPlayer.setOnCompletionListener(mCompletionListener);
++            mMediaPlayer.setOnSeekCompleteListener(mOnSeekCompleteListener);
+             mMediaPlayer.setOnErrorListener(mErrorListener);
+             mMediaPlayer.setOnInfoListener(mOnInfoListener);
+             mMediaPlayer.setOnBufferingUpdateListener(mBufferingUpdateListener);
+@@ -601,6 +605,16 @@ public class CodeauroraVideoView extends SurfaceView implements MediaPlayerContr
+         mOnCompletionListener = l;
+     }
+ 
++    // Register before openVideo() or attach to the already-open MediaPlayer.
++    // Setting it on only one MediaPlayer instance would lose the callback
++    // whenever an orientation change recreates the SurfaceView/player.
++    public void setOnSeekCompleteListener(MediaPlayer.OnSeekCompleteListener l) {
++        mOnSeekCompleteListener = l;
++        if (mMediaPlayer != null) {
++            mMediaPlayer.setOnSeekCompleteListener(l);
++        }
++    }
++
+     /**
+      * Register a callback to be invoked when an error occurs
+      * during playback or setup.  If no listener is specified,
+diff --git a/tools/t311_verify_local_seek.py b/tools/t311_verify_local_seek.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b1fcabbd1953d3fcf6bb819d0d1ff62de1397bf2
+--- /dev/null
++++ b/tools/t311_verify_local_seek.py
+@@ -0,0 +1,27 @@
++#!/usr/bin/env python3
++"""SM-T311 Gallery seek regression check; source-only, never touches device."""
++from pathlib import Path
++
++root = Path(__file__).resolve().parents[1]
++base = root / 'src/com/android/gallery3d/app'
++movie = (base / 'MoviePlayer.java').read_text()
++gesture = (base / 'GestureControllerOverlay.java').read_text()
++video = (root / 'src/org/codeaurora/gallery3d/video/CodeauroraVideoView.java').read_text()
++timebar = (base / 'TimeBar.java').read_text()
++
++assert 'private boolean canSeekLocalRecording()' in movie
++assert 'MediaPlayer.SEEK_CLOSEST' in movie
++assert 'G891_SEEK_REQUEST' in movie and 'G891_SEEK_COMPLETE' in movie
++assert 'mVideoView.setOnSeekCompleteListener(this);' in movie
++assert 'mMediaPlayer.setOnSeekCompleteListener(mOnSeekCompleteListener);' in video
++assert 'public void setOnSeekCompleteListener(MediaPlayer.OnSeekCompleteListener l)' in video
++assert 'mListener.onScrubbingEnd(getScrubberTime(), 0, 0);' in timebar
++start = gesture.split('public void adjustVideoPosition(double adjustPercent, boolean forwardDirection) {', 1)[1]
++end = start.split('\n    @Override', 1)[0]
++assert 'mPendingSeekTime = targetTime;' in end
++assert 'mListener.onSeekEnd(' not in end, 'G892 old per-MOVE seek flood returned'
++done = gesture.split('public void onGestureDone(boolean notStart) {', 1)[1].split('\n    @Override', 1)[0]
++assert done.count('mListener.onSeekEnd(mPendingSeekTime, 0, 0);') == 1
++assert 'mPendingSeekTime = -1;' in done
++assert 'mListener.onSeekStart();' in end
++print('G892_GALLERY_LOCAL_SEEK_SCRUB_CALLBACKS_AND_ONE_GESTURE_ONE_MEDIA_SEEK_SOURCE_PASS')

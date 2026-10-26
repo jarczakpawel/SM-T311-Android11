@@ -1,0 +1,2 @@
+
+allow audioserver appdomain_tmpfs:file { getattr map read write };

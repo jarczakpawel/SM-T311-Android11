@@ -1,0 +1,16 @@
+// Copyright (C) 2026 Pawel Jarczak
+cc_binary {
+    name: "android.hardware.vibrator@1.0-service.lt013g",
+    relative_install_path: "hw",
+    vendor: true,
+    init_rc: ["android.hardware.vibrator@1.0-service.lt013g.rc"],
+    vintf_fragments: ["manifest.vibrator.xml"],
+    srcs: ["Vibrator.cpp"],
+    shared_libs: [
+        "android.hardware.vibrator@1.0",
+        "libhidlbase",
+        "liblog",
+        "libutils",
+    ],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}

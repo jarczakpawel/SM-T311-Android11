@@ -1,0 +1,11 @@
+# G320 — XMM6262 receive error/suspend fixes and correct system-as-root TWRP paths
+
+Kernel commit `8f7fd0818` makes the SM-T311 HSIC receive callback ignore a failed or cancelled URB's payload, avoiding the risk of processing stale IPC bytes as a new modem response. Non-cancellation RX transport errors rearm the receive channel instead of leaving it idle. In suspend, the old RX allocation-retry work is cancelled along with the RX submit-retry work after `usb_kill_urb`, before USB resume creates a fresh receive request. These changes retain the OEM SIPC4 frame syntax, IPC channel IDs, vendor RIL, and audio routing. Full ARM32 Linux 6.12.112 `zImage dtbs` build passed. SMS ACK remains unverified on physical G320.
+
+**SYSTEM path forensic proof:** the live Android 11 device's physical `mmcblk0p20` SYSTEM ext4 is mounted as `/`, with `/sepolicy`, `/system/build.prop` and `/system/vendor/...`. The installed, hash-verified original TWRP mounts the **same block** at `/system`. Therefore the recovery paths must be `/system/sepolicy`, `/system/system/build.prop`, and `/system/system/vendor/...`. All six live original file SHA256 values were checked against the G316 target-files manifest and matched before building G320. Do not attempt to "fix" `/system/system/build.prop` to `/system/build.prop` in the TWRP script.
+
+G320 signed combined TWRP OTA packages six previously verified GNSS/SELinux/namespace-mnt system files and the new G320 BOOT in a single transaction. Preflight verifies known original system hashes, the exact physical G301 BOOT partition SHA and target image. The updater writes SYSTEM first, verifies six target hashes and then writes BOOT last; the flash operation itself verifies six new SYSTEM hashes independently. Does not touch EFS, recovery or userdata. It is NOT power-loss atomic and is not tested by actual TWRP installation.
+
+Build: `python3 device/samsung/lt013g/tools/build_g320_combined_twrp_ota.py`.
+Isolated shell fixture test: `python3 device/samsung/lt013g/tools/test_g320_combined_offline.py`.
+This G320 release supersedes the earlier G319 OTA; the previous ZIPs are not prerequisites. Live G301 remains unchanged until a recoverable physical installation is performed.

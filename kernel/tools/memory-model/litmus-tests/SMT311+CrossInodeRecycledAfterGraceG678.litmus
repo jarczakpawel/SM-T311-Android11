@@ -1,0 +1,61 @@
+C SMT311+CrossInodeRecycledAfterGraceG678
+
+(*
+ * G678 armv7/LKMM model of numeric XArray pointer ABA crossing
+ * different inode generations. This uses an additional "generation"
+ * ORACLE absent from the real kernel. slot=1 means physical address P
+ * initially contains A for mapping M, then B for mapping N, and C for M.
+ * Writer models B receiving a hot page flag then losing it in last-put.
+ * Reader holds a single RCU read-side critical section.
+ *
+ * This cannot itself prove allocator/UAF behavior or physical ARMv7
+ * timing. A forbidden/allowed mixed-generation outcome is diagnostic.
+ *)
+{
+slot=1;
+generation=1;
+flag=0;
+mapping=1;
+}
+P0(int *slot, int *generation, int *flag, int *mapping, spinlock_t *xa_lock)
+{
+ int r0;
+ int r1;
+ int r2;
+ int r3;
+ int r4;
+ int r5;
+
+ rcu_read_lock();
+ r0 = READ_ONCE(*slot);
+ r1 = READ_ONCE(*generation);
+ r2 = READ_ONCE(*flag);
+ smp_rmb();
+ /* omitted unchanged i_size_read(), size is not the disputed field */
+ smp_rmb();
+ r3 = READ_ONCE(*slot);
+ smp_rmb();
+ r4 = READ_ONCE(*mapping);
+ r5 = READ_ONCE(*generation);
+ rcu_read_unlock();
+}
+
+P1(int *slot, int *generation, int *flag, int *mapping, spinlock_t *xa_lock)
+{
+ spin_lock(xa_lock);
+ WRITE_ONCE(*slot, 0);
+ spin_unlock(xa_lock);
+ WRITE_ONCE(*generation, 2);
+ WRITE_ONCE(*mapping, 2);
+ WRITE_ONCE(*flag, 1);
+ /* B's tag eventually cleared on allocator last-put, not inode-exit */
+ WRITE_ONCE(*flag, 0);
+ /* physical page P cannot become new generation C until GP */
+ synchronize_rcu();
+ WRITE_ONCE(*generation, 3);
+ WRITE_ONCE(*mapping, 1);
+ spin_lock(xa_lock);
+ WRITE_ONCE(*slot, 1);
+ spin_unlock(xa_lock);
+}
+exists (0:r0=1 /\ 0:r1=1 /\ 0:r2=1 /\ 0:r3=1 /\ 0:r4=1 /\ 0:r5=3)

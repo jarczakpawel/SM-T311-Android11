@@ -1,0 +1,300 @@
+{
+  "updated": "2026-10-17",
+  "resume_first": "chat-history/MASTER_DONE_TODO.md",
+  "current_physical_release": "G408",
+  "current_signed_release": "G408",
+  "G408_status": "INSTALLED_TWRP_EXIT0_BOOT1_TWICE_14_PASS_ZERO_FAIL",
+  "G408_bytes": 484330484,
+  "G408_sha256": "5ae3595004b2043715408eed2e3f33f1ded920a3061f9f42504f0303e12c7a79",
+  "G410_to_G414": "EXPERIMENTAL_HOST_ONLY_G413_AND_G414_FULL_LINUX6_ARM32_KERNEL_LINK_PASS_NOT_FLASHABLE",
+  "first_unblocked": "Live G408 GPS3D and Internet VALIDATED DNS NTP SUPL acceptance; no retest closed hardware",
+  "original_20_tasks": 20,
+  "done_open_rows": [
+    {
+      "id": "P0-1",
+      "status": "CZĘŚCIOWO",
+      "done": "Global Enforcing i nowy GNSS Binder/OTA p11 label PASS.",
+      "open": "Pozostałe domeny GPS/RIL permissive tylko po AVC."
+    },
+    {
+      "id": "P0-2",
+      "status": "WDROŻONE",
+      "done": "G408 kompletne podpisane OTA, TWRP instalacja rc0 i Android boot1 dwukrotnie.",
+      "open": "Pełne wydanie czeka na GPS3D/telefon."
+    },
+    {
+      "id": "P0-3",
+      "status": "ZAMKNIĘTE",
+      "done": "AudioFX usunięty z ROM.",
+      "open": "Brak ponownego testu bez regresji."
+    },
+    {
+      "id": "P0-4",
+      "status": "ZAMKNIĘTE",
+      "done": "Lineage Trust zbędny, natywne zabezpieczenia zachowane.",
+      "open": "Brak."
+    },
+    {
+      "id": "P0-5",
+      "status": "OTWARTE",
+      "done": "Prywatne źródła i dokumentacja w Git.",
+      "open": "Licencje OEM/publiczna dystrybucja na sam koniec."
+    },
+    {
+      "id": "P0-6",
+      "status": "ZAMKNIĘTE",
+      "done": "BOOT G408 SHA cad5e76..., recovery p10 oryginalny f818c29f..., TWRP preflight V2 PASS, install=0, dwa boot1.",
+      "open": "Brak w samym kontrakcie instalacji."
+    },
+    {
+      "id": "P1-7",
+      "status": "ZAMKNIĘTE",
+      "done": "GPU Mali/FIMD/HWC/G2D poprzednie fizyczne PASS.",
+      "open": "Nie wracać bez konkretnego błędu."
+    },
+    {
+      "id": "P1-8",
+      "status": "ZAMKNIĘTE",
+      "done": "SystemUI/SurfaceFlinger i render wcześniej PASS.",
+      "open": "Nie wracać bez regresji."
+    },
+    {
+      "id": "P1-9",
+      "status": "ZAMKNIĘTE",
+      "done": "FUSE/MediaProvider przyjęte we wcześniejszych testach.",
+      "open": "Tylko nowe błędy."
+    },
+    {
+      "id": "P1-10",
+      "status": "CZĘŚCIOWO",
+      "done": "RIL żyje; rmnet1 /32, host-gateway/default route PASS w G408.",
+      "open": "Internet VALIDATED; ekran połączenia przychodzącego, audio rozmowy, SMS ACK, tylko testy użytkownika."
+    },
+    {
+      "id": "P1-11",
+      "status": "CZĘŚCIOWO",
+      "done": "BCM4752 i do 14 satelitów wcześniej; nowy G408 GPS ELF/daemon/private Binder pass.",
+      "open": "Ostateczny GPS/GLONASS 3D fix na zewnątrz, DNS/NTP/SUPL i native UTC."
+    },
+    {
+      "id": "P1-12",
+      "status": "ZAMKNIĘTE",
+      "done": "MFC H.264 1080p i testy kamer z archiwum (m.in. 46/46) PASS.",
+      "open": "Tylko konkretny nowy regres."
+    },
+    {
+      "id": "P1-13",
+      "status": "CZĘŚCIOWO",
+      "done": "WiFi/BT, wejścia, sensory i część urządzeń fizycznie badane.",
+      "open": "Jedynie niezaliczone konkretne tryby, nie cały sprzęt od początku."
+    },
+    {
+      "id": "P1-14",
+      "status": "CZĘŚCIOWO",
+      "done": "PMIC/thermal MAX77693/MAX17050, termika i suspend już badane.",
+      "open": "Długoterminowa kalibracja mA, tylko realne problemy."
+    },
+    {
+      "id": "P1-15",
+      "status": "ZAMKNIĘTE",
+      "done": "W G408 fizyczny ZRAM 768MiB, LZ4 i /proc/swaps PASS (786428KiB).",
+      "open": "Nie mierzyć od zera; regresje tylko jeśli wystąpią."
+    },
+    {
+      "id": "P2-16",
+      "status": "ZAMKNIĘTE",
+      "done": "Podstawowa obsługa dotyku i czujników oraz oryginalna Samsung BSP badane.",
+      "open": "Tylko brakujące tryby P1-13."
+    },
+    {
+      "id": "P2-17",
+      "status": "ZAMKNIĘTE",
+      "done": "Linux 6.12.112 działający fizycznie G408; zbudowane G413/G414 ARM32 host.",
+      "open": "Prototypy nie należą do systemu."
+    },
+    {
+      "id": "P2-18",
+      "status": "PRZYSZŁE",
+      "done": "G410–G414 testy host i pełny linker ARM32.",
+      "open": "/proc/uid_time_in_state i model G411 prądów bez realnych danych nie wdrażać."
+    },
+    {
+      "id": "P2-19",
+      "status": "ZAMKNIĘTE",
+      "done": "Odchudzony ROM; /data 96% do 49%, ponad 5GiB odzyskane z technicznych plików.",
+      "open": "Brak."
+    },
+    {
+      "id": "P2-20",
+      "status": "CZĘŚCIOWO",
+      "done": "G408 boot/testy 14 PASS 0 FAIL, naprawione adb reboot recovery, powrót do Androida.",
+      "open": "GPS3D, Internet VALIDATED, użytkownikowe telekom testy i końcowe niesprawdzone tryby."
+    }
+  ],
+  "priority": [
+    {
+      "order": 1,
+      "id": "P1-11",
+      "next": "GPS/GNSS: bez lokalizacji, pasywna diagnoza; G408 po bezpiecznym release",
+      "gate": "Host ADB teraz; fizyczne 3D później"
+    },
+    {
+      "order": 2,
+      "id": "P2-19 STORAGE SAFETY",
+      "next": "Reclaim /data/local/tmp technical obsolete files only if recoverable and exact host copy verified; preserve G408 and emergency images",
+      "gate": "Currently /data 96% full, tmp 8.18GiB; do not delete unclassified user/recovery data"
+    },
+    {
+      "order": 3,
+      "id": "P0-1",
+      "next": "SELinux GNSS binderfs/misc targeted",
+      "gate": "Host teraz; G408 później"
+    },
+    {
+      "order": 4,
+      "id": "P0-6/P0-2/P2-20",
+      "next": "G408 owner manual TWRP read-only gate + osobna zgoda instalacji",
+      "gate": "Właściciel recovery"
+    },
+    {
+      "order": 5,
+      "id": "P1-10",
+      "next": "3G data, calls, SMS/MMS",
+      "gate": "Host diagnostyka; użytkownik calls"
+    },
+    {
+      "order": 6,
+      "id": "P1-14/P1-15",
+      "next": "ZRAM/thermal/PMIC/power profile",
+      "gate": "Host; sprzęt po G408"
+    },
+    {
+      "order": 7,
+      "id": "P1-13/P2-16",
+      "next": "Wi-Fi, BT, kamera, audio, czujniki, microSD/OTG",
+      "gate": "Host i fizyczne akcesoria"
+    },
+    {
+      "order": 8,
+      "id": "P2-17/P2-18",
+      "next": "G414/G415 rozliczanie UID CPUFreq, proc, SELinux i SMP",
+      "gate": "Host tylko, prototyp"
+    },
+    {
+      "order": 9,
+      "id": "P1-9/P1-12",
+      "next": "Media/camera tylko nieprzetestowane przypadki",
+      "gate": "Zależnie od błędu"
+    },
+    {
+      "order": 10,
+      "id": "P1-7/P1-8",
+      "next": "Zamrożone sprawne GPU i UI",
+      "gate": "Brak"
+    },
+    {
+      "order": 11,
+      "id": "P0-3/P0-4/P2-19",
+      "next": "Zależności finalne obrazu",
+      "gate": "Host"
+    },
+    {
+      "order": 12,
+      "id": "P0-5",
+      "next": "Licencje i publikacja",
+      "gate": "Właściciel na końcu"
+    }
+  ],
+  "never": [
+    "SIM PIN PUK",
+    "outgoing calls SMS without user",
+    "CP EFS writes",
+    "blind recovery reboot",
+    "G413/G414 kernel flashing",
+    "coordinate logging",
+    "overwrite signed G408",
+    "repeat completed tests"
+  ],
+  "G414_status": "FULL_ARM32_STATIC_LINK_AND_ZIMAGE_HOST_PASS_75000_ORACLE_NOT_ANDROID_PROC_NOT_INSTALLABLE",
+  "started_engineering_branch": "G414 full ARM32 vmlinux/zImage linked; no real Android per-UID proc, UID lifecycle or physical SMP validation",
+  "data_capacity_after_latest_ADB_readonly": {
+    "percent_used": 49,
+    "free_KiB": 6275196,
+    "tech_cleanup_performed": true
+  },
+  "live_release": "G408",
+  "pinned_release_status": "PHYSICALLY_INSTALLED_BOOTED_TWICE_RECOVERY_REBOOT_PASS",
+  "next_tasks_now": [
+    {
+      "rank": 1,
+      "task": "GNSS outdoor fix, mobile internet VALIDATED DNS NTP SUPL",
+      "status": "OPEN"
+    },
+    {
+      "rank": 2,
+      "task": "Incoming call UI audio and SMS ACK owner-triggered only",
+      "status": "OPEN"
+    },
+    {
+      "rank": 3,
+      "task": "GNSS legacy and RIL SELinux domain enforcing only after actual AVC",
+      "status": "OPEN"
+    },
+    {
+      "rank": 4,
+      "task": "G411 measured power model and experimental G414 /proc/uid_time_in_state",
+      "status": "FUTURE HOST"
+    },
+    {
+      "rank": 5,
+      "task": "Only concrete missing hardware and licensing",
+      "status": "PARTIAL"
+    }
+  ],
+  "ranked_tasks": [
+    {
+      "rank": 1,
+      "ids": [
+        "P1-11",
+        "P1-10"
+      ],
+      "goal": "GPS real 3D, mobile Internet VALIDATED and DNS/NTP/SUPL",
+      "blocked_by": "requires live outdoor GPS session and/or validated cellular data; source read-only diagnostics possible"
+    },
+    {
+      "rank": 2,
+      "ids": [
+        "P1-10"
+      ],
+      "goal": "incoming-call UI, voice and SMS ACK",
+      "blocked_by": "user initiates calls and SMS; no spontaneous modem or SIM changes"
+    },
+    {
+      "rank": 3,
+      "ids": [
+        "P0-1"
+      ],
+      "goal": "narrow real SELinux GNSS/RIL permissive domain restrictions",
+      "blocked_by": "exact AVC evidence, not blanket changes"
+    },
+    {
+      "rank": 4,
+      "ids": [
+        "P1-13",
+        "P2-20"
+      ],
+      "goal": "remaining demonstrably untested hardware-only feature modes and final stability",
+      "blocked_by": "physical peripherals where necessary; do not rerun accepted tests"
+    },
+    {
+      "rank": 5,
+      "ids": [
+        "P2-18",
+        "P0-5"
+      ],
+      "goal": "optional G411 PowerProfile/G414 exact CPU UID frequency and legal publication",
+      "blocked_by": "physical current calibration and full Linux ABI integration"
+    }
+  ],
+  "updated_after_physical_G408_install": true
+}

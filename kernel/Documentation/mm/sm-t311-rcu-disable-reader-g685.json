@@ -1,0 +1,87 @@
+{
+  "stage": "G685",
+  "scope": "ARM32 experiment-on reader-side key recheck source/LKMM",
+  "source_guards": {
+    "static_key_default_off": true,
+    "runtime_key_first_check_before_reader_batch": true,
+    "second_check_after_entering_rcu_before_mmap": true,
+    "second_check_compiled_only_for_experiment": true,
+    "second_check_false_branch_unlocks_and_falls_back": true,
+    "mmap_guard_unlocks_and_falls_back": true,
+    "no_speculative_copy_if_no_key": true,
+    "user_pagefault_disabled_for_copy": true,
+    "toggle_disable_available": true,
+    "toggle_enable_available": true,
+    "reader_key_does_not_serialize_mmap_writers": true,
+    "mmap_writer_ext4_gp_retained": true,
+    "mapping_eligibility_still_checked": true,
+    "CONFIG_JUMP_LABEL_fallback": true,
+    "no_new_GP_in_reader_batch": true,
+    "actual_exp_config_on": true
+  },
+  "source_guards_pass": 16,
+  "source_mutations_rejected": {
+    "remove_internal_key_recheck": [
+      "second_check_after_entering_rcu_before_mmap",
+      "second_check_false_branch_unlocks_and_falls_back",
+      "no_speculative_copy_if_no_key"
+    ],
+    "skip_internal_unlock": [
+      "second_check_false_branch_unlocks_and_falls_back"
+    ],
+    "unprotect_key_recheck": [
+      "second_check_after_entering_rcu_before_mmap"
+    ],
+    "omit_dispatch_gate": [
+      "runtime_key_first_check_before_reader_batch"
+    ],
+    "omit_mmap_safe_fallback": [
+      "mmap_guard_unlocks_and_falls_back"
+    ],
+    "omit_writer_GP": [
+      "mmap_writer_ext4_gp_retained"
+    ],
+    "omit_debugfs_disable": [
+      "toggle_disable_available"
+    ],
+    "remove_AS_RCU_READ_gate": [
+      "mapping_eligibility_still_checked"
+    ]
+  },
+  "actual_herd7": {
+    "old_key_check_outside_rcu": {
+      "name": "SMT311+DisableStaleReaderNoRecheckG685",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 4,
+      "source_sha256": "5fdb633817320f7a27dd0f963587c7df97aa840a6ccb2dfbb48fc07cd4b8b0d8",
+      "normalized_herd7_sha256": "2650c4f72f0734e7a9b2874d6276fb4130b94c1f60aeab6f4fb946e5f46812f6"
+    },
+    "second_check_inside_rcu": {
+      "name": "SMT311+DisableStaleReaderRecheckG685",
+      "outcome": "Never",
+      "positive": 0,
+      "negative": 6,
+      "source_sha256": "78f19c8aa879f807084138754e5b265934d474e77d6e6f4c57da2a382334100e",
+      "normalized_herd7_sha256": "29341dcec5d496cd68f8fb9cc45b88ede0adb72eba8d40f55b3f3b5c32e15ab3"
+    }
+  },
+  "experiment_on_ARM32_filemap_object": {
+    "file": "/home/debian/Projekty/samsung/linux-7.3-port/build/g633-armv7-rcu-zone-guard/mm/filemap.o",
+    "sha256": "0c97df92e8c15d5163ea91e7c54ad0ac20c7b71297c6a5b31f440dece0cdf9c1",
+    "format": "/home/debian/Projekty/samsung/linux-7.3-port/build/g633-armv7-rcu-zone-guard/mm/filemap.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped"
+  },
+  "runtime_staged_new_code": "mm/filemap.c reader rechecks key under rcu_read_lock before accessing any unreferenced folio",
+  "constraints": [
+    "Current G683 ext4 mmap GP is still mandatory, including with runtime static-key OFF.",
+    "Simple runtime OFF mmap GP shortcut remains unsafe without a writer drain/activation protocol.",
+    "This catches one later-entering reader race in LKMM, but not every weak-memory stale load, all writer paths or CPU cache alias.",
+    "No full linked kernel, no BOOT/TWRP flash or physical RCU ON test.",
+    "S1 ACTIVE S2/S3 BLOCKED."
+  ],
+  "staged_runtime_files_not_installed": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/vma.c"
+  ]
+}

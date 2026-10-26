@@ -1,0 +1,72 @@
+diff --git a/net/nl80211_attribute.cpp b/net/nl80211_attribute.cpp
+index 4d2530d07388dfde1d7efa570357404d7950dd08..6219fba3f5067651da7b494ec49cfa8e6a514346 100644
+--- a/net/nl80211_attribute.cpp
++++ b/net/nl80211_attribute.cpp
+@@ -49,7 +49,9 @@ void BaseNL80211Attr::InitHeaderAndResize(int attribute_id,
+ 
+ int BaseNL80211Attr::GetAttributeId() const {
+   const nlattr* header = reinterpret_cast<const nlattr*>(data_.data());
+-  return header->nla_type;
++  // Linux 7.3 marks nested attributes with NLA_F_NESTED. Those upper bits
++  // describe the encoding, not the attribute ID.
++  return header->nla_type & NLA_TYPE_MASK;
+ }
+ 
+ bool BaseNL80211Attr::IsValid() const {
+@@ -74,11 +76,15 @@ bool BaseNL80211Attr::GetAttributeImpl(const uint8_t* buf,
+   const uint8_t* end_ptr = buf + len;
+   while (ptr + NLA_HDRLEN <= end_ptr) {
+     const nlattr* header = reinterpret_cast<const nlattr*>(ptr);
+-    if (header->nla_type == attr_id) {
+-      if (ptr + NLA_ALIGN(header->nla_len) > end_ptr) {
+-        LOG(ERROR) << "Failed to get attribute: broken nl80211 atrribute.";
+-        return false;
+-      }
++    // A malformed nla_len must never leave this cursor unchanged. Kernel
++    // NL80211_ATTR_STA_INFO uses NLA_F_NESTED on modern cfg80211; compare
++    // only the low type bits, while preserving the original wire header.
++    if (header->nla_len < NLA_HDRLEN ||
++        NLA_ALIGN(header->nla_len) > static_cast<size_t>(end_ptr - ptr)) {
++      LOG(ERROR) << "Failed to get attribute: broken nl80211 attribute.";
++      return false;
++    }
++    if ((header->nla_type & NLA_TYPE_MASK) == attr_id) {
+       if (attr_start != nullptr && attr_end != nullptr) {
+         *attr_start = const_cast<uint8_t*>(ptr);
+         *attr_end = const_cast<uint8_t*>(ptr + NLA_ALIGN(header->nla_len));
+diff --git a/tests/nl80211_attribute_unittest.cpp b/tests/nl80211_attribute_unittest.cpp
+index 7d1332df31ddcae6cabea4cadb007ae1d3be520d..0fd9b444d9ce99167aa8fcaf54e32f7a0ea0c043 100644
+--- a/tests/nl80211_attribute_unittest.cpp
++++ b/tests/nl80211_attribute_unittest.cpp
+@@ -164,6 +164,31 @@ TEST(NL80211AttributeTest, CanGetNestedAttributes) {
+   EXPECT_EQ(attr_value, kU32Value2);
+ }
+ 
++TEST(NL80211AttributeTest, NestedFlagIsNotPartOfAttributeId) {
++  // Linux kernel nla_nest_start() sets NLA_F_NESTED in the wire type.
++  // G754: the Android 11 parser previously failed to find STA_INFO at all.
++  NL80211NestedAttr station_info(NL80211_ATTR_STA_INFO | NLA_F_NESTED);
++  station_info.AddAttribute(NL80211Attr<uint8_t>(
++      NL80211_STA_INFO_SIGNAL, static_cast<uint8_t>(-54)));
++  EXPECT_EQ(NL80211_ATTR_STA_INFO, station_info.GetAttributeId());
++
++  NL80211NestedAttr top_level(0);
++  top_level.AddAttribute(station_info);
++  EXPECT_TRUE(top_level.HasAttribute(NL80211_ATTR_STA_INFO));
++  NL80211NestedAttr decoded(0);
++  ASSERT_TRUE(top_level.GetAttribute(NL80211_ATTR_STA_INFO, &decoded));
++  uint8_t signal = 0;
++  ASSERT_TRUE(decoded.GetAttributeValue(NL80211_STA_INFO_SIGNAL, &signal));
++  EXPECT_EQ(static_cast<uint8_t>(-54), signal);
++}
++
++TEST(NL80211AttributeTest, RejectZeroLengthNestedAttribute) {
++  // Reject malformed attrs; otherwise GetAttributeImpl loops forever.
++  const std::vector<uint8_t> bad = {8, 0, 1, 0, 0, 0, 1, 0};
++  NL80211NestedAttr top_level(bad);
++  EXPECT_FALSE(top_level.HasAttribute(1));
++}
++
+ TEST(NL80211AttributeTest, CannotGetDoubleNestedAttributes) {
+   NL80211NestedAttr nested_attr(1);
+   NL80211NestedAttr deeper_nested_attr(2);

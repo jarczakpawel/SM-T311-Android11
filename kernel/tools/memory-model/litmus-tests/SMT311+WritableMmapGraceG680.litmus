@@ -1,0 +1,26 @@
+C SMT311+WritableMmapGraceG680
+
+{
+writable=0;
+published=0;
+}
+
+P0(int *writable, int *published)
+{
+ int r0;
+ int r1;
+
+ rcu_read_lock();
+ r0 = READ_ONCE(*writable);
+ r1 = READ_ONCE(*published);
+ rcu_read_unlock();
+}
+
+P1(int *writable, int *published)
+{
+ WRITE_ONCE(*writable, 1);
+ synchronize_rcu();
+ WRITE_ONCE(*published, 1);
+}
+
+exists (0:r0=0 /\ 0:r1=1)

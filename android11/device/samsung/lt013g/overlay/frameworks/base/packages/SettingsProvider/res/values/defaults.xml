@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- G1410: fresh SettingsProvider DB only. A live user SettingsProvider
+         database takes precedence; upgrades must not overwrite user choices.
+         The third (animator_duration_scale) is provisioned only by the
+         explicit G1400 tool on this Android 11 branch. -->
+    <fraction name="def_window_animation_scale">50%</fraction>
+    <fraction name="def_window_transition_scale">50%</fraction>
+</resources>

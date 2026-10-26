@@ -1,0 +1,63 @@
+# SM-T311 V168 Stage 2 Fix1
+# Make cgroup task files writable by Android's system services.
+
+on init
+    mkdir /dev/cpuctl/background 0750 system system
+    mkdir /dev/cpuctl/system-background 0750 system system
+    mkdir /dev/cpuctl/foreground 0750 system system
+    mkdir /dev/cpuctl/top-app 0750 system system
+    mkdir /dev/cpuctl/rt 0750 system system
+    mkdir /dev/cpuctl/camera-daemon 0750 system system
+    mkdir /dev/blkio/background 0750 system system
+
+    chown system system /dev/cpuctl/tasks
+    chmod 0664 /dev/cpuctl/tasks
+    chown system system /dev/cpuctl/cgroup.procs
+    chmod 0664 /dev/cpuctl/cgroup.procs
+
+    chown system system /dev/cpuctl/background/tasks
+    chmod 0664 /dev/cpuctl/background/tasks
+    chown system system /dev/cpuctl/background/cgroup.procs
+    chmod 0664 /dev/cpuctl/background/cgroup.procs
+
+    chown system system /dev/cpuctl/system-background/tasks
+    chmod 0664 /dev/cpuctl/system-background/tasks
+    chown system system /dev/cpuctl/system-background/cgroup.procs
+    chmod 0664 /dev/cpuctl/system-background/cgroup.procs
+
+    chown system system /dev/cpuctl/foreground/tasks
+    chmod 0664 /dev/cpuctl/foreground/tasks
+    chown system system /dev/cpuctl/foreground/cgroup.procs
+    chmod 0664 /dev/cpuctl/foreground/cgroup.procs
+
+    chown system system /dev/cpuctl/top-app/tasks
+    chmod 0664 /dev/cpuctl/top-app/tasks
+    chown system system /dev/cpuctl/top-app/cgroup.procs
+    chmod 0664 /dev/cpuctl/top-app/cgroup.procs
+
+    chown system system /dev/cpuctl/rt/tasks
+    chmod 0664 /dev/cpuctl/rt/tasks
+    chown system system /dev/cpuctl/rt/cgroup.procs
+    chmod 0664 /dev/cpuctl/rt/cgroup.procs
+
+    chown system system /dev/cpuctl/camera-daemon/tasks
+    chmod 0664 /dev/cpuctl/camera-daemon/tasks
+    chown system system /dev/cpuctl/camera-daemon/cgroup.procs
+    chmod 0664 /dev/cpuctl/camera-daemon/cgroup.procs
+
+    chown system system /dev/blkio/tasks
+    chmod 0664 /dev/blkio/tasks
+    chown system system /dev/blkio/cgroup.procs
+    chmod 0664 /dev/blkio/cgroup.procs
+
+    chown system system /dev/blkio/background/tasks
+    chmod 0664 /dev/blkio/background/tasks
+    chown system system /dev/blkio/background/cgroup.procs
+    chmod 0664 /dev/blkio/background/cgroup.procs
+
+    write /dev/cpuctl/background/cpu.shares 52
+    write /dev/cpuctl/system-background/cpu.shares 256
+    write /dev/cpuctl/foreground/cpu.shares 1024
+    write /dev/cpuctl/top-app/cpu.shares 2048
+    write /dev/cpuctl/rt/cpu.shares 2048
+    write /dev/cpuctl/camera-daemon/cpu.shares 1024

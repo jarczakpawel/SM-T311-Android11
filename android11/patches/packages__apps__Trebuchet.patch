@@ -1,0 +1,14 @@
+diff --git a/quickstep/src/com/android/quickstep/views/ShelfScrimView.java b/quickstep/src/com/android/quickstep/views/ShelfScrimView.java
+index 19e278be3c4dab14242a3720ff1b74369f99208e..16fcaaace154de2dada0c4d47866fb70508c7505 100644
+--- a/quickstep/src/com/android/quickstep/views/ShelfScrimView.java
++++ b/quickstep/src/com/android/quickstep/views/ShelfScrimView.java
+@@ -298,7 +298,8 @@ public class ShelfScrimView extends ScrimView<BaseQuickstepLauncher>
+                         mRadius, mRadius, Direction.CW);
+                 mRemainingScreenPath.reset();
+                 mRemainingScreenPath.addRect(0, 0, width, height, Direction.CW);
+-                mRemainingScreenPath.op(mTempPath, Op.DIFFERENCE);
++                mRemainingScreenPathValid = mRemainingScreenPath.op(
++                        mTempPath, Op.DIFFERENCE);
+             }
+ 
+             float offset = height - mRadius - mShelfTop;

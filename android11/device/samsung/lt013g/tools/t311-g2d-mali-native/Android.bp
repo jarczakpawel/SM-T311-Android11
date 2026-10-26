@@ -1,0 +1,11 @@
+// Real Android gralloc0 -> Exynos G2D -> Android EGL NativeBuffer -> Mali GLES2.
+// ISOLATED: not in PRODUCT_PACKAGES, no FIMD/HWC interaction.
+cc_binary {
+    name: "t311_g2d_mali_native_offline",
+    vendor: true,
+    srcs: ["main.c"],
+    static_libs: ["libexynos_g2d_t311_offline"],
+    shared_libs: ["libdrm", "libEGL", "libGLESv2", "libhardware", "libnativewindow", "liblog"],
+    include_dirs: ["external/libdrm/exynos", "external/libdrm"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c11", "-O2"],
+}

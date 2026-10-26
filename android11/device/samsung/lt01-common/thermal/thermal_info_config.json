@@ -1,0 +1,21 @@
+{
+  "Sensors": [
+    {
+      "Name": "cpu-thermal",
+      "Type": "CPU",
+      "HotThreshold": ["NAN", "NAN", "NAN", "NAN", "NAN", "NAN", "NAN"],
+      "VrThreshold": "NAN",
+      "Multiplier": 0.001,
+      "Monitor": false
+    },
+    {
+      "Name": "max170xx_battery",
+      "Type": "BATTERY",
+      "HotThreshold": ["NAN", "NAN", "NAN", "NAN", "NAN", "NAN", "NAN"],
+      "VrThreshold": "NAN",
+      "Multiplier": 0.001,
+      "Monitor": false
+    }
+  ],
+  "CoolingDevices": []
+}

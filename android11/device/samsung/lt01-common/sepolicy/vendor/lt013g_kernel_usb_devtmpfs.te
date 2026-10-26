@@ -1,0 +1,10 @@
+# Linux 6.12.112 devtmpfs kworker hotplug/unplug USB devices creates
+# /dev/bus/usb/<bus>/<dev> as u:object_r:device:s0.
+# Android 11 permissive AVCs on the physical G299 boot show that a
+# switch to Enforcing otherwise prevents USB char-device replacement.
+# Only kernel domain, only the observed devtmpfs node operations.
+allow kernel device:dir { write add_name remove_name rmdir create };
+allow kernel device:chr_file { create getattr setattr unlink };
+
+# Linux kdevtmpfs allocates USB character nodes during hotplug.
+allow kernel self:capability mknod;

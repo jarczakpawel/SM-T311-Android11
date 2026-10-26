@@ -1,0 +1,95 @@
+{
+  "stage": "G673",
+  "type": "COMMIT ANCESTRY, SOURCE AND DEFAULT-OFF VERIFICATION",
+  "series_commit_count": 18,
+  "series_sha256_commit_ids": [
+    "05362c1a756c13d5d116e1ddc2c1c63771af3f5c",
+    "dc8121b77ae3321bc93007909c8dad995d15fa22",
+    "70372e1d819c85af8d1ae31668063412f212d12e",
+    "8f1727487ef702862dccf60243d9587ed908a164",
+    "60042496006733caeb5921972a685a164341849f",
+    "8f870c46c296245abcb4083fd04507df4d846ddc",
+    "3d859a1f31849de2088ca21f9ce559fceb54fa39",
+    "05d297f838d67934e524829c8c2cbb46816e569e",
+    "eaa49601257d6a7813cb2d5c04b2758431833966",
+    "899f8d53b439e45d76bfb05d8d0a6b1020f47765",
+    "fc553008d316d4967bd6bcf0952a7b6dd5116e30",
+    "e7f430601df292029362e97993efbabb241e5737",
+    "d46226de3244da00c0e46a6bed7ed33b06167cbc",
+    "1fbcb22d1ed6b342ed0271f63089193cff4d3511",
+    "0ab08136b34d9359eab594a6e62ce13dc2066cd2",
+    "aa34c829eeeb34931a511d914e44ae009f9ecc47",
+    "ba9b14cecb99be282eeb1e3af25efde4185854bf",
+    "016e9141139a6ffb54279d4c5b60b3970909b00a"
+  ],
+  "first_series_commit": "05362c1a756c13d5d116e1ddc2c1c63771af3f5c",
+  "last_series_commit": "016e9141139a6ffb54279d4c5b60b3970909b00a",
+  "g650_source_commit": "a2fca45587d4d54b91274eaff738b9679868161b",
+  "g650_contains_all_18_series_commits": true,
+  "runtime_source_identical_to_G650": false,
+  "runtime_source_staged_NOT_INSTALLED": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ],
+  "physical_boot_source_unchanged": true,
+  "source_checks": {
+    "SMT311_compiled_RCUswitch_defaults_false": true,
+    "SMT311_filemap_rcu_no_ref_requires_enabled_switch": true,
+    "SMT311_mark_HOT_under_reference": true,
+    "SMT311_marker_has_order0_normal_zone_guard": true,
+    "SMT311_lookup_requires_flag_before_reloading_xarray": true,
+    "SMT311_lookup_checks_4k_zone_and_mapping": true,
+    "SMT311_reader_has_rcu_and_pagefault_scope": true,
+    "SMT311_copy_budget_max_32KB": true,
+    "SMT311_reader_excludes_writable_mmap": true,
+    "SMT311_tagged_folio_last_free_deferred": true,
+    "SMT311_grace_on_queue_and_expedited": true,
+    "SMT311_configuration_ARM_SMP_PREEMPT_RCU_HIGHMEM": true,
+    "ARM_maintains_D_cache_when_required": true
+  },
+  "source_checks_passed": 13,
+  "negative_mutations_rejected": {
+    "default_ON": [
+      "SMT311_compiled_RCUswitch_defaults_false"
+    ],
+    "remove_XArray_reread": [
+      "SMT311_lookup_requires_flag_before_reloading_xarray"
+    ],
+    "no_queue_grace": [
+      "SMT311_grace_on_queue_and_expedited"
+    ],
+    "no_normal_zone_reader_guard": [
+      "SMT311_lookup_checks_4k_zone_and_mapping"
+    ]
+  },
+  "physical_config_verified_separately_via_adb": {
+    "CONFIG_PAGE_RCU_FREE": "y",
+    "CONFIG_SM_T311_RCU_HOT4K_EXPERIMENT": "y",
+    "CONFIG_PREEMPT_RCU": "y",
+    "CONFIG_SMP": "y",
+    "CONFIG_HIGHMEM": "y",
+    "evidence": "/proc/config.gz read-only adb_shell on G673"
+  },
+  "critical_qualifications": [
+    "Code is in the compiled physical kernel but runtime no-ref path is DEFAULT OFF.",
+    "Build inclusion is NOT runtime feature activation, safety or speedup.",
+    "PG_rcu_free flags and XArray ABA/allocator reuse remain unproven for ARMv7.",
+    "HighMem and VIPT alias lifetime remain BLOCKED.",
+    "The kernel debugfs toggle was not directly readable in G673; do not claim it was read.",
+    "G665 real native userspace XArray binary UNRUN due missing liburcu-dev headers.",
+    "No executable kernel change and no new physical BOOT flash needed."
+  ],
+  "stages": {
+    "S0": "PASS",
+    "S1": "ACTIVE",
+    "S2": "BLOCKED",
+    "S3": "BLOCKED",
+    "S4": "BLOCKED",
+    "S5": "BLOCKED",
+    "S6": "BLOCKED",
+    "S7": "PARTIAL",
+    "S8": "ACTIVE"
+  }
+}

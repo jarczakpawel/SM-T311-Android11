@@ -1,0 +1,15 @@
+# SM-T311 G382: label ONLY the pre-provisioned fourth binderfs device.
+# Linux creates /lt013g-gps as a separate binder_context before the launcher.
+# The legacy domain must not obtain blanket binderfs filesystem mount access:
+# Android 11 domain.te forbids it (neverallow).
+type lt013g_gps_private_binder_device, dev_type;
+
+# G379 physical dmesg: device /lt013g-gps needs stat, chown/chmod by its
+# dedicated GNSS launcher and read/write/open/ioctl by the isolated gpsd.
+# This type is not used for /binder, /hwbinder or /vndbinder.
+allow lt013g_gps_legacy lt013g_gps_private_binder_device:chr_file { getattr setattr open read write ioctl map };
+
+# The existing binderfs /binder inode is the target of MS_BIND inside the
+# GNSS service's own init-provided mount namespace only (never global).
+# Observed AVC: mounton binder_device:chr_file with permissive=1.
+allow lt013g_gps_legacy binder_device:chr_file mounton;

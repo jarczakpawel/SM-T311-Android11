@@ -1,0 +1,20 @@
+# SM-T311 PJARCZAK CAMERA V214 HOTFIX8
+# Kernel-only BOOT repacks intentionally preserve the known-good ramdisk.
+# Source ueventd.lt013g.rc already has equivalent 0660 system:media rules.
+# This vendor-init bridge guarantees those permissions with the preserved ramdisk.
+on post-fs
+    # SMT311_Q33E_FIMC0_M2M_NODE_ACCESS
+    chown system media /dev/video0
+    chmod 0660 /dev/video0
+    chown system media /dev/video2
+    chmod 0660 /dev/video2
+    chown system media /dev/video1
+    chmod 0660 /dev/video1
+    chown system media /dev/video3
+    chmod 0660 /dev/video3
+
+    # SMT311_Q31Q_JPEG_NODES - s5p-jpeg encoder/decoder for Camera HAL.
+    chown system media /dev/video4
+    chmod 0660 /dev/video4
+    chown system media /dev/video5
+    chmod 0660 /dev/video5

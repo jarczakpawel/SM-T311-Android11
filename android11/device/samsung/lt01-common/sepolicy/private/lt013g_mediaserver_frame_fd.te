@@ -1,0 +1,16 @@
+# G747: MediaMetadataRetriever frame transfer (IMemoryHeap) uses Binder
+# BINDER_TYPE_FD from mediaserver to the requesting app.
+# Linux binder_translate_fd() calls security_binder_transfer_file() and
+# returns -EPERM without fd:use permission. This manifested as
+# "binder: translate fd failed" for MediaProvider thumbnail generation.
+# Grant use ONLY for descriptors explicitly provided by mediaserver;
+# it does not grant permission to open arbitrary files or devices.
+# Isolated apps are intentionally excluded.
+allow { appdomain -isolated_app } mediaserver:fd use;
+
+# G748: Binder's fd transfer checks inode read/write in addition to fd:use.
+# MediaMetadataRetrieverClient frame heap is a read-write memfd labeled
+# mediaserver_tmpfs. This is the same narrow shared-memory pattern that AOSP
+# already uses for audioserver_tmpfs. Apps never gain path-based access.
+allow { appdomain -isolated_app } mediaserver_tmpfs:file { getattr read write map };
+typeattribute mediaserver_tmpfs mlstrustedobject;

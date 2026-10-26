@@ -1,0 +1,4 @@
+SOURCE_V193_ROOTFS=/home/debian/android/lineage-18.1-sm-t311/device/samsung/lt01-common/v193-gnss-bridge-tmp/legacy-rootfs.tar
+SOURCE_V193_ROOTFS_SHA256=1ce24e6b63063ce88b27f055dd71adcb71c4a0cab818caaf419d67ae4fa011ed
+V195_PACKAGE_REVISION=2
+V195_APPLIED_AT=2026-08-06T17:30:11+02:00

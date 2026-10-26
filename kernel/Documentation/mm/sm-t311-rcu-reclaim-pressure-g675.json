@@ -1,0 +1,83 @@
+{
+  "stage": "G675",
+  "type": "source lifecycle audit + bounded queue arithmetic",
+  "source_positive_checks": {
+    "only_2_inode_exit_tag_clear_calls": true,
+    "single_inode_clear_disabled_for_experiment": true,
+    "batch_inode_clear_disabled_for_experiment": true,
+    "free_prepare_sole_raw_tag_clear": true,
+    "free_prepare_tagged_defers_before_buddy": true,
+    "soft_mark_limit_2m": true,
+    "mark_hot_checks_soft_limit_only_before_setting_bit": true,
+    "mark_only_ext4_order0_Normal": true,
+    "reserve_4m": true,
+    "expedite_threshold_512k": true,
+    "expedite_needs_low_Normal_even_if_queue_over_128": true,
+    "defer_accounts_every_previously_marked_folio": true,
+    "one_queued_grace_period_per_cpu": true,
+    "callback_clears_batch_counter": true,
+    "sync_drain_under_pressure": true,
+    "migrate_does_not_copy_pg_rcu_free": true,
+    "migration_frozen_old_folio_and_releases_refs": true,
+    "hwpoison_waits_for_existing_flag": true,
+    "final_inode_exiting_then_truncate": true,
+    "fuse_does_not_steal_tagged_pipe_folio": true,
+    "reclaim_checks_exiting_mapping": true,
+    "rcu_pending_counter_zone_defined": true
+  },
+  "source_positive_pass": 22,
+  "modified_source_negative_rejections": {
+    "single_eviction_guard_removed": [
+      "single_inode_clear_disabled_for_experiment"
+    ],
+    "both_eviction_guards_removed": [
+      "single_inode_clear_disabled_for_experiment",
+      "batch_inode_clear_disabled_for_experiment"
+    ],
+    "allocator_defer_removed": [
+      "free_prepare_tagged_defers_before_buddy"
+    ],
+    "mark_soft_limit_removed": [
+      "mark_hot_checks_soft_limit_only_before_setting_bit"
+    ],
+    "expedite_512k_changed": [
+      "expedite_threshold_512k"
+    ],
+    "migration_ref_freeze_removed": [
+      "migration_frozen_old_folio_and_releases_refs"
+    ],
+    "hwpoison_wait_removed": [
+      "hwpoison_waits_for_existing_flag"
+    ]
+  },
+  "hypothetical_backlog_scenario": {
+    "unit": "4KiB pages",
+    "normal_snapshot_pages_free": 76850,
+    "normal_high_watermark_pages": 1350,
+    "normal_low_watermark_pages": 1125,
+    "highmem_snapshot_pages_free": 294,
+    "highmem_low_watermark_pages": 314,
+    "highmem_below_low": true,
+    "marker_soft_limit_pages": 512,
+    "marker_soft_limit_mib": 2.0,
+    "expedite_queued_threshold_pages": 128,
+    "low_normal_reserve_pages": 1024,
+    "expedite_free_watermark_plus_reserve_pages": 2374,
+    "normal_above_pressure_threshold_at_snapshot": true,
+    "simulated_previously_tagged_folios_retired": 1536,
+    "illustrative_deferred_folios_mib": 6.0,
+    "deferred_can_exceed_mark_soft_limit": true,
+    "scenario_is_live_measurement": false,
+    "interpretation": "Previously tagged pages do not lose flags solely because global queue exceeds soft mark threshold; this source gate is NOT a hard upper bound on eviction deferred memory."
+  },
+  "source_only": true,
+  "caveats": [
+    "No actual RCU ON or reclaim stress was performed on tablet.",
+    "Current idle Normal-zone headroom does not guarantee headroom during bulk eviction.",
+    "HighMem below low in one snapshot; cannot infer memory-system correctness or user experience.",
+    "The 2MiB soft mark limit is not a hard maximum for folios tagged previously.",
+    "Migration preserving old tagged folio through free does not establish all cross-generation ARMv7 ordering.",
+    "Hardware-poison grace path is source visible, but full race proof remains unavailable.",
+    "S1 ACTIVE, S2/S3 BLOCKED; no-ref RCU ON not approved."
+  ]
+}

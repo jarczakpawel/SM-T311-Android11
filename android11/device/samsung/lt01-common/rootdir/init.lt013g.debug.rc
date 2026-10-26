@@ -1,0 +1,9 @@
+on boot
+    write /sys/power/pm_print_times 0
+
+on property:sys.boot_completed=1
+    write /proc/sys/kernel/softlockup_panic 1
+
+service vendor.watchdogd /system/bin/watchdogd 5 10
+    class core
+    seclabel u:r:watchdogd:s0

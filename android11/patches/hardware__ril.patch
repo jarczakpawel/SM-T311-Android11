@@ -1,0 +1,316 @@
+diff --git a/libril/Android.mk b/libril/Android.mk
+index b0fa53b641b816386aab4163ca8b7800e1948118..f80816dba19b58a3364e70e6293849a275100987 100644
+--- a/libril/Android.mk
++++ b/libril/Android.mk
+@@ -25,6 +25,11 @@ LOCAL_SHARED_LIBRARIES := \
+     android.hardware.radio.deprecated@1.0 \
+     libhidlbase \
+ 
++ifeq ($(TARGET_DEVICE),lt013g)
++LOCAL_SHARED_LIBRARIES += t311-libcutils-compat
++LOCAL_CFLAGS += -DT311_LEGACY_SIM_CARDSTATUS
++endif
++
+ LOCAL_STATIC_LIBRARIES := \
+     libprotobuf-c-nano-enable_malloc-32bit \
+ 
+diff --git a/libril/ril_service.cpp b/libril/ril_service.cpp
+index 466d14193fbbdcdf086bf29af274606fdffbb2a6..545bb340fe7ed4c108be8f66fa053acc99c604fc 100755
+--- a/libril/ril_service.cpp
++++ b/libril/ril_service.cpp
+@@ -32,6 +32,7 @@
+ #include <hidl/HidlTransportSupport.h>
+ #include <utils/SystemClock.h>
+ #include <inttypes.h>
++#include <atomic>
+ 
+ #define INVALID_HEX_CHAR 16
+ 
+@@ -580,6 +581,78 @@ bool dispatchString(int serial, int slotId, int request, const char * str) {
+     return true;
+ }
+ 
++#ifdef T311_LEGACY_SIM_CARDSTATUS
++// Samsung Pin/Puk/PinChange constructors copy 9 bytes per code and 39 per AID.
++// Reject empty or malformed credentials before reaching the proprietary RIL.
++enum class T311SimSecretResult { Ok, Invalid, NoMemory };
++
++static bool t311PadSimField(char **field, size_t minimumBytes) {
++    if (field == nullptr || *field == nullptr) return false;
++    size_t len = strlen(*field);
++    if (len + 1 >= minimumBytes) return true;
++    char *padded = static_cast<char *>(calloc(minimumBytes, 1));
++    if (padded == nullptr) return false;
++    memcpy(padded, *field, len);
++    memsetAndFreeStrings(1, *field);
++    *field = padded;
++    return true;
++}
++
++static T311SimSecretResult t311PrepareSimSecrets(int request, char **fields, int count) {
++    int secretCount;
++    int expectedCount;
++    bool isPuk;
++    switch (request) {
++        case RIL_REQUEST_ENTER_SIM_PIN:
++        case RIL_REQUEST_ENTER_SIM_PIN2:
++            secretCount = 1; expectedCount = 2; isPuk = false; break;
++        case RIL_REQUEST_ENTER_SIM_PUK:
++        case RIL_REQUEST_ENTER_SIM_PUK2:
++            secretCount = 2; expectedCount = 3; isPuk = true; break;
++        case RIL_REQUEST_CHANGE_SIM_PIN:
++        case RIL_REQUEST_CHANGE_SIM_PIN2:
++            secretCount = 2; expectedCount = 3; isPuk = false; break;
++        default:
++            return T311SimSecretResult::Ok;
++    }
++    if (count != expectedCount) return T311SimSecretResult::Invalid;
++    for (int i = 0; i < secretCount; ++i) {
++        if (fields[i] == nullptr) return T311SimSecretResult::Invalid;
++        size_t n = strnlen(fields[i], 9);
++        size_t min = (isPuk && i == 0) ? 8 : 4;
++        if (n < min || n > 8) return T311SimSecretResult::Invalid;
++        for (size_t j = 0; j < n; ++j) {
++            if (fields[i][j] < '0' || fields[i][j] > '9')
++                return T311SimSecretResult::Invalid;
++        }
++    }
++    for (int i = 0; i < expectedCount; ++i) {
++        if (!t311PadSimField(&fields[i], i == expectedCount - 1 ? 39 : 9))
++            return T311SimSecretResult::NoMemory;
++    }
++    return T311SimSecretResult::Ok;
++}
++// Fail closed on repeated numeric PIN/PUK attempts from a misbehaving framework.
++// Each request class may reach the OEM RIL only once per rild process lifetime;
++// no automatic unlock, no PIN/PUK guessing and no user secrets in the log.
++static std::atomic<unsigned char> t311SimCredentialOnce[6] = {};
++static bool t311ClaimSimCredentialAttempt(int request) {
++    int index;
++    switch (request) {
++        case RIL_REQUEST_ENTER_SIM_PIN: index = 0; break;
++        case RIL_REQUEST_ENTER_SIM_PIN2: index = 1; break;
++        case RIL_REQUEST_ENTER_SIM_PUK: index = 2; break;
++        case RIL_REQUEST_ENTER_SIM_PUK2: index = 3; break;
++        case RIL_REQUEST_CHANGE_SIM_PIN: index = 4; break;
++        case RIL_REQUEST_CHANGE_SIM_PIN2: index = 5; break;
++        default: return true;
++    }
++    unsigned char expected = 0;
++    return t311SimCredentialOnce[index].compare_exchange_strong(expected, 1,
++            std::memory_order_acq_rel, std::memory_order_relaxed);
++}
++#endif
++
+ bool dispatchStrings(int serial, int slotId, int request, bool allowEmpty, int countStrings, ...) {
+     RequestInfo *pRI = android::addRequestToList(serial, slotId, request);
+     if (pRI == NULL) {
+@@ -608,6 +681,31 @@ bool dispatchStrings(int serial, int slotId, int request, bool allowEmpty, int c
+     }
+     va_end(ap);
+ 
++#ifdef T311_LEGACY_SIM_CARDSTATUS
++    T311SimSecretResult simSecret = t311PrepareSimSecrets(request, pStrings, countStrings);
++    if (simSecret != T311SimSecretResult::Ok) {
++        for (int i = 0; i < countStrings; ++i) {
++            if (pStrings[i] != nullptr) memsetAndFreeStrings(1, pStrings[i]);
++        }
++        free(pStrings);
++        RLOGW("T311_SIM_CREDENTIAL_REJECTED: request=%d", request);
++        sendErrorResponse(pRI, simSecret == T311SimSecretResult::Invalid ?
++                RIL_E_INVALID_ARGUMENTS : RIL_E_NO_MEMORY);
++        return false;
++    }
++#endif
++
++#ifdef T311_LEGACY_SIM_CARDSTATUS
++    if (!t311ClaimSimCredentialAttempt(request)) {
++        for (int i = 0; i < countStrings; ++i) {
++            if (pStrings[i] != nullptr) memsetAndFreeStrings(1, pStrings[i]);
++        }
++        free(pStrings);
++        RLOGW("T311_SIM_CREDENTIAL_ATTEMPT_LIMIT: request=%d", request);
++        sendErrorResponse(pRI, RIL_E_INVALID_ARGUMENTS);
++        return false;
++    }
++#endif
+     CALL_ONREQUEST(request, pStrings, countStrings * sizeof(char *), pRI, slotId);
+ 
+     if (pStrings != NULL) {
+@@ -3040,10 +3138,88 @@ int radio::getIccCardStatusResponse(int slotId,
+         populateResponseInfo(responseInfo, serial, responseType, e);
+         CardStatus cardStatus = {CardState::ABSENT, PinState::UNKNOWN, -1, -1, -1, {}};
+         RIL_CardStatus_v6 *p_cur = ((RIL_CardStatus_v6 *) response);
++#ifdef T311_LEGACY_SIM_CARDSTATUS
++        // Stock Samsung RIL v7 may send the older v5 structure.
++        // Never reinterpret v5 application records at the shifted v6 offset.
++        RIL_CardStatus_v6 v6_adapter = {};
++        // A physical SM-T311 returned 440 bytes for GET_SIM_STATUS, whereas
++        // AOSP Android 11 demands exactly 280. On ARM32:
++        // header = 24 bytes, RIL_AppStatus = 32, extra 5 app slots = 160.
++        // Accept the vendor's larger fixed-capacity array only if the
++        // standard prefix (including every reported app) validates.
++        static_assert(sizeof(RIL_AppStatus) == 32, "unexpected ARM32 app ABI");
++        static_assert(offsetof(RIL_CardStatus_v6, applications) == 24,
++                      "unexpected ARM32 card header");
++        if (response != nullptr && responseLen == 440) {
++            const RIL_CardStatus_v6 *large = static_cast<const RIL_CardStatus_v6 *>(response);
++            bool prefix_ok = large->card_state >= RIL_CARDSTATE_ABSENT &&
++                    large->card_state <= RIL_CARDSTATE_ERROR &&
++                    large->universal_pin_state >= RIL_PINSTATE_UNKNOWN &&
++                    large->universal_pin_state <= RIL_PINSTATE_ENABLED_PERM_BLOCKED &&
++                    large->num_applications >= 0 &&
++                    large->num_applications <= RIL_CARD_MAX_APPS &&
++                    large->gsm_umts_subscription_app_index >= -1 &&
++                    large->cdma_subscription_app_index >= -1 &&
++                    large->ims_subscription_app_index >= -1 &&
++                    large->gsm_umts_subscription_app_index < large->num_applications &&
++                    large->cdma_subscription_app_index < large->num_applications &&
++                    large->ims_subscription_app_index < large->num_applications;
++            if (prefix_ok) {
++                for (int i = 0; i < large->num_applications; ++i) {
++                    const RIL_AppStatus &app = large->applications[i];
++                    if (app.app_type < RIL_APPTYPE_UNKNOWN ||
++                        app.app_type > RIL_APPTYPE_ISIM ||
++                        app.app_state < RIL_APPSTATE_UNKNOWN ||
++                        app.app_state > RIL_APPSTATE_READY ||
++                        app.pin1 < RIL_PINSTATE_UNKNOWN ||
++                        app.pin1 > RIL_PINSTATE_ENABLED_PERM_BLOCKED ||
++                        app.pin2 < RIL_PINSTATE_UNKNOWN ||
++                        app.pin2 > RIL_PINSTATE_ENABLED_PERM_BLOCKED) {
++                        prefix_ok = false;
++                        break;
++                    }
++                }
++            }
++            RLOGI("T311_RIL_SIM_STATUS_440 size=%zu prefix_valid=%d card_state=%d apps=%d gsm_index=%d",
++                  responseLen, prefix_ok, static_cast<int>(large->card_state),
++                  large->num_applications, large->gsm_umts_subscription_app_index);
++            if (prefix_ok) {
++                // Only the first 8 standard RIL_AppStatus entries are relevant.
++                // Do not modify or invent any card or application state.
++                responseLen = sizeof(RIL_CardStatus_v6);
++            }
++        }
++        if (response != nullptr && responseLen == sizeof(RIL_CardStatus_v5)) {
++            const RIL_CardStatus_v5 *v5 = static_cast<const RIL_CardStatus_v5 *>(response);
++            v6_adapter.card_state = v5->card_state;
++            v6_adapter.universal_pin_state = v5->universal_pin_state;
++            v6_adapter.gsm_umts_subscription_app_index = v5->gsm_umts_subscription_app_index;
++            v6_adapter.cdma_subscription_app_index = v5->cdma_subscription_app_index;
++            v6_adapter.ims_subscription_app_index = -1;
++            v6_adapter.num_applications = v5->num_applications;
++            memcpy(v6_adapter.applications, v5->applications, sizeof(v5->applications));
++            p_cur = &v6_adapter;
++            responseLen = sizeof(v6_adapter);
++            RLOGI("T311_RIL_SIM_STATUS_V5_ADAPTED size=%zu apps=%d state=%d",
++                  sizeof(RIL_CardStatus_v5), v5->num_applications,
++                  static_cast<int>(v5->card_state));
++        }
++#endif
+         if (response == NULL || responseLen != sizeof(RIL_CardStatus_v6)
++                || p_cur->num_applications < 0
++                || p_cur->num_applications > RIL_CARD_MAX_APPS
++                || p_cur->gsm_umts_subscription_app_index < -1
++                || p_cur->cdma_subscription_app_index < -1
++                || p_cur->ims_subscription_app_index < -1
+                 || p_cur->gsm_umts_subscription_app_index >= p_cur->num_applications
+                 || p_cur->cdma_subscription_app_index >= p_cur->num_applications
+                 || p_cur->ims_subscription_app_index >= p_cur->num_applications) {
++#ifdef T311_LEGACY_SIM_CARDSTATUS
++            // No ICCID, IMSI, AID or phone data ever logged.
++            RLOGE("T311_RIL_SIM_STATUS_INVALID response_present=%d len=%zu v5=%zu v6=%zu",
++                  response != nullptr, responseLen,
++                  sizeof(RIL_CardStatus_v5), sizeof(RIL_CardStatus_v6));
++#endif
+             RLOGE("getIccCardStatusResponse: Invalid response");
+             if (e == RIL_E_SUCCESS) responseInfo.error = RadioError::INVALID_RESPONSE;
+         } else {
+@@ -3506,7 +3682,8 @@ int radio::getSignalStrengthResponse(int slotId,
+         populateResponseInfo(responseInfo, serial, responseType, e);
+         SignalStrength signalStrength = {};
+         if (response == NULL || (responseLen != sizeof(RIL_SignalStrength_v10)
+-                && responseLen != sizeof(RIL_SignalStrength_v8))) {
++                && responseLen != sizeof(RIL_SignalStrength_v8)
++                && responseLen != sizeof(RIL_SignalStrength_v6))) {
+             RLOGE("getSignalStrengthResponse: Invalid response");
+             if (e == RIL_E_SUCCESS) responseInfo.error = RadioError::INVALID_RESPONSE;
+         } else {
+@@ -4000,8 +4177,16 @@ int radio::getOperatorResponse(int slotId,
+         hidl_string numeric;
+         int numStrings = responseLen / sizeof(char *);
+         if (response == NULL || numStrings != 3) {
+-            RLOGE("getOperatorResponse Invalid response: NULL");
+-            if (e == RIL_E_SUCCESS) responseInfo.error = RadioError::INVALID_RESPONSE;
++            // G835: an unsuccessful operator request may validly omit the
++            // response payload. Preserve the actual modem error code for
++            // any SIM/operator/roaming network. A claimed RIL success with
++            // a malformed response is a real protocol error, however.
++            // Diagnostic values are lengths only, never operator identifiers.
++            if (e == RIL_E_SUCCESS) {
++                RLOGE("G835 OPERATOR SUCCESS malformed payload bytes=%zu pointers=%d",
++                      responseLen, numStrings);
++                responseInfo.error = RadioError::INVALID_RESPONSE;
++            }
+ 
+         } else {
+             char **resp = (char **) response;
+@@ -6527,7 +6712,10 @@ int radio::getModemActivityInfoResponse(int slotId,
+     if (radioService[slotId]->mRadioResponse != NULL) {
+         RadioResponseInfo responseInfo = {};
+         populateResponseInfo(responseInfo, serial, responseType, e);
+-        ActivityStatsInfo info;
++        // Legacy Samsung XMM6262 lacks RIL activity statistics. OEM RIL
++        // returns a NULL payload; send deterministic zero-initialized fields
++        // together with INVALID_RESPONSE, never stack garbage from ril-daemon.
++        ActivityStatsInfo info = {};
+         if (response == NULL || responseLen != sizeof(RIL_ActivityStatsInfo)) {
+             RLOGE("getModemActivityInfoResponse Invalid response: NULL");
+             if (e == RIL_E_SUCCESS) responseInfo.error = RadioError::INVALID_RESPONSE;
+@@ -7202,9 +7390,35 @@ void convertRilSignalStrengthToHalV10(void *response, size_t responseLen,
+     signalStrength.tdScdma.rscp = rilSignalStrength->TD_SCDMA_SignalStrength.rscp;
+ }
+ 
++/* Samsung SM-T311 stock libsec-ril.so still reports RIL_SignalStrength_v6.
++ * Its OEM NetworkRespBuilder emits exactly 48 bytes (12 x int32).  Android
++ * 11's HIDL adapter previously rejected both unsolicited and queried values,
++ * then produced INVALID_RESPONSE, despite a valid modem measurement.
++ * Expand in a separate local V8 structure so no out-of-bounds field reads and
++ * the shared existing LTE sentinel conversion remains authoritative.
++ */
++void convertRilSignalStrengthToHalV6(const RIL_SignalStrength_v6 *legacy,
++        SignalStrength& signalStrength) {
++    RIL_SignalStrength_v8 expanded = {};
++    expanded.GW_SignalStrength = legacy->GW_SignalStrength;
++    expanded.CDMA_SignalStrength = legacy->CDMA_SignalStrength;
++    expanded.EVDO_SignalStrength = legacy->EVDO_SignalStrength;
++    expanded.LTE_SignalStrength.signalStrength = legacy->LTE_SignalStrength.signalStrength;
++    expanded.LTE_SignalStrength.rsrp = legacy->LTE_SignalStrength.rsrp;
++    expanded.LTE_SignalStrength.rsrq = legacy->LTE_SignalStrength.rsrq;
++    expanded.LTE_SignalStrength.rssnr = legacy->LTE_SignalStrength.rssnr;
++    expanded.LTE_SignalStrength.cqi = legacy->LTE_SignalStrength.cqi;
++    expanded.LTE_SignalStrength.timingAdvance = INT_MAX;
++    convertRilSignalStrengthToHalV8(&expanded, sizeof(expanded), signalStrength);
++    signalStrength.gw.timingAdvance = INT_MAX;
++}
++
+ void convertRilSignalStrengthToHal(void *response, size_t responseLen,
+         SignalStrength& signalStrength) {
+-    if (responseLen == sizeof(RIL_SignalStrength_v8)) {
++    if (responseLen == sizeof(RIL_SignalStrength_v6)) {
++        convertRilSignalStrengthToHalV6(
++                static_cast<const RIL_SignalStrength_v6 *>(response), signalStrength);
++    } else if (responseLen == sizeof(RIL_SignalStrength_v8)) {
+         convertRilSignalStrengthToHalV8(response, responseLen, signalStrength);
+     } else {
+         convertRilSignalStrengthToHalV10(response, responseLen, signalStrength);
+@@ -7216,7 +7430,8 @@ int radio::currentSignalStrengthInd(int slotId,
+                                     void *response, size_t responseLen) {
+     if (radioService[slotId] != NULL && radioService[slotId]->mRadioIndication != NULL) {
+         if (response == NULL || (responseLen != sizeof(RIL_SignalStrength_v10)
+-                && responseLen != sizeof(RIL_SignalStrength_v8))) {
++                && responseLen != sizeof(RIL_SignalStrength_v8)
++                && responseLen != sizeof(RIL_SignalStrength_v6))) {
+             RLOGE("currentSignalStrengthInd: invalid response");
+             return 0;
+         }

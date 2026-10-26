@@ -1,0 +1,108 @@
+diff --git a/exynos/Android.bp b/exynos/Android.bp
+new file mode 100644
+index 0000000000000000000000000000000000000000..df157c9e2bceadb998df7e24e1316def7c0c40ee
+--- /dev/null
++++ b/exynos/Android.bp
+@@ -0,0 +1,9 @@
++// Standalone Exynos G2D userspace ABI test library (offline, not PRODUCT_PACKAGES).
++cc_library_static {
++    name: "libexynos_g2d_t311_offline",
++    srcs: ["exynos_drm.c", "exynos_fimg2d.c"],
++    vendor: true,
++    shared_libs: ["libdrm"],
++    local_include_dirs: ["."],
++    cflags: ["-Wno-unused-parameter", "-Wno-deprecated-declarations"],
++}
+diff --git a/exynos/exynos_fimg2d.c b/exynos/exynos_fimg2d.c
+index ac6fa6872562128a384c518df7854ba79751bc2e..dd9255cdc5b8b91c46d2e1a1a0fe9fc68f168ad1 100644
+--- a/exynos/exynos_fimg2d.c
++++ b/exynos/exynos_fimg2d.c
+@@ -505,20 +505,17 @@ g2d_copy(struct g2d_context *ctx, struct g2d_image *src,
+ 	union g2d_point_val pt;
+ 	unsigned int src_w, src_h, dst_w, dst_h;
+ 
+-	src_w = w;
+-	src_h = h;
+-	if (src_x + src->width > w)
+-		src_w = src->width - src_x;
+-	if (src_y + src->height > h)
+-		src_h = src->height - src_y;
+-
+-	dst_w = w;
+-	dst_h = w;
+-	if (dst_x + dst->width > w)
+-		dst_w = dst->width - dst_x;
+-	if (dst_y + dst->height > h)
+-		dst_h = dst->height - dst_y;
++	/* Check origins before subtraction to avoid unsigned underflow.
++	 * Clip the requested width and height against BOTH buffer extents.
++	 */
++	if (!w || !h || src_x >= src->width || src_y >= src->height ||
++	    dst_x >= dst->width || dst_y >= dst->height)
++		return -EINVAL;
+ 
++	src_w = MIN(w, src->width - src_x);
++	src_h = MIN(h, src->height - src_y);
++	dst_w = MIN(w, dst->width - dst_x);
++	dst_h = MIN(h, dst->height - dst_y);
+ 	w = MIN(src_w, dst_w);
+ 	h = MIN(src_h, dst_h);
+ 
+@@ -589,20 +586,17 @@ g2d_move(struct g2d_context *ctx, struct g2d_image *img,
+ 	union g2d_direction_val dir;
+ 	unsigned int src_w, src_h, dst_w, dst_h;
+ 
+-	src_w = w;
+-	src_h = h;
+-	if (src_x + img->width > w)
+-		src_w = img->width - src_x;
+-	if (src_y + img->height > h)
+-		src_h = img->height - src_y;
+-
+-	dst_w = w;
+-	dst_h = w;
+-	if (dst_x + img->width > w)
+-		dst_w = img->width - dst_x;
+-	if (dst_y + img->height > h)
+-		dst_h = img->height - dst_y;
++	/* Memmove's source and destination share one BO. Clip both
++	 * rectangles independently, including non-square BOs.
++	 */
++	if (!w || !h || src_x >= img->width || src_y >= img->height ||
++	    dst_x >= img->width || dst_y >= img->height)
++		return -EINVAL;
+ 
++	src_w = MIN(w, img->width - src_x);
++	src_h = MIN(h, img->height - src_y);
++	dst_w = MIN(w, img->width - dst_x);
++	dst_h = MIN(h, img->height - dst_y);
+ 	w = MIN(src_w, dst_w);
+ 	h = MIN(src_h, dst_h);
+ 
+@@ -797,18 +791,22 @@ g2d_blend(struct g2d_context *ctx, struct g2d_image *src,
+ 	unsigned int gem_space;
+ 	unsigned int src_w, src_h, dst_w, dst_h;
+ 
++	if (!w || !h || src_x >= src->width || src_y >= src->height ||
++	    dst_x >= dst->width || dst_y >= dst->height)
++		return -EINVAL;
++
+ 	src_w = w;
+ 	src_h = h;
+-	if (src_x + w > src->width)
++	if (w > src->width - src_x)
+ 		src_w = src->width - src_x;
+-	if (src_y + h > src->height)
++	if (h > src->height - src_y)
+ 		src_h = src->height - src_y;
+ 
+ 	dst_w = w;
+ 	dst_h = h;
+-	if (dst_x + w > dst->width)
++	if (w > dst->width - dst_x)
+ 		dst_w = dst->width - dst_x;
+-	if (dst_y + h > dst->height)
++	if (h > dst->height - dst_y)
+ 		dst_h = dst->height - dst_y;
+ 
+ 	w = MIN(src_w, dst_w);

@@ -1,0 +1,10 @@
+# SM-T311 LT013G partition map physically verified by v55:
+# p19=CACHE, p20=SYSTEM, p21=USERDATA.
+# EFS p3 is intentionally not mounted until a separate read-only probe.
+/dev/block/platform/soc/12550000.mmc/by-name/SYSTEM /system ext4 ro,noatime wait,first_stage_mount
+/dev/block/platform/soc/12550000.mmc/by-name/CACHE /cache ext4 noatime,nosuid,nodev wait,check
+/dev/block/platform/soc/12550000.mmc/by-name/USERDATA /data ext4 noatime,nosuid,nodev,noauto_da_alloc wait,check,encryptable=footer
+/dev/block/zram0 none swap defaults zramsize=50%,max_comp_streams=2,swapprio=32758
+
+# SM-T311 V159: PIT OTA (p11) is Android bootloader-message storage
+/dev/block/platform/soc/12550000.mmc/by-name/OTA /misc emmc defaults defaults

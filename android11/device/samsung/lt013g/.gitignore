@@ -1,0 +1,13 @@
+/gps-v195/immutable/
+/gps-v195/legacy-rootfs-mutable.tar
+/gps-v195/legacy-rootfs.tar
+/tools/__pycache__/
+/prebuilt/*
+!/prebuilt/BOOT-7.3.0-pjarczak-G730-OTG-EVAL-8MiB.img
+!/prebuilt/BOOT-7.3.0-pjarczak-G1130-VERIFIED-8MiB.img
+!/prebuilt/kernel-7.3.0-pjarczak-G1130-VERIFIED-zImage.bin
+!/prebuilt/BOOT-7.3.0-pjarczak-G716-CLEAN-HOST-ONLY-8MiB.img
+!/prebuilt/recovery-current.img
+/radio/prebuilt/
+
+prebuilt/private-active-g958/

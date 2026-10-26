@@ -1,0 +1,55 @@
+{
+  "stage": "G699",
+  "checks": {
+    "host_positive_preflight_guard_count": true,
+    "host_positive_preflight_all_true": true,
+    "host_negative_controls_all_rejected": true,
+    "real_host_TWRP_expected_sha": true,
+    "real_host_G650_expected_sha": true,
+    "real_host_candidate_G696_expected_sha": true,
+    "recorded_android_shell_uid_not_root": true,
+    "live_BOOT_hash_blocked_not_faked": true,
+    "live_RECOVERY_hash_blocked_not_faked": true,
+    "neither_partition_size_live_confirmed": true,
+    "TWRP_not_running_and_not_rebooted": true,
+    "manual_readonly_TWRP_guard_requires_real_binary": true,
+    "manual_guard_blocks_unknown_BOOT_and_REC": true,
+    "manual_guard_can_only_be_triggered_by_owner": true,
+    "no_device_flash_permitted": true,
+    "no_release_off_boot_claimed": true,
+    "host_code_explicitly_no_ADB_transport": true,
+    "host_scripts_exist_as_source_code": true
+  },
+  "positive": 18,
+  "counterfactuals_caught": {
+    "fake_TWRP_readback": [
+      "live_RECOVERY_hash_blocked_not_faked"
+    ],
+    "fake_BOOT_readback": [
+      "live_BOOT_hash_blocked_not_faked"
+    ],
+    "allow_flash": [
+      "no_device_flash_permitted"
+    ],
+    "fake_recovery_boot": [
+      "manual_guard_can_only_be_triggered_by_owner"
+    ],
+    "drop_TWRP_binary_guard": [
+      "manual_readonly_TWRP_guard_requires_real_binary"
+    ],
+    "accept_wrong_recovery_sha": [
+      "real_host_TWRP_expected_sha"
+    ]
+  },
+  "physical_adb_uid": 2000,
+  "current_live_BOOT_SHA_read": false,
+  "current_live_RECOVERY_SHA_read": false,
+  "original_TWRP_host_image_sha": "f818c29f65d2082cb642cac85e27715c5255c87aac627bb542b777129d4f784f",
+  "historical_G650_host_image_sha": "2d477816fef0dbe2f41ca30747201dbe773e3dc3e710348c118226ee2999b7a3",
+  "G696_release_OFF_host_image_sha": "ba9aed97fe7a028fc9ff5b540c916b251a7cd064a9fbf4055b5eb3f7af254204",
+  "manual_TWRP_test_executed": false,
+  "physical_G696_booted": false,
+  "flash_authorized": false,
+  "s0_to_s8": "S0 PASS S1 ACTIVE S2-S6 BLOCKED S7 PARTIAL S8 ACTIVE",
+  "status": "HARD_STOP_REQUIRE_REAL_PHYSICAL_READONLY_TWRP_IDENTITY"
+}

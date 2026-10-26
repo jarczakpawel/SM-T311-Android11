@@ -1,0 +1,2 @@
+# Only the explicit procfs knob set by init.lt013g.debug.rc on boot completion.
+allow vendor_init proc_lt013g_softlockup_panic:file { getattr open write };

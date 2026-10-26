@@ -1,0 +1,9 @@
+cc_binary {
+    name: "T311V4L2Probe",
+    srcs: ["t311_v4l2_probe.c"],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}

@@ -1,0 +1,8 @@
+// G645 non-privileged diagnostic, test only, not added to ROM.
+cc_binary {
+    name: "t311_filecache_zones_probe",
+    vendor: true,
+    srcs: ["main.c"],
+    cflags: ["-O2", "-Wall", "-Wextra", "-Werror"],
+    stl: "none",
+}

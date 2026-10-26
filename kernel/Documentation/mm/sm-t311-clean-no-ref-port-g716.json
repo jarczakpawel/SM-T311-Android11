@@ -1,0 +1,51 @@
+{
+  "stage": "G716",
+  "description": "Complete removal of abandoned 18-commit Linus/Kiryl experimental no-ref RCU port from SM-T311 active runtime source, retain independent verified optimizations",
+  "checks": {
+    "all_18_commit_changed_20_files_identified": true,
+    "nineteen_source_files_bitwise_identical_to_preport": true,
+    "final_filemap_is_refcounted_without_noref": true,
+    "all_affected_runtime_source_free_of_removed_port": true,
+    "original_16_commit_migration_cleanup_no_rcu_direct_refs": true,
+    "both_read_microoptimizations_retained": true,
+    "FUSE_independent_passthrough_negotiation_still_available": true,
+    "RCU_coupled_FUSE_open_counter_completely_removed": true,
+    "mm_vma_G683_experiment_removed": true,
+    "no_Kconfig_option_can_enable_old_port": true,
+    "both_experimental_Kconfig_overlays_removed": true,
+    "G716_config_lacks_noref_features": true,
+    "G716_config_preserves_hardware_features": true,
+    "ARM32_ELF_machine_verified": true,
+    "ARM32_linked_release_does_not_define_any_ref_free_symbol": true,
+    "full_boot_SHA_matches_G716_manifest": true,
+    "full_boot_bytes_expected": true,
+    "DTB_matches_previous_physical_G650": true,
+    "ramdisk_is_pinned_G650_ramdisk": true,
+    "kernel_release_exact_stable": true,
+    "not_claimed_physical_installed": true
+  },
+  "negative_controls": {
+    "reintroduce_PAGE_RCU_FREE_Kconfig": true,
+    "reenable_SM_T311_experiment": true,
+    "reinsert_ref_free_reader": true,
+    "lose_prev_pos_skip": true,
+    "lose_folio_access_consolidation": true,
+    "reintroduce_experimental_FUSE_counter": true,
+    "reintroduce_ref_free_ELF_symbol": true
+  },
+  "removed_series": "05362c1a7..016e91411 (18 historical commits still in Git history; runtime tree restored to 4432bceab for 19 files)",
+  "retained_refcounted_optimizations": [
+    "899f8d53b folio_mark_accessed consolidation",
+    "d46226de3 skip unchanged ra->prev_pos store"
+  ],
+  "shmem_read_bytes_G650_equivalent_host": 976,
+  "shmem_read_bytes_G700_host": 920,
+  "shmem_read_bytes_G716_host": 860,
+  "shmem_optimization_note": "These are static linked ARM32 function code sizes (not latency or measured throughput). G716 has no no-ref stub at all.",
+  "new_full_BOOT_sha256": "5d275fb7977d95e9e3515ff571efe675359e0874e1f8c5aef4b9c925d19182c1",
+  "new_full_BOOT_bytes": 8388608,
+  "DTB_unchanged": true,
+  "RAMDISK_unchanged": true,
+  "hardware_flash": false,
+  "next": "Android prebuilt G716 packaging selection, then owner-attended physical p9/p10 and recovery proof before flash"
+}

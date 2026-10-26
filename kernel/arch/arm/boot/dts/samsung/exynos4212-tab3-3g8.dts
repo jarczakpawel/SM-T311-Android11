@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Samsung's Exynos4212 based Galaxy Tab 3 8.0 3G board device tree
+ * source
+ *
+ * Copyright (c) 2013 Samsung Electronics Co., Ltd.
+ *		http://www.samsung.com
+ */
+
+/dts-v1/;
+#include "exynos4212-tab3.dtsi"
+
+/ {
+	model = "Samsung Galaxy Tab 3 8.0 3G (SM-T311) based on Exynos4212";
+	compatible = "samsung,t311", "samsung,tab3", "samsung,exynos4212", "samsung,exynos4";
+	chassis-type = "tablet";
+
+	i2c_ir: i2c-gpio-ir {
+		compatible = "i2c-gpio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ir_ack_default>;
+		sda-gpios = <&gpy0 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpy0 1 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ir_tx: ir@50 {
+			compatible = "samsung,tab3-mc96-ir";
+			reg = <0x50>;
+			wake-gpios = <&gpl0 3 GPIO_ACTIVE_HIGH>;
+			ack-gpios = <&gpm0 6 GPIO_ACTIVE_HIGH>;
+			led-gpios = <&gpj0 3 GPIO_ACTIVE_HIGH>;
+			vled-supply = <&ldo19_reg>;
+		};
+	};
+
+	vibrator {
+		compatible = "gpio-vibrator";
+		enable-gpios = <&gpl2 4 GPIO_ACTIVE_HIGH>;
+	};
+
+	gps-power {
+		compatible = "samsung,tab3-bcm4752";
+		enable-gpios = <&gpl2 2 GPIO_ACTIVE_HIGH>;
+		clocks = <&s5m8767_osc S2MPS11_CLK_AP>;
+		clock-names = "lpo";
+	};
+
+	xmm6262-modem-control {
+		compatible = "samsung,tab3-xmm6262";
+		reset-request-gpios = <&gpm3 3 GPIO_ACTIVE_HIGH>;
+		cp-on-gpios = <&gpl2 5 GPIO_ACTIVE_HIGH>;
+		cp-reset-gpios = <&gpx3 2 GPIO_ACTIVE_HIGH>;
+		pda-active-gpios = <&gpl1 0 GPIO_ACTIVE_HIGH>;
+		phone-active-gpios = <&gpx1 6 GPIO_ACTIVE_HIGH>;
+		cp-dump-gpios = <&gpj0 5 GPIO_ACTIVE_HIGH>;
+		ap-dump-gpios = <&gpm3 4 GPIO_ACTIVE_HIGH>;
+		link-active-gpios = <&gpl0 0 GPIO_ACTIVE_HIGH>;
+		host-wake-gpios = <&gpx1 1 GPIO_ACTIVE_HIGH>;
+		slave-wake-gpios = <&gpx1 0 GPIO_ACTIVE_HIGH>;
+		suspend-request-gpios = <&gpm2 4 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&xmm_hostwake_default &xmm_phone_active_default
+			     &xmm_cp_rst_default &xmm_ap_dump_default>;
+		wakeup-source;
+	};
+};
+
+&i2c_lightsensor {
+	status = "okay";
+
+	light-proximity-sensor@60 {
+		compatible = "capella,cm36653";
+		reg = <0x60>;
+		interrupt-parent = <&gpx0>;
+		interrupts = <2 IRQ_TYPE_EDGE_BOTH>;
+		vled-supply = <&ldo24_reg>;
+		capella,proximity-threshold-low = <8>;
+		capella,proximity-threshold-high = <10>;
+		wakeup-source;
+	};
+};
+
+&pinctrl_1 {
+	ir_ack_default: ir-ack-default-pins {
+		samsung,pins = "gpm0-6";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	xmm_hostwake_default: xmm-hostwake-default-pins {
+		samsung,pins = "gpx1-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	xmm_phone_active_default: xmm-phone-active-default-pins {
+		samsung,pins = "gpx1-6";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	xmm_cp_rst_default: xmm-cp-rst-default-pins {
+		samsung,pins = "gpx3-2";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	xmm_ap_dump_default: xmm-ap-dump-default-pins {
+		samsung,pins = "gpm3-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+};
+
+&pinctrl_0 {
+	gps_uart_rx: gps-uart-rx-pins {
+		samsung,pins = "gpa0-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	gps_uart_tx: gps-uart-tx-pins {
+		samsung,pins = "gpa0-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	gps_uart_fctl: gps-uart-fctl-pins {
+		samsung,pins = "gpa0-6", "gpa0-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+};
+
+&serial_1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&gps_uart_rx &gps_uart_tx &gps_uart_fctl>;
+	uart-has-rtscts;
+	/delete-property/ dmas;
+	/delete-property/ dma-names;
+	samsung,uart-force-hw-flow-control;
+	samsung,uart-block-deep-idle-while-open;
+	samsung,uart-tx-trigger-level = <8>;
+	samsung,uart-rx-trigger-level = <32>;
+	status = "okay";
+};
+
+/* Pin control sleep state overrides */
+&sleep0 {
+	PIN_SLP(gpa0-4, INPUT, UP);
+	PIN_SLP(gpa0-5, INPUT, UP);
+	PIN_SLP(gpa0-6, INPUT, DOWN);
+	PIN_SLP(gpa0-7, INPUT, DOWN);
+
+	PIN_SLP(gpb-5, INPUT, UP);
+};
+
+&sleep1 {
+	PIN_SLP(gpl0-0, OUT0, NONE);
+	PIN_SLP(gpl1-0, OUT0, NONE);
+	PIN_SLP(gpl2-2, INPUT, DOWN);
+	PIN_SLP(gpl2-4, OUT0, NONE);
+	PIN_SLP(gpm3-3, OUT1, NONE);
+};
+
+/* XMM-A isolation: enable inherited Exynos EHCI only. */
+&ehci {
+	status = "okay";
+};
+
+/* Samsung T311 host topology includes the real OHCI companion. */
+&ohci {
+	status = "okay";
+};
+
+&tab3_charger {
+	t311,otg-boost-experimental;
+	phys = <&exynos_usbphy 1>;
+	phy-names = "usb2-host";
+};

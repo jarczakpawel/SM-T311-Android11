@@ -1,0 +1,122 @@
+{
+  "stage": "G713",
+  "scope": "Read-only linked ARM32 G700 release + G686 experiment: verify production filemap/shmem folio reference contract and accidental ref-free dispatch regressions",
+  "gates": {
+    "host_release_ELF32_ARM": true,
+    "release_CONFIG_FUSE_unrelated_RCU_OFF": true,
+    "release_ref_free_stub_linked_8_bytes": true,
+    "release_stub_is_exact_mov_zero_bx_lr": true,
+    "filemap_read_G700_does_not_branch_to_unref": true,
+    "shmem_read_G700_does_not_branch_to_unref": true,
+    "filemap_read_G686_calls_real_unref": true,
+    "filemap_read_G686_unref_is_real_function": true,
+    "filemap_read_G700_uses_refcounted_page_provider": true,
+    "filemap_get_pages_G700_calls_reference_batch": true,
+    "filemap_get_read_batch_has_tryget_under_RCU": true,
+    "filemap_get_read_batch_retry_drops_reference": true,
+    "release_reference_batch_linked_nonempty": true,
+    "release_reference_batch_has_ARM32_unpin_branch": true,
+    "filemap_get_entry_RCU_tryget_reload_put": true,
+    "filemap_read_copy_keeps_folio_until_put": true,
+    "filemap_read_preserves_alias_flush": true,
+    "shmem_read_after_skip_enters_normal_loop": true,
+    "source_release_filemap_skips_unref_dispatch": true,
+    "source_release_shmem_skips_unref_dispatch": true,
+    "still_no_ref_free_activation_in_staged_G692": true,
+    "filemap_and_shmem_release_do_not_hide_rcu_stub_call": true,
+    "G700_known_pinned_boot_hash": true
+  },
+  "mutation_detection": {
+    "replace_filemap_zero_with_rcu_call": true,
+    "replace_shmem_zero_with_rcu_call": true,
+    "drop_batch_try_get": true,
+    "drop_batch_reload": true,
+    "drop_reference_put": true,
+    "open_experimental_ON_switch": true,
+    "reject_binary_stub_modified": true,
+    "reject_binary_unref_call_inserted": true
+  },
+  "linked_symbol_sizes": {
+    "experiment": {
+      "filemap_get_entry": {
+        "address": "c02fb9b8",
+        "size": 340
+      },
+      "filemap_get_pages": {
+        "address": "c02fa514",
+        "size": 2468
+      },
+      "filemap_get_read_batch": {
+        "address": "c02f965c",
+        "size": 676
+      },
+      "filemap_read": {
+        "address": "c02fe224",
+        "size": 1256
+      },
+      "filemap_read_rcu": {
+        "address": "c02fdbbc",
+        "size": 1640
+      },
+      "shmem_file_read_iter": {
+        "address": "c031d710",
+        "size": 920
+      }
+    },
+    "release": {
+      "filemap_get_entry": {
+        "address": "c02fbd4c",
+        "size": 340
+      },
+      "filemap_get_pages": {
+        "address": "c02fa270",
+        "size": 2468
+      },
+      "filemap_get_read_batch": {
+        "address": "c02f93b8",
+        "size": 676
+      },
+      "filemap_read": {
+        "address": "c02fac14",
+        "size": 1236
+      },
+      "filemap_read_rcu": {
+        "address": "c02fdf08",
+        "size": 8
+      },
+      "shmem_file_read_iter": {
+        "address": "c031cdb0",
+        "size": 920
+      }
+    }
+  },
+  "linked_function_instruction_counts": {
+    "experiment": {
+      "filemap_read_rcu": 410,
+      "filemap_read": 314,
+      "shmem_file_read_iter": 230,
+      "filemap_get_pages": 617,
+      "filemap_get_read_batch": 169,
+      "filemap_get_entry": 85
+    },
+    "release": {
+      "filemap_read_rcu": 2,
+      "filemap_read": 309,
+      "shmem_file_read_iter": 230,
+      "filemap_get_pages": 617,
+      "filemap_get_read_batch": 169,
+      "filemap_get_entry": 85
+    }
+  },
+  "factual_decision": "G700 filemap_read/shmem do not call ref-free stub; reference-backed filemap_get_read_batch uses tryget/reload/put; no G713 claim of filemap_read speedup over G650 (G694 compiled baseline had same instructions)",
+  "known_limits": [
+    "G700 full host-only ELF is not the running physical G650.",
+    "Current G650 runtime static key cannot be read through unprivileged ADB; G692 fail-closed is STAGED only.",
+    "Does not prove absence of all possible other ref-free callers; checks designated production read paths.",
+    "Does not prove real ARMv7 memory ordering, mmap lockdep, S2 or S3.",
+    "Does not grant unattended flash permission without verified current p9/p10 and recovery path."
+  ],
+  "release_candidate_rcu_noref_ON_allowed": false,
+  "runtime_kernel_C_modified": false,
+  "physical_boot_flashed": false
+}

@@ -1,0 +1,27 @@
+C SMT311+NoWmb+FlagData
+
+(*
+ * G654 NEGATIVE CONTROL: deliberately omit publishing writer barrier.
+ * Outcome may be allowed. Not a model of actual tag publication path,
+ * which uses bitops, refcount, folio locks and XArray publication.
+ *)
+
+{}
+
+P0(int *data, int *flag)
+{
+	WRITE_ONCE(*data, 1);
+	WRITE_ONCE(*flag, 1);
+}
+
+P1(int *data, int *flag)
+{
+	int r0;
+	int r1;
+
+	r0 = READ_ONCE(*flag);
+	smp_rmb();
+	r1 = READ_ONCE(*data);
+}
+
+exists (1:r0=1 /\ 1:r1=0)

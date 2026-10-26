@@ -1,0 +1,27 @@
+HWC missed frame count: 209
+  - Output Layer 0xa7703680(com.android.systemui.ImageWallpaper#0)
+      hwc: layer=0x083 composition=DEVICE (2) 
+  - Output Layer 0xa7704b70(com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher#0)
+      hwc: layer=0x084 composition=CLIENT (1) 
+  - Output Layer 0xa77025c0(StatusBar#0)
+      hwc: layer=0x082 composition=CLIENT (1) 
+  - Output Layer 0xa77010d0(NotificationShade#0)
+      hwc: layer=0x08d composition=CLIENT (1) 
+ Total frames count: 8357
+ ValidateDisplay unexpected composition failures: 0
+ ValidateDisplay normal plane-exhaustion CLIENT fallback: 0
+ PresentDisplay composition errors (NOT atomic-only): 0
+  - ImportBuffer failures: 0
+  - Planner failures: 0
+  - Submit/test failures: 0
+ Composition efficiency: 0.396696
+ Total frames count: 44
+ ValidateDisplay unexpected composition failures: 0
+ ValidateDisplay normal plane-exhaustion CLIENT fallback: 0
+ PresentDisplay composition errors (NOT atomic-only): 0
+  - ImportBuffer failures: 0
+  - Planner failures: 0
+  - Submit/test failures: 0
+ Composition efficiency: 0.320748
+ Actual DRM atomic frame ioctl failures (compositor): 0
+ SM-T311 one-atomic-Present mode: 1

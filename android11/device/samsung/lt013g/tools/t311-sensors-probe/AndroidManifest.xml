@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.pjarczak.t311sensorsprobe">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <application android:label="SM-T311 Sensor Probe" android:allowBackup="false">
+        <service android:name=".SensorProbeService" android:exported="true" />
+    </application>
+</manifest>

@@ -1,0 +1,1610 @@
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index 1cc2ab802bf38b87bb31653548d980f63df9e8d9..e2030a9325b84159349b93780b7d19f48bb93e29 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -26,6 +26,7 @@
+     <uses-permission android:name="android.permission.READ_COMPAT_CHANGE_CONFIG"/>
+ 
+     <application
++            android:usesNonSdkApi="true"
+             android:name="com.android.providers.media.MediaApplication"
+             android:label="@string/app_label"
+             android:icon="@mipmap/ic_launcher"
+diff --git a/jni/Android.bp b/jni/Android.bp
+index 280ddcda2d688c97fa9f374c329745a0047cd13d..ba7b3bbed29c21cbfb2214dfefaefe5e9830f9bc 100644
+--- a/jni/Android.bp
++++ b/jni/Android.bp
+@@ -25,6 +25,7 @@ cc_library_shared {
+         "MediaProviderWrapper.cpp",
+         "ReaddirHelper.cpp",
+         "RedactionInfo.cpp",
++        "snapshot-g150.c",
+         "node.cpp"
+     ],
+ 
+diff --git a/jni/FuseDaemon.cpp b/jni/FuseDaemon.cpp
+index 7dc629ff6a40a127757aead957b2fe2390a0671c..92b9f7b48187ea41500abdabde686ca291dca405 100644
+--- a/jni/FuseDaemon.cpp
++++ b/jni/FuseDaemon.cpp
+@@ -64,6 +64,7 @@
+ #include "libfuse_jni/FuseUtils.h"
+ #include "libfuse_jni/ReaddirHelper.h"
+ #include "libfuse_jni/RedactionInfo.h"
++#include "snapshot-g150.h"
+ #include "node-inl.h"
+ 
+ using mediaprovider::fuse::DirectoryEntry;
+@@ -275,6 +276,26 @@ struct fuse {
+     }
+ 
+     std::recursive_mutex lock;
++    // Protect the interval between a MediaProvider database insert and
++    // publication of the FUSE CREATE reply / creator-handle restriction.
++    std::unordered_map<string, uid_t> pending_creates;
++
++    bool ReserveCreate(const string& name, uid_t uid) {
++        std::lock_guard<std::recursive_mutex> guard(lock);
++        return pending_creates.emplace(name, uid).second;
++    }
++
++    void ReleaseCreate(const string& name) {
++        std::lock_guard<std::recursive_mutex> guard(lock);
++        pending_creates.erase(name);
++    }
++
++    bool CreatePendingForOtherUid(const string& name, uid_t uid) {
++        std::lock_guard<std::recursive_mutex> guard(lock);
++        const auto it = pending_creates.find(name);
++        return it != pending_creates.end() && it->second != uid;
++    }
++
+     const string path;
+     // The Inode tracker associated with this FUSE instance.
+     mediaprovider::fuse::NodeTracker tracker;
+@@ -296,9 +317,27 @@ struct fuse {
+ 
+     FAdviser fadviser;
+ 
++    bool passthrough = false;
++    android::base::unique_fd root_fd;
+     std::atomic_bool* active;
+ };
+ 
++// Remove the create reservation on every return, including error paths.
++class ScopedCreateReservation {
++  public:
++    ScopedCreateReservation(fuse* fs, const string& path, uid_t uid)
++        : fuse_(fs), path_(path), acquired_(fs->ReserveCreate(path, uid)) {}
++    ~ScopedCreateReservation() {
++        if (acquired_) fuse_->ReleaseCreate(path_);
++    }
++    bool acquired() const { return acquired_; }
++
++  private:
++    fuse* const fuse_;
++    const string path_;
++    const bool acquired_;
++};
++
+ static inline string get_name(node* n) {
+     if (n) {
+         std::string name = IS_OS_DEBUGABLE ? "real_path: " + n->BuildPath() + " " : "";
+@@ -415,6 +454,12 @@ static node* make_node_entry(fuse_req_t req, node* parent, const string& name, c
+ 
+     bool should_inval = false;
+     node = parent->LookupChildByName(name, true /* acquire */);
++    if (node && !node->MatchesBackingIdentity(e->attr)) {
++        node->SetDeleted();
++        node->Release(1);
++        node = nullptr;
++        should_inval = true;
++    }
+     if (!node) {
+         node = ::node::Create(parent, name, &fuse->lock, &fuse->tracker);
+     } else if (!mediaprovider::fuse::containsMount(path, std::to_string(getuid() / PER_USER_RANGE))) {
+@@ -440,6 +485,7 @@ static node* make_node_entry(fuse_req_t req, node* parent, const string& name, c
+             t.detach();
+         }
+     }
++    node->RememberBackingIdentity(e->attr);
+     TRACE_NODE(node, req);
+ 
+     // This FS is not being exported via NFS so just a fixed generation number
+@@ -477,9 +523,21 @@ static void pf_init(void* userdata, struct fuse_conn_info* conn) {
+                      FUSE_CAP_ASYNC_READ | FUSE_CAP_ATOMIC_O_TRUNC | FUSE_CAP_WRITEBACK_CACHE |
+                      FUSE_CAP_EXPORT_SUPPORT | FUSE_CAP_FLOCK_LOCKS);
+     conn->want |= conn->capable & mask;
++    struct fuse* fuse = reinterpret_cast<struct fuse*>(userdata);
++    fuse->passthrough = android::base::GetBoolProperty(
++            "persist.sys.fuse.passthrough.enable", false) &&
++            fuse->root_fd.get() >= 0 && (conn->capable & FUSE_CAP_PASSTHROUGH);
++    if (fuse->passthrough) {
++        conn->want |= FUSE_CAP_PASSTHROUGH;
++        conn->want &= ~FUSE_CAP_SPLICE_WRITE;
++    }
++    // SM-T311: report the FUSE_INIT request without file names or UIDs.
++    // Neither kernel acceptance nor any passthrough open is proven here.
++    LOG(INFO) << "SM-T311 FUSE passthrough requested=" << fuse->passthrough
++              << " kernel_capable=" << !!(conn->capable & FUSE_CAP_PASSTHROUGH)
++              << " backing_root_available=" << (fuse->root_fd.get() >= 0);
+     conn->max_read = MAX_READ_SIZE;
+ 
+-    struct fuse* fuse = reinterpret_cast<struct fuse*>(userdata);
+     fuse->active->store(true, std::memory_order_release);
+ }
+ 
+@@ -546,6 +604,14 @@ static node* do_lookup(fuse_req_t req, fuse_ino_t parent, const char* name,
+         *error_code = EPERM;
+         return nullptr;
+     }
++    // Serialize the lookup decision and creation of an inode entry with
++    // CREATE's pending-path marker. Otherwise another UID could acquire
++    // a readable inode between open(O_EXCL) and BeginCreate().
++    std::lock_guard<std::recursive_mutex> guard(fuse->lock);
++    if (fuse->CreatePendingForOtherUid(child_path, req->ctx.uid)) {
++        *error_code = EACCES;
++        return nullptr;
++    }
+     return make_node_entry(req, parent_node, name, child_path, e, error_code);
+ }
+ 
+@@ -719,11 +785,32 @@ static void pf_setattr(fuse_req_t req,
+ 
+ static void pf_canonical_path(fuse_req_t req, fuse_ino_t ino)
+ {
++    if (fuse_req_ctx(req)->uid >= AID_APP_START ||
++        !android::base::GetBoolProperty("persist.sys.fuse.canonical_path.enable", false)) {
++        fuse_reply_err(req, ENOSYS);
++        return;
++    }
+     struct fuse* fuse = get_fuse(req);
+     node* node = fuse->FromInode(ino);
+     string path = node ? node->BuildPath() : "";
+ 
+     if (node && is_app_accessible_path(fuse->mp, path, req->ctx.uid)) {
++        struct stat st;
++        if (lstat(path.c_str(), &st)) {
++            fuse_reply_err(req, errno);
++            return;
++        }
++        if (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode)) {
++            fuse_reply_err(req, EACCES);
++            return;
++        }
++        const int status = S_ISDIR(st.st_mode)
++                ? fuse->mp->IsOpendirAllowed(path, req->ctx.uid, false)
++                : fuse->mp->IsOpenAllowed(path, req->ctx.uid, false);
++        if (status) {
++            fuse_reply_err(req, status);
++            return;
++        }
+         // TODO(b/147482155): Check that uid has access to |path| and its contents
+         fuse_reply_canonical_path(req, path.c_str());
+         return;
+@@ -957,8 +1044,70 @@ static void pf_link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t new_parent,
+ }
+ */
+ 
++// G152 never modifies the legacy redaction or passthrough flow unless the
++// explicit experimental property is enabled, and NEVER sets the unimplemented
++// FUSE mmap flag. Enabling this is offline-only until privacy tests pass.
++static constexpr const char* kPrivateSnapshotProperty =
++        "persist.sys.fuse.experimental-private-snapshot";
++
++#if defined(FUSE_HAS_REDACTED_PRIVATE_OPEN)
++static constexpr const char* kPrivateMmapProperty = "persist.sys.fuse.experimental-private-mmap";
++#endif
++
++struct SnapshotDeleter {
++    void operator()(sm_snapshot* s) const {
++        if (!s) return;
++        sm_snapshot_release(s);
++        delete s;
++    }
++};
++
++// The original lower fd stays under its existing handle; this helper returns
++// a separately sealed redacted view and a lifetime owner for the handle.
++// Fail closed on any truncation, parser, quota or sealing failure.
++static int make_private_redacted_snapshot(struct fuse* fuse, const string& path,
++                                          int lower_fd, uid_t uid, pid_t tid,
++                                          std::shared_ptr<void>* owner, int* clean_fd) {
++    std::unique_ptr<sm_snapshot, SnapshotDeleter> snapshot(new sm_snapshot());
++    sm_snapshot_init(snapshot.get());
++    const int capture = sm_snapshot_begin(snapshot.get(), lower_fd);
++    if (capture < 0) return -capture;
++
++    std::unique_ptr<RedactionInfo> frozen_ranges = fuse->mp->GetSnapshotRedactionInfo(
++            path, uid, tid, sm_snapshot_raw_fd(snapshot.get()));
++    if (!frozen_ranges || !frozen_ranges->isRedactionNeeded()) {
++        return EIO;
++    }
++    std::vector<ReadRange> pieces;
++    frozen_ranges->getReadRanges(0, snapshot->length, &pieces);
++    std::vector<sm_range> redactions;
++    for (const ReadRange& part : pieces) {
++        if (!part.is_redaction) continue;
++        if (part.start < 0 || !part.size ||
++            static_cast<uint64_t>(part.start) > snapshot->length ||
++            static_cast<uint64_t>(part.size) > snapshot->length -
++                static_cast<uint64_t>(part.start) ||
++            redactions.size() >= SM_SNAP_MAX_RANGES) {
++            return EIO;
++        }
++        redactions.push_back({static_cast<uint64_t>(part.start),
++                              static_cast<uint64_t>(part.start) + part.size});
++    }
++    if (redactions.empty()) return EIO;
++    const int result = sm_snapshot_finish(snapshot.get(), redactions.data(), redactions.size());
++    if (result < 0) return -result;
++    const int sealed_fd = sm_snapshot_clean_fd(snapshot.get());
++    if (sealed_fd < 0) return EIO;
++    // Own both the immutable fd and budget until node::DestroyHandle.
++    *owner = std::shared_ptr<void>(snapshot.release(), SnapshotDeleter());
++    *clean_fd = sealed_fd;
++    return 0;
++}
++
+ static handle* create_handle_for_node(struct fuse* fuse, const string& path, int fd, node* node,
+-                                      const RedactionInfo* ri) {
++                                      const RedactionInfo* ri, bool force_direct_io = false,
++                                      std::shared_ptr<void> snapshot_owner = nullptr,
++                                      int snapshot_fd = -1) {
+     std::lock_guard<std::recursive_mutex> guard(fuse->lock);
+     // We don't want to use the FUSE VFS cache in two cases:
+     // 1. When redaction is needed because app A with EXIF access might access
+@@ -973,13 +1122,47 @@ static handle* create_handle_for_node(struct fuse* fuse, const string& path, int
+     // b. Reading from a FUSE fd with caching enabled may not see the latest writes using
+     // the lower fs fd because those writes did not go through the FUSE layer and reads from
+     // FUSE after that write may be served from cache
+-    bool direct_io = ri->isRedactionNeeded() || is_file_locked(fd, path);
++    bool direct_io = force_direct_io || snapshot_fd >= 0 ||
++            ri->isRedactionNeeded() || is_file_locked(fd, path);
+ 
+     handle* h = new handle(fd, ri, !direct_io);
++    h->snapshot_owner = std::move(snapshot_owner);
++    h->snapshot_read_fd = snapshot_fd;
+     node->AddHandle(h);
+     return h;
+ }
+ 
++static int open_passthrough_file(const struct fuse* fuse, const string& path, int flags,
++                                 mode_t create_mode = 0) {
++    const size_t root_len = fuse->path.size();
++    if (path.size() <= root_len + 1 || path.compare(0, root_len, fuse->path) != 0 ||
++        path[root_len] != '/') {
++        errno = EACCES;
++        return -1;
++    }
++
++    int parent = fuse->root_fd.get();
++    android::base::unique_fd directory;
++    size_t start = root_len + 1;
++    while (true) {
++        const size_t end = path.find('/', start);
++        const string component = path.substr(start, end - start);
++        if (component.empty() || component == "." || component == "..") {
++            errno = EACCES;
++            return -1;
++        }
++        if (end == string::npos) {
++            return openat(parent, component.c_str(), flags | O_NOFOLLOW | O_CLOEXEC,
++                          create_mode);
++        }
++        directory.reset(openat(parent, component.c_str(),
++                               O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
++        if (directory.get() < 0) return -1;
++        parent = directory.get();
++        start = end + 1;
++    }
++}
++
+ static void pf_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info* fi) {
+     ATRACE_CALL();
+     struct fuse* fuse = get_fuse(req);
+@@ -995,9 +1178,15 @@ static void pf_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info* fi) {
+         return;
+     }
+ 
++    if (fuse->CreatePendingForOtherUid(path, ctx->uid) ||
++        node->NewFileRestrictedFor(ctx->uid)) {
++        fuse_reply_err(req, EACCES);
++        return;
++    }
+     TRACE_NODE(node, req) << (is_requesting_write(fi->flags) ? "write" : "read");
+ 
+-    if (fi->flags & O_DIRECT) {
++    const bool requested_direct_io = (fi->flags & O_DIRECT) != 0;
++    if (requested_direct_io) {
+         fi->flags &= ~O_DIRECT;
+         fi->direct_io = true;
+     }
+@@ -1010,7 +1199,7 @@ static void pf_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info* fi) {
+ 
+     // With the writeback cache enabled, FUSE may generate READ requests even for files that
+     // were opened O_WRONLY; so make sure we open it O_RDWR instead.
+-    int open_flags = fi->flags;
++    int open_flags = fi->flags & ~O_TRUNC;
+     if (open_flags & O_WRONLY) {
+         open_flags &= ~O_WRONLY;
+         open_flags |= O_RDWR;
+@@ -1020,12 +1209,33 @@ static void pf_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info* fi) {
+         open_flags &= ~O_APPEND;
+     }
+ 
+-    const int fd = open(path.c_str(), open_flags);
++    bool passthrough_candidate = fuse->passthrough &&
++            !is_requesting_write(fi->flags) &&
++            !fi->direct_io && !(fi->flags & (O_CREAT | O_EXCL | O_TRUNC | O_APPEND));
++    int fd = -1;
++    if (passthrough_candidate) {
++        fd = open_passthrough_file(fuse, path, open_flags);
++        if (fd < 0) passthrough_candidate = false;
++    }
++    if (fd < 0) fd = open(path.c_str(), open_flags);
+     if (fd < 0) {
+         fuse_reply_err(req, errno);
+         return;
+     }
+ 
++    struct stat opened_stat;
++    if (fstat(fd, &opened_stat) < 0) {
++        const int error = errno;
++        close(fd);
++        fuse_reply_err(req, error);
++        return;
++    }
++    if (!node->MatchesBackingIdentity(opened_stat)) {
++        close(fd);
++        fuse_reply_err(req, ESTALE);
++        return;
++    }
++
+     // We don't redact if the caller was granted write permission for this file
+     std::unique_ptr<RedactionInfo> ri;
+     if (is_requesting_write(fi->flags)) {
+@@ -1040,18 +1250,112 @@ static void pf_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info* fi) {
+         return;
+     }
+ 
+-    handle* h = create_handle_for_node(fuse, path, fd, node, ri.release());
+-    fi->fh = ptr_to_id(h);
+-    fi->keep_cache = 1;
+-    fi->direct_io = !h->cached;
+-    fuse_reply_open(req, fi);
++    struct stat current_stat;
++    if (lstat(path.c_str(), &current_stat) < 0 ||
++        current_stat.st_dev != opened_stat.st_dev ||
++        current_stat.st_ino != opened_stat.st_ino) {
++        close(fd);
++        fuse_reply_err(req, ESTALE);
++        return;
++    }
++
++    // G152: default OFF. Preserve G134 legacy open, EXIF redaction and
++    // passthrough for every caller until the complete release is validated.
++    std::shared_ptr<void> snapshot_owner;
++    int snapshot_read_fd = -1;
++    // O_RDONLY alone is not enough: O_TRUNC and creation flags also mutate.
++    const bool immutable_read_candidate = !is_requesting_write(fi->flags) &&
++            !(fi->flags & (O_CREAT | O_EXCL | O_TRUNC | O_APPEND));
++    if (ri->isRedactionNeeded() && immutable_read_candidate &&
++        !requested_direct_io &&
++        android::base::GetBoolProperty(kPrivateSnapshotProperty, false)) {
++        const int snapshot_error = make_private_redacted_snapshot(
++                fuse, path, fd, ctx->uid, ctx->pid, &snapshot_owner, &snapshot_read_fd);
++        if (snapshot_error != 0) {
++            close(fd);
++            fuse_reply_err(req, snapshot_error);
++            return; // Never return unredacted bytes if snapshot fails.
++        }
++        passthrough_candidate = false;
++    }
++
++    if ((fi->flags & O_TRUNC) && ftruncate(fd, 0) < 0) {
++        const int error = errno;
++        close(fd);
++        fuse_reply_err(req, error);
++        return;
++    }
++
++    handle* h;
++    int backing_id = 0;
++    {
++        std::lock_guard<std::recursive_mutex> guard(fuse->lock);
++        if (fuse->CreatePendingForOtherUid(path, ctx->uid) ||
++            node->NewFileRestrictedFor(ctx->uid)) {
++            close(fd);
++            fuse_reply_err(req, EACCES);
++            return;
++        }
++        const handle* existing = node->GetPassthroughHandle();
++        const bool correct_inode = S_ISREG(opened_stat.st_mode);
++        if (!correct_inode) passthrough_candidate = false;
++        bool reuse = false;
++        if (passthrough_candidate && existing && !node->HasUnbackedCachedHandle()) {
++            struct stat backing_stat;
++            reuse = fstat(existing->fd, &backing_stat) == 0 &&
++                    opened_stat.st_dev == backing_stat.st_dev &&
++                    opened_stat.st_ino == backing_stat.st_ino;
++        }
++        const bool fresh = passthrough_candidate && !node->HasOpenHandle();
++        h = create_handle_for_node(fuse, path, fd, node, ri.release(),
++                                   requested_direct_io || !correct_inode || (existing && !reuse),
++                                   std::move(snapshot_owner), snapshot_read_fd);
++        fi->fh = ptr_to_id(h);
++        fi->keep_cache = h->cached;
++        fi->direct_io = !h->cached;
++        if (h->cached && (reuse || fresh) && correct_inode) {
++            backing_id = reuse ? existing->backing_id : fuse_passthrough_open(req, fd);
++            if (backing_id > 0) {
++                h->backing_id = backing_id;
++                fi->keep_cache = 0;
++            }
++        }
++    }
++    if (backing_id > 0) {
++        int result = fuse_reply_passthrough_open(req, fi, backing_id);
++        if (result < 0) {
++            std::lock_guard<std::recursive_mutex> guard(fuse->lock);
++            node->DestroyHandle(h);
++            if (!node->HasBackingId(backing_id)) {
++                fuse_passthrough_close(fuse->se, backing_id);
++            }
++        }
++        return;
++    }
++    int open_result;
++#if defined(FUSE_HAS_REDACTED_PRIVATE_OPEN)
++    if (h->snapshot_read_fd >= 0 && h->ri->isRedactionNeeded() &&
++        fi->direct_io && !fi->keep_cache && immutable_read_candidate &&
++        android::base::GetBoolProperty(kPrivateMmapProperty, false)) {
++        open_result = fuse_reply_redacted_private_open(req, fi);
++    } else
++#endif
++    {
++        open_result = fuse_reply_open(req, fi);
++    }
++    if (open_result < 0) {
++        // Even an IPC/send failure must release the handle, sanitized
++        // memfd and charged snapshot memory. Passthrough has its own
++        // error cleanup branch above and is unchanged.
++        std::lock_guard<std::recursive_mutex> guard(fuse->lock);
++        node->DestroyHandle(h);
++    }
+ }
+ 
+-static void do_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_info* fi) {
+-    handle* h = reinterpret_cast<handle*>(fi->fh);
++static void do_read_from_fd(fuse_req_t req, size_t size, off_t off, int input_fd) {
+     struct fuse_bufvec buf = FUSE_BUFVEC_INIT(size);
+ 
+-    buf.buf[0].fd = h->fd;
++    buf.buf[0].fd = input_fd;
+     buf.buf[0].pos = off;
+     buf.buf[0].flags =
+             (enum fuse_buf_flags) (FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK);
+@@ -1059,6 +1363,11 @@ static void do_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_inf
+     fuse_reply_data(req, &buf, (enum fuse_buf_copy_flags) 0);
+ }
+ 
++static void do_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_info* fi) {
++    handle* h = reinterpret_cast<handle*>(fi->fh);
++    do_read_from_fd(req, size, off, h->fd);
++}
++
+ /**
+  * Sets the parameters for a fuse_buf that reads from memory, including flags.
+  * Makes buf->mem point to an already mapped region of zeroized memory.
+@@ -1127,6 +1436,13 @@ static void pf_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
+ 
+     fuse->fadviser.Record(h->fd, size);
+ 
++    if (h->snapshot_read_fd >= 0) {
++        // Already redacted into an immutable sealed fd. DO NOT reapply the
++        // mutable source path redaction ranges and NEVER serve the raw fd.
++        do_read_from_fd(req, size, off, h->snapshot_read_fd);
++        return;
++    }
++
+     if (h->ri->isRedactionNeeded()) {
+         do_read_with_redaction(req, size, off, fi);
+     } else {
+@@ -1149,6 +1465,10 @@ static void pf_write_buf(fuse_req_t req,
+                          struct fuse_file_info* fi) {
+     ATRACE_CALL();
+     handle* h = reinterpret_cast<handle*>(fi->fh);
++    if (h->snapshot_read_fd >= 0) {
++        fuse_reply_err(req, EACCES); // prevent write to the snapshot-backed view
++        return;
++    }
+     struct fuse_bufvec buf = FUSE_BUFVEC_INIT(fuse_buf_size(bufv));
+     ssize_t size;
+     struct fuse* fuse = get_fuse(req);
+@@ -1218,8 +1538,16 @@ static void pf_release(fuse_req_t req,
+     TRACE_NODE(node, req);
+ 
+     fuse->fadviser.Close(h->fd);
+-    if (node) {
+-        node->DestroyHandle(h);
++    {
++        std::lock_guard<std::recursive_mutex> guard(fuse->lock);
++        const int backing_id = h->backing_id;
++        if (node) {
++            node->EndCreateIfCreator(h);
++            node->DestroyHandle(h);
++        }
++        if (backing_id > 0 && (!node || !node->HasBackingId(backing_id))) {
++            fuse_passthrough_close(fuse->se, backing_id);
++        }
+     }
+ 
+     fuse_reply_err(req, 0);
+@@ -1529,9 +1857,28 @@ static void pf_create(fuse_req_t req,
+ 
+     const string child_path = parent_path + "/" + name;
+ 
+-    int mp_return_code = fuse->mp->InsertFile(child_path.c_str(), req->ctx.uid);
+-    if (mp_return_code) {
+-        fuse_reply_err(req, mp_return_code);
++    ScopedCreateReservation reservation(fuse, child_path, req->ctx.uid);
++    if (!reservation.acquired()) {
++        fuse_reply_err(req, EEXIST);
++        return;
++    }
++    // Detect an already existing name before creating a database row. This
++    // is only an early conflict check; the later O_EXCL is authoritative.
++    int existing_fd = open_passthrough_file(fuse, child_path, O_PATH);
++    if (existing_fd >= 0) {
++        close(existing_fd);
++        fuse_reply_err(req, EEXIST);
++        return;
++    }
++    if (errno != ENOENT) {
++        const int error = errno;
++        fuse_reply_err(req, error);
++        return;
++    }
++
++    const int64_t inserted_id = fuse->mp->InsertFile(child_path.c_str(), req->ctx.uid);
++    if (inserted_id < 0) {
++        fuse_reply_err(req, static_cast<int>(-inserted_id));
+         return;
+     }
+ 
+@@ -1548,38 +1895,64 @@ static void pf_create(fuse_req_t req,
+     }
+ 
+     mode = (mode & (~0777)) | 0664;
+-    int fd = open(child_path.c_str(), open_flags, mode);
++    // Never replace an existing inode after the MediaProvider path policy decision.
++    int fd = open_passthrough_file(fuse, child_path,
++                                   (open_flags & ~O_TRUNC) | O_CREAT | O_EXCL, mode);
+     if (fd < 0) {
+         int error_code = errno;
+-        // We've already inserted the file into the MP database before the
+-        // failed open(), so that needs to be rolled back here.
+-        fuse->mp->DeleteFile(child_path.c_str(), req->ctx.uid);
++        // Delete only the exact row this CREATE inserted, never the pathname.
++        // If a concurrently created physical file now exists, leave the row
++        // intact for MediaProvider reconciliation instead of unlinking it.
++        if (inserted_id > 0) {
++            const int undo = fuse->mp->RollbackInsertedFile(child_path, req->ctx.uid,
++                                                            inserted_id);
++            if (undo != 0 && undo != EEXIST && undo != ENOENT) {
++                LOG(WARNING) << "Pending MediaProvider row cleanup failed: " << undo;
++            }
++        }
+         fuse_reply_err(req, error_code);
+         return;
+     }
+ 
++    // Hold one lock across LOOKUP and registration of the creator handle:
++    // another FUSE request must not observe this new node before it is marked
++    // as incomplete. Do not accept a concurrently substituted pathname.
+     int error_code = 0;
+     struct fuse_entry_param e;
+-    node* node = make_node_entry(req, parent_node, name, child_path, &e, &error_code);
+-    TRACE_NODE(node, req);
++    node* node;
++    handle* h;
++    {
++        std::lock_guard<std::recursive_mutex> guard(fuse->lock);
++        node = make_node_entry(req, parent_node, name, child_path, &e, &error_code);
++        if (node) {
++            struct stat created_stat;
++            if (fstat(fd, &created_stat) < 0 || !node->MatchesBackingIdentity(created_stat)) {
++                node->Release(1);
++                node = nullptr;
++                error_code = ESTALE;
++            }
++        }
++        if (node) {
++            h = create_handle_for_node(fuse, child_path, fd, node, new RedactionInfo());
++            node->BeginCreate(req->ctx.uid, h);
++        }
++    }
+     if (!node) {
+-        CHECK(error_code != 0);
+-        fuse_reply_err(req, error_code);
++        close(fd);
++        fuse_reply_err(req, error_code ? error_code : EIO);
+         return;
+     }
+-
+-    // Let MediaProvider know we've created a new file
+-    fuse->mp->OnFileCreated(child_path);
+-
+-    // TODO(b/147274248): Assume there will be no EXIF to redact.
+-    // This prevents crashing during reads but can be a security hole if a malicious app opens an fd
+-    // to the file before all the EXIF content is written. We could special case reads before the
+-    // first close after a file has just been created.
+-    handle* h = create_handle_for_node(fuse, child_path, fd, node, new RedactionInfo());
++    TRACE_NODE(node, req);
+     fi->fh = ptr_to_id(h);
+-    fi->keep_cache = 1;
++    fi->keep_cache = h->cached;
+     fi->direct_io = !h->cached;
+-    fuse_reply_create(req, &e, fi);
++    fuse->mp->OnFileCreated(child_path);
++    if (fuse_reply_create(req, &e, fi) < 0) {
++        std::lock_guard<std::recursive_mutex> guard(fuse->lock);
++        node->EndCreateIfCreator(h);
++        node->DestroyHandle(h);
++        node->Release(1);
++    }
+ }
+ /*
+ static void pf_getlk(fuse_req_t req, fuse_ino_t ino,
+@@ -1763,6 +2136,8 @@ void FuseDaemon::Start(android::base::unique_fd fd, const std::string& path) {
+ 
+     struct fuse fuse_default(path);
+     fuse_default.mp = &mp;
++    fuse_default.root_fd.reset(open(path.c_str(),
++                                    O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+     // fuse_default is stack allocated, but it's safe to save it as an instance variable because
+     // this method blocks and FuseDaemon#active tells if we are currently blocking
+     fuse = &fuse_default;
+diff --git a/jni/MediaProviderWrapper.cpp b/jni/MediaProviderWrapper.cpp
+index 04c2503f251c0e44f6f1fb1bce6421b4a81a0c49..d666742882a8042c10a3f7cd35e7b1a1aa3a82e9 100644
+--- a/jni/MediaProviderWrapper.cpp
++++ b/jni/MediaProviderWrapper.cpp
+@@ -58,15 +58,23 @@ static bool CheckForJniException(JNIEnv* env) {
+ 
+ std::unique_ptr<RedactionInfo> getRedactionInfoInternal(JNIEnv* env, jobject media_provider_object,
+                                                         jmethodID mid_get_redaction_ranges,
+-                                                        uid_t uid, pid_t tid, const string& path) {
++                                                        uid_t uid, pid_t tid, const string& path,
++                                                        int sealed_raw_fd = -1) {
+     ScopedLocalRef<jstring> j_path(env, env->NewStringUTF(path.c_str()));
+-    ScopedLongArrayRO redaction_ranges(
+-            env, static_cast<jlongArray>(env->CallObjectMethod(
+-                         media_provider_object, mid_get_redaction_ranges, j_path.get(), uid, tid)));
+-
++    // For the snapshot-only callback, an additional int references the
++    // SEALED raw memfd in this process. Never route a missing fd to the
++    // legacy mutable-path parser.
++    jlongArray raw_ranges = sealed_raw_fd >= 0
++            ? static_cast<jlongArray>(env->CallObjectMethod(
++                    media_provider_object, mid_get_redaction_ranges,
++                    j_path.get(), uid, tid, static_cast<jint>(sealed_raw_fd)))
++            : static_cast<jlongArray>(env->CallObjectMethod(
++                    media_provider_object, mid_get_redaction_ranges, j_path.get(), uid, tid));
+     if (CheckForJniException(env)) {
+         return nullptr;
+     }
++    ScopedLocalRef<jlongArray> owned_ranges(env, raw_ranges);
++    ScopedLongArrayRO redaction_ranges(env, owned_ranges.get());
+ 
+     std::unique_ptr<RedactionInfo> ri;
+     if (redaction_ranges.size() % 2) {
+@@ -81,15 +89,12 @@ std::unique_ptr<RedactionInfo> getRedactionInfoInternal(JNIEnv* env, jobject med
+     return ri;
+ }
+ 
+-int insertFileInternal(JNIEnv* env, jobject media_provider_object, jmethodID mid_insert_file,
+-                       const string& path, uid_t uid) {
++int64_t insertFileInternal(JNIEnv* env, jobject media_provider_object, jmethodID mid_insert_file,
++                           const string& path, uid_t uid) {
+     ScopedLocalRef<jstring> j_path(env, env->NewStringUTF(path.c_str()));
+-    int res = env->CallIntMethod(media_provider_object, mid_insert_file, j_path.get(), uid);
+-
+-    if (CheckForJniException(env)) {
+-        return EFAULT;
+-    }
+-    return res;
++    jlong res = env->CallLongMethod(media_provider_object, mid_insert_file, j_path.get(), uid);
++    if (CheckForJniException(env)) return -EFAULT;
++    return static_cast<int64_t>(res);
+ }
+ 
+ int deleteFileInternal(JNIEnv* env, jobject media_provider_object, jmethodID mid_delete_file,
+@@ -260,8 +265,11 @@ MediaProviderWrapper::MediaProviderWrapper(JNIEnv* env, jobject media_provider)
+     // Cache methods - Before calling a method, make sure you cache it here
+     mid_get_redaction_ranges_ = CacheMethod(env, "getRedactionRanges", "(Ljava/lang/String;II)[J",
+                                             /*is_static*/ false);
+-    mid_insert_file_ = CacheMethod(env, "insertFileIfNecessary", "(Ljava/lang/String;I)I",
++    mid_insert_file_ = CacheMethod(env, "insertFileWithToken", "(Ljava/lang/String;I)J",
+                                    /*is_static*/ false);
++    mid_rollback_inserted_file_ =
++            CacheMethod(env, "rollbackPendingCreation", "(Ljava/lang/String;IJ)I",
++                        /*is_static*/ false);
+     mid_delete_file_ = CacheMethod(env, "deleteFile", "(Ljava/lang/String;I)I", /*is_static*/ false);
+     mid_is_open_allowed_ = CacheMethod(env, "isOpenAllowed", "(Ljava/lang/String;IZ)I",
+                                        /*is_static*/ false);
+@@ -305,15 +313,48 @@ std::unique_ptr<RedactionInfo> MediaProviderWrapper::GetRedactionInfo(const stri
+     return res;
+ }
+ 
+-int MediaProviderWrapper::InsertFile(const string& path, uid_t uid) {
+-    if (uid == ROOT_UID) {
+-        return 0;
++std::unique_ptr<RedactionInfo> MediaProviderWrapper::GetSnapshotRedactionInfo(
++        const string& path, uid_t uid, pid_t tid, int sealed_raw_fd) {
++    if (sealed_raw_fd < 0 || shouldBypassMediaProvider(uid) ||
++        !GetBoolProperty(kPropRedactionEnabled, true)) {
++        return nullptr; // no snapshot opt-in without redaction
+     }
++    JNIEnv* env = MaybeAttachCurrentThread();
++    // Resolve lazily: a native-only update never crashes old MediaProvider
++    // at daemon initialization (G131 fatal CacheMethod contract regression).
++    // This prototype remains unreferenced by pf_open until the gated release.
++    const jmethodID mid = env->GetMethodID(
++            media_provider_class_, "getRedactionRangesSnapshotForFuse",
++            "(Ljava/lang/String;III)[J");
++    if (!mid) {
++        CheckForJniException(env);
++        return nullptr;
++    }
++    auto info = getRedactionInfoInternal(
++            env, media_provider_object_, mid, uid, tid, path, sealed_raw_fd);
++    if (!info || !info->isRedactionNeeded()) {
++        return nullptr; // fail-closed: do not enable redacted mmap without spans
++    }
++    return info;
++}
+ 
++int64_t MediaProviderWrapper::InsertFile(const string& path, uid_t uid) {
++    if (uid == ROOT_UID) return 0;
+     JNIEnv* env = MaybeAttachCurrentThread();
+     return insertFileInternal(env, media_provider_object_, mid_insert_file_, path, uid);
+ }
+ 
++int MediaProviderWrapper::RollbackInsertedFile(const string& path, uid_t uid,
++                                               int64_t inserted_id) {
++    if (uid == ROOT_UID || inserted_id <= 0) return 0;
++    JNIEnv* env = MaybeAttachCurrentThread();
++    ScopedLocalRef<jstring> j_path(env, env->NewStringUTF(path.c_str()));
++    jint result = env->CallIntMethod(media_provider_object_, mid_rollback_inserted_file_,
++                                    j_path.get(), static_cast<jint>(uid),
++                                    static_cast<jlong>(inserted_id));
++    return CheckForJniException(env) ? EFAULT : static_cast<int>(result);
++}
++
+ int MediaProviderWrapper::DeleteFile(const string& path, uid_t uid) {
+     if (uid == ROOT_UID) {
+         int res = unlink(path.c_str());
+diff --git a/jni/MediaProviderWrapper.h b/jni/MediaProviderWrapper.h
+index 1f74acc5a62f26569df1bcb42773ada119340ca6..f12f13fbc788ce3389622ddf4d73e5b486e4ff5d 100644
+--- a/jni/MediaProviderWrapper.h
++++ b/jni/MediaProviderWrapper.h
+@@ -18,6 +18,7 @@
+ #define MEDIAPROVIDER_FUSE_MEDIAPROVIDERWRAPPER_H_
+ 
+ #include <jni.h>
++#include <cstdint>
+ #include <sys/types.h>
+ 
+ #include <dirent.h>
+@@ -54,15 +55,30 @@ class MediaProviderWrapper final {
+      */
+     std::unique_ptr<RedactionInfo> GetRedactionInfo(const std::string& path, uid_t uid, pid_t tid);
+ 
++    /**
++     * G151 optional private mmap candidate only: request redaction offsets
++     * from a frozen raw memfd, NOT from the mutable path. Missing Java callback,
++     * invalid fd, no redaction or JNI exception returns nullptr (opt-in OFF).
++     * DO NOT call from pf_open until G150 sealed-snapshot API and kernel/libfuse
++     * protocol are fully integrated and enabled by an explicit release gate.
++     */
++    std::unique_ptr<RedactionInfo> GetSnapshotRedactionInfo(
++            const std::string& path, uid_t uid, pid_t tid, int sealed_raw_fd);
++
+     /**
+      * Inserts a new entry for the given path and UID.
+      *
+      * @param path the path of the file to be created
+      * @param uid UID of the calling app
+-     * @return 0 if the operation succeeded,
+-     * or errno error code if operation fails.
++     * @return Positive inserted database row ID if this call created a row,
++     * zero if no row was created, or negative errno for an error.
++     */
++    int64_t InsertFile(const std::string& path, uid_t uid);
++
++    /** Delete only our pending metadata row after a failed O_EXCL.
++     * Never unlinks physical files.
+      */
+-    int InsertFile(const std::string& path, uid_t uid);
++    int RollbackInsertedFile(const std::string& path, uid_t uid, int64_t inserted_id);
+ 
+     /**
+      * Delete the file denoted by the given path on behalf of the given UID.
+@@ -179,6 +195,7 @@ class MediaProviderWrapper final {
+     /** Cached MediaProvider method IDs **/
+     jmethodID mid_get_redaction_ranges_;
+     jmethodID mid_insert_file_;
++    jmethodID mid_rollback_inserted_file_;
+     jmethodID mid_delete_file_;
+     jmethodID mid_is_open_allowed_;
+     jmethodID mid_scan_file_;
+diff --git a/jni/node-inl.h b/jni/node-inl.h
+index 364a32791a0787a6ac6c28adbbb510dd350f9250..7ac546cdd86ef1dc149643209a00518ccf4323e9 100644
+--- a/jni/node-inl.h
++++ b/jni/node-inl.h
+@@ -25,6 +25,7 @@
+ #include <memory>
+ #include <mutex>
+ #include <set>
++#include <sys/stat.h>
+ #include <sstream>
+ #include <string>
+ #include <unordered_set>
+@@ -47,6 +48,13 @@ struct handle {
+     const int fd;
+     const std::unique_ptr<const RedactionInfo> ri;
+     const bool cached;
++    int backing_id = 0;
++    // G152: only enabled under explicit off-by-default private snapshot
++    // experiment. The type-erased shared_ptr owns the sanitized memfd and
++    // releases the snapshot quota when this handle is destroyed, including
++    // when fuse_reply_open fails. The original backing fd is still separate.
++    int snapshot_read_fd = -1;
++    std::shared_ptr<void> snapshot_owner;
+ 
+     ~handle() { close(fd); }
+ };
+@@ -271,6 +279,69 @@ class node {
+         handles_.erase(it);
+     }
+ 
++    void RememberBackingIdentity(const struct stat& st) {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        if (!backing_identity_known_) {
++            backing_device_ = static_cast<uint64_t>(st.st_dev);
++            backing_inode_ = static_cast<uint64_t>(st.st_ino);
++            backing_identity_known_ = true;
++        }
++    }
++
++    bool MatchesBackingIdentity(const struct stat& st) const {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        return backing_identity_known_ &&
++                backing_device_ == static_cast<uint64_t>(st.st_dev) &&
++                backing_inode_ == static_cast<uint64_t>(st.st_ino);
++    }
++
++    void BeginCreate(uid_t uid, const handle* creator) {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        creating_uid_ = uid;
++        creator_handle_ = creator;
++    }
++
++    bool NewFileRestrictedFor(uid_t uid) const {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        return creator_handle_ != nullptr && creating_uid_ != uid;
++    }
++
++    bool EndCreateIfCreator(const handle* h) {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        if (creator_handle_ != h) return false;
++        creator_handle_ = nullptr;
++        return true;
++    }
++
++    bool HasOpenHandle() const {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        return !handles_.empty();
++    }
++
++    const handle* GetPassthroughHandle() const {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        for (const auto& h : handles_) {
++            if (h->backing_id > 0) return h.get();
++        }
++        return nullptr;
++    }
++
++    bool HasUnbackedCachedHandle() const {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        for (const auto& h : handles_) {
++            if (h->cached && h->backing_id == 0) return true;
++        }
++        return false;
++    }
++
++    bool HasBackingId(int backing_id) const {
++        std::lock_guard<std::recursive_mutex> guard(*lock_);
++        for (const auto& h : handles_) {
++            if (h->backing_id == backing_id) return true;
++        }
++        return false;
++    }
++
+     bool HasCachedHandle() const {
+         std::lock_guard<std::recursive_mutex> guard(*lock_);
+ 
+@@ -417,6 +488,11 @@ class node {
+     // List of directory handles associated with this node. Guarded by |lock_|.
+     std::vector<std::unique_ptr<dirhandle>> dirhandles_;
+     bool deleted_;
++    uid_t creating_uid_ = 0;
++    const handle* creator_handle_ = nullptr;
++    bool backing_identity_known_ = false;
++    uint64_t backing_device_ = 0;
++    uint64_t backing_inode_ = 0;
+     std::recursive_mutex* lock_;
+ 
+     NodeTracker* const tracker_;
+diff --git a/jni/snapshot-g150.c b/jni/snapshot-g150.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..d23069717d9cf88e73c0d4007e2c2b1281827d61
+--- /dev/null
++++ b/jni/snapshot-g150.c
+@@ -0,0 +1,194 @@
++#define _GNU_SOURCE
++#include "snapshot-g150.h"
++#include <stdatomic.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <linux/memfd.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <unistd.h>
++#include <string.h>
++#include <stdbool.h>
++
++/* In-process limit covers every live sanitized handle plus any transient
++ * raw snapshot. Cross-process accounting still requires a service owner. */
++static _Atomic uint64_t g_charged = 0;
++
++static int reserve_bytes(uint64_t want) {
++  uint64_t old = atomic_load(&g_charged);
++  for (;;) {
++    if (old > SM_SNAP_MAX_ALL || want > SM_SNAP_MAX_ALL - old)
++      return -ENOMEM;
++    if (atomic_compare_exchange_weak(&g_charged, &old, old + want))
++      return 0;
++  }
++}
++static void uncharge(uint64_t amount) {
++  if (amount) atomic_fetch_sub(&g_charged, amount);
++}
++uint64_t sm_snapshot_charged_total(void) { return atomic_load(&g_charged); }
++
++void sm_snapshot_init(struct sm_snapshot *s) {
++  if (!s) return;
++  s->raw_fd = -1;
++  s->clean_fd = -1;
++  s->length = 0;
++  s->charged_bytes = 0;
++}
++void sm_snapshot_release(struct sm_snapshot *s) {
++  if (!s) return;
++  if (s->raw_fd >= 0) close(s->raw_fd);
++  if (s->clean_fd >= 0) close(s->clean_fd);
++  uncharge(s->charged_bytes);
++  sm_snapshot_init(s);
++}
++static int sealed_memfd(const char *name, size_t length) {
++  int fd = memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING);
++  if (fd < 0) return -errno;
++  if (ftruncate(fd, (off_t)length)) {
++    int err = errno;
++    close(fd);
++    return -err;
++  }
++  return fd;
++}
++static int seal_fd(int fd) {
++  const int required = F_SEAL_WRITE | F_SEAL_GROW |
++                       F_SEAL_SHRINK | F_SEAL_SEAL;
++  if (fcntl(fd, F_ADD_SEALS, required) != 0) return -errno;
++  int seals = fcntl(fd, F_GET_SEALS);
++  if (seals < 0) return -errno;
++  return (seals & required) == required ? 0 : -EIO;
++}
++static int read_full(int fd, void *dst, size_t n, off_t off) {
++  unsigned char *p = dst;
++  while (n) {
++    ssize_t r = pread(fd, p, n, off);
++    if (r < 0 && errno == EINTR) continue;
++    if (r <= 0) return r == 0 ? -EIO : -errno;
++    off += r; p += r; n -= (size_t)r;
++  }
++  return 0;
++}
++static int write_full(int fd, const void *src, size_t n, off_t off) {
++  const unsigned char *p = src;
++  while (n) {
++    ssize_t r = pwrite(fd, p, n, off);
++    if (r < 0 && errno == EINTR) continue;
++    if (r <= 0) return r == 0 ? -EIO : -errno;
++    off += r; p += r; n -= (size_t)r;
++  }
++  return 0;
++}
++static bool same_version(const struct stat *a, const struct stat *b) {
++  return a->st_dev == b->st_dev && a->st_ino == b->st_ino &&
++         a->st_size == b->st_size &&
++         a->st_ctim.tv_sec == b->st_ctim.tv_sec &&
++         a->st_ctim.tv_nsec == b->st_ctim.tv_nsec &&
++         a->st_mtim.tv_sec == b->st_mtim.tv_sec &&
++         a->st_mtim.tv_nsec == b->st_mtim.tv_nsec;
++}
++int sm_snapshot_begin(struct sm_snapshot *s, int lower_fd) {
++  if (!s || lower_fd < 0) return -EINVAL;
++  if (s->raw_fd != -1 || s->clean_fd != -1 || s->charged_bytes)
++    return -EBUSY;
++  struct stat before, after;
++  if (fstat(lower_fd, &before)) return -errno;
++  if (!S_ISREG(before.st_mode)) return -EINVAL;
++  if (before.st_size <= 0 || (uint64_t)before.st_size > SM_SNAP_MAX_ONE)
++    return -EFBIG;
++  const size_t size = (size_t)before.st_size;
++  int rc = reserve_bytes((uint64_t)size * 2);
++  if (rc) return rc;
++  s->charged_bytes = (uint64_t)size * 2;
++  s->length = size;
++  s->raw_fd = sealed_memfd("sm-t311-private-raw", size);
++  if (s->raw_fd < 0) {
++    rc = s->raw_fd;
++    sm_snapshot_init(s); /* reset only AFTER releasing reservation below */
++    uncharge((uint64_t)size * 2);
++    return rc;
++  }
++
++  unsigned char block[65536];
++  for (size_t at = 0; at < size;) {
++    size_t len = size - at < sizeof(block) ? size - at : sizeof(block);
++    rc = read_full(lower_fd, block, len, (off_t)at);
++    if (rc) { sm_snapshot_release(s); return rc; }
++    rc = write_full(s->raw_fd, block, len, (off_t)at);
++    if (rc) { sm_snapshot_release(s); return rc; }
++    at += len;
++  }
++  /* This rejects ordinary concurrent modification. Inode timestamps do
++   * NOT by themselves guarantee atomic capture under hostile writers.
++   * Always run a trusted metadata parser on this SEALED snapshot itself. */
++  if (fstat(lower_fd, &after)) {
++    rc = -errno; sm_snapshot_release(s); return rc;
++  }
++  if (!same_version(&before, &after)) {
++    sm_snapshot_release(s);
++    return -EAGAIN;
++  }
++  rc = seal_fd(s->raw_fd);
++  if (rc) { sm_snapshot_release(s); return rc; }
++  return 0;
++}
++int sm_snapshot_raw_fd(const struct sm_snapshot *s) {
++  return s ? s->raw_fd : -1;
++}
++int sm_snapshot_clean_fd(const struct sm_snapshot *s) {
++  return s ? s->clean_fd : -1;
++}
++static int validate(const struct sm_snapshot *s,
++                    const struct sm_range *ranges, size_t count) {
++  if (!s || s->raw_fd < 0 || s->clean_fd != -1 ||
++      !ranges || count == 0 || count > SM_SNAP_MAX_RANGES) return -EINVAL;
++  uint64_t last = 0;
++  for (size_t i = 0; i < count; ++i) {
++    if (ranges[i].start < last || ranges[i].start >= ranges[i].end ||
++        ranges[i].end > s->length) return -EINVAL;
++    last = ranges[i].end;
++  }
++  return 0;
++}
++int sm_snapshot_finish(struct sm_snapshot *s,
++                       const struct sm_range *ranges, size_t count) {
++  int rc = validate(s, ranges, count);
++  if (rc) {
++    if (s) sm_snapshot_release(s);
++    return rc;
++  }
++  s->clean_fd = sealed_memfd("sm-t311-redacted-immutable", s->length);
++  if (s->clean_fd < 0) {
++    rc = s->clean_fd; s->clean_fd = -1;
++    sm_snapshot_release(s);
++    return rc;
++  }
++  unsigned char block[65536];
++  size_t ri = 0;
++  for (size_t at = 0; at < s->length;) {
++    size_t len = s->length - at < sizeof(block) ? s->length - at : sizeof(block);
++    rc = read_full(s->raw_fd, block, len, (off_t)at);
++    if (rc) { sm_snapshot_release(s); return rc; }
++    const uint64_t end = (uint64_t)at + len;
++    while (ri < count && ranges[ri].end <= (uint64_t)at) ++ri;
++    for (size_t j = ri; j < count && ranges[j].start < end; ++j) {
++      const uint64_t a = ranges[j].start > at ? ranges[j].start : (uint64_t)at;
++      const uint64_t b = ranges[j].end < end ? ranges[j].end : end;
++      if (b > a) memset(block + (size_t)(a - at), 0, (size_t)(b - a));
++    }
++    rc = write_full(s->clean_fd, block, len, (off_t)at);
++    if (rc) { sm_snapshot_release(s); return rc; }
++    at += len;
++  }
++  rc = seal_fd(s->clean_fd);
++  if (rc) { sm_snapshot_release(s); return rc; }
++  close(s->raw_fd);
++  s->raw_fd = -1;
++  uncharge(s->length);
++  s->charged_bytes = s->length;
++  return 0;
++}
+diff --git a/jni/snapshot-g150.h b/jni/snapshot-g150.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..65fe4e6435b8a8f6e2fb9a154beabf412607da1d
+--- /dev/null
++++ b/jni/snapshot-g150.h
+@@ -0,0 +1,36 @@
++/* SM-T311 G150 — isolated prototype; NOT integrated into libfuse or MediaProvider. */
++#ifndef SM_T311_G150_SNAPSHOT_H
++#define SM_T311_G150_SNAPSHOT_H
++#include <stddef.h>
++#include <stdint.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++#define SM_SNAP_MAX_ONE (16U * 1024U * 1024U)
++#define SM_SNAP_MAX_ALL (32U * 1024U * 1024U)
++#define SM_SNAP_MAX_RANGES 4096U
++struct sm_range { uint64_t start; uint64_t end; };
++struct sm_snapshot {
++  int raw_fd;       /* privileged PRIVATE sealed source; never app-visible */
++  int clean_fd;     /* privileged sealed zeroed output, FD borrowed by daemon */
++  size_t length;
++  uint64_t charged_bytes; /* held until sm_snapshot_release */
++};
++void sm_snapshot_init(struct sm_snapshot *s);
++/* -errno on failure; begin reserves 2*length bytes for raw+clean memfd. */
++int sm_snapshot_begin(struct sm_snapshot *s, int lower_fd);
++/* Caller must calculate GPS/XMP ranges from sm_snapshot_raw_fd(s), not the
++ * lower path or fd, and fail closed if decoding metadata is unreliable. */
++int sm_snapshot_raw_fd(const struct sm_snapshot *s);
++/* Must call only after trusted parser created ranges from SAME sealed raw fd.
++ * On failure the session is released; never use raw fd as fallback.
++ * Rejects empty, malformed, unsorted, overlapping or out-of-bounds ranges. */
++int sm_snapshot_finish(struct sm_snapshot *s,
++                       const struct sm_range *ranges, size_t count);
++int sm_snapshot_clean_fd(const struct sm_snapshot *s);
++void sm_snapshot_release(struct sm_snapshot *s);
++uint64_t sm_snapshot_charged_total(void);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/src/com/android/providers/media/MediaProvider.java b/src/com/android/providers/media/MediaProvider.java
+index c8078f95ed502f35dfe5fda8163c9b125a25043e..29f7a432189ae966356e20bb02fca79c73421227 100644
+--- a/src/com/android/providers/media/MediaProvider.java
++++ b/src/com/android/providers/media/MediaProvider.java
+@@ -585,6 +585,16 @@ public class MediaProvider extends ContentProvider {
+     }
+ 
+     private final void updateQuotaTypeForFileInternal(File file, int mediaType) {
++        // SM-T311 uses legacy ext4 /data without project quotas, backed by
++        // emulated FUSE storage. Vold has NOT enabled external_storage.projid.
++        // Issuing FS_IOC_FSSETXATTR through /storage/emulated returns EPERM for
++        // every scan/update, repeatedly logging failures and wasting CPU.
++        // There is no project quota to update in this configuration.
++        // Keep the normal AOSP behavior if that feature is enabled later.
++        if ("lt013g".equals(Build.DEVICE)
++                && !SystemProperties.getBoolean("external_storage.projid.enabled", false)) {
++            return;
++        }
+         try {
+             switch (mediaType) {
+                 case FileColumns.MEDIA_TYPE_AUDIO:
+@@ -6520,6 +6530,42 @@ public class MediaProvider extends ContentProvider {
+     @Keep
+     @NonNull
+     public long[] getRedactionRangesForFuse(String path, int uid, int tid) throws IOException {
++        return getRedactionRangesForFuseInternal(path, uid, tid, null);
++    }
++
++    /**
++     * G151, opt-in prototype: derive EXIF/XMP spans from the same immutable
++     * raw memfd that a private-redacted-mmap handle will later sanitize.
++     *
++     * The integer is a valid fd in THIS MediaProvider process, created and
++     * sealed by native snapshot code. ParcelFileDescriptor.fromFd duplicates
++     * it, so the Java call never takes ownership of the native snapshot.
++     * This method MUST NOT be called on an arbitrary app-provided fd.
++     *
++     * CacheMethod JNI appends "ForFuse": native caches
++     * "getRedactionRangesSnapshot" with signature (Ljava/lang/String;III)[J.
++     */
++    @Keep
++    @NonNull
++    public long[] getRedactionRangesSnapshotForFuse(
++            String path, int uid, int tid, int sealedRawFd) throws IOException {
++        if (sealedRawFd < 0) {
++            throw new IOException("Invalid private snapshot descriptor");
++        }
++        final String mimeType = MimeUtils.resolveMimeType(new File(path));
++        if (!ExifInterface.isSupportedMimeType(mimeType)
++                && !IsoInterface.isSupportedMimeType(mimeType)) {
++            throw new IOException("Unsupported private redaction MIME type");
++        }
++        try (ParcelFileDescriptor raw = ParcelFileDescriptor.fromFd(sealedRawFd)) {
++            return getRedactionRangesForFuseInternal(path, uid, tid, raw.getFileDescriptor());
++        }
++    }
++
++    @NonNull
++    private long[] getRedactionRangesForFuseInternal(
++            String path, int uid, int tid, @Nullable FileDescriptor frozenRawFd)
++            throws IOException {
+         final File file = new File(path);
+ 
+         // When we're calculating redaction ranges for MediaProvider, it means we're actually
+@@ -6531,7 +6577,10 @@ public class MediaProvider extends ContentProvider {
+                 shouldRedact = mShouldRedactThreadIds.indexOf(tid) != -1;
+             }
+             if (shouldRedact) {
+-                return getRedactionRanges(file).redactionRanges;
++                return (frozenRawFd == null
++                        ? getRedactionRanges(file)
++                        : getRedactionRanges(frozenRawFd, MimeUtils.resolveMimeType(file)))
++                        .redactionRanges;
+             } else {
+                 return new long[0];
+             }
+@@ -6575,7 +6624,10 @@ public class MediaProvider extends ContentProvider {
+                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION) == PERMISSION_GRANTED;
+ 
+             if (!callerIsOwner && !callerHasUriPermission) {
+-                res = getRedactionRanges(file).redactionRanges;
++                res = (frozenRawFd == null
++                        ? getRedactionRanges(file)
++                        : getRedactionRanges(frozenRawFd, MimeUtils.resolveMimeType(file)))
++                        .redactionRanges;
+             }
+         } finally {
+             restoreLocalCallingIdentity(token);
+@@ -6594,13 +6646,31 @@ public class MediaProvider extends ContentProvider {
+      */
+     @VisibleForTesting
+     public static RedactionInfo getRedactionRanges(File file) throws IOException {
++        try (FileInputStream is = new FileInputStream(file)) {
++            return getRedactionRanges(is.getFD(), MimeUtils.resolveMimeType(file));
++        } catch (FileNotFoundException ignored) {
++            // Preserve legacy G134 behavior; the new snapshot method NEVER
++            // accepts a missing snapshot file or an invalid snapshot fd.
++            return new RedactionInfo(new long[0], new long[0]);
++        } catch (IOException e) {
++            throw new IOException("Failed to redact " + file, e);
++        }
++    }
++
++    /**
++     * Same ExifInterface, IsoInterface and XMP byte-span extraction as G134,
++     * but bound to a CALLER-OWNED fd. The fd is NEVER closed by this helper.
++     * For G151, the caller passes a duplicate of the SEALED raw memfd.
++     */
++    @VisibleForTesting
++    public static RedactionInfo getRedactionRanges(
++            FileDescriptor fd, String mimeType) throws IOException {
+         Trace.beginSection("getRedactionRanges");
+         final LongArray res = new LongArray();
+         final LongArray freeOffsets = new LongArray();
+-        try (FileInputStream is = new FileInputStream(file)) {
+-            final String mimeType = MimeUtils.resolveMimeType(file);
++        try {
+             if (ExifInterface.isSupportedMimeType(mimeType)) {
+-                final ExifInterface exif = new ExifInterface(is.getFD());
++                final ExifInterface exif = new ExifInterface(fd);
+                 for (String tag : REDACTED_EXIF_TAGS) {
+                     final long[] range = exif.getAttributeRange(tag);
+                     if (range != null) {
+@@ -6614,7 +6684,7 @@ public class MediaProvider extends ContentProvider {
+             }
+ 
+             if (IsoInterface.isSupportedMimeType(mimeType)) {
+-                final IsoInterface iso = IsoInterface.fromFileDescriptor(is.getFD());
++                final IsoInterface iso = IsoInterface.fromFileDescriptor(fd);
+                 for (int box : REDACTED_ISO_BOXES) {
+                     final long[] ranges = iso.getBoxRanges(box);
+                     for (int i = 0; i < ranges.length; i += 2) {
+@@ -6628,12 +6698,9 @@ public class MediaProvider extends ContentProvider {
+                 final XmpInterface isoXmp = XmpInterface.fromContainer(iso);
+                 res.addAll(isoXmp.getRedactionRanges());
+             }
+-        } catch (FileNotFoundException ignored) {
+-            // If file not found, then there's nothing to redact
+-        } catch (IOException e) {
+-            throw new IOException("Failed to redact " + file, e);
++        } finally {
++            Trace.endSection();
+         }
+-        Trace.endSection();
+         return new RedactionInfo(res.toArray(), freeOffsets.toArray());
+     }
+ 
+@@ -6859,18 +6926,29 @@ public class MediaProvider extends ContentProvider {
+      */
+     @Keep
+     public int insertFileIfNecessaryForFuse(@NonNull String path, int uid) {
++        final long result = insertFileWithTokenForFuse(path, uid);
++        return result < 0 ? (int) -result : 0;
++    }
++
++    /**
++     * Returns a positive database row id only when this call itself created
++     * that row. Zero means no database mutation; negative values are errno.
++     * FUSE CREATE uses the token for metadata-only rollback after O_EXCL fails.
++     */
++    @Keep
++    public long insertFileWithTokenForFuse(@NonNull String path, int uid) {
+         final LocalCallingIdentity token =
+                 clearLocalCallingIdentity(getCachedCallingIdentityForFuse(uid));
+ 
+         try {
+             if (isPrivatePackagePathNotOwnedByCaller(path)) {
+                 Log.e(TAG, "Can't create a file in another app's external directory");
+-                return OsConstants.ENOENT;
++                return -OsConstants.ENOENT;
+             }
+ 
+             if (!path.equals(getAbsoluteSanitizedPath(path))) {
+                 Log.e(TAG, "File name contains invalid characters");
+-                return OsConstants.EPERM;
++                return -OsConstants.EPERM;
+             }
+ 
+             if (shouldBypassDatabaseForFuse(uid)) {
+@@ -6886,8 +6964,9 @@ public class MediaProvider extends ContentProvider {
+                     // IS_PENDING=1. We shouldn't overwrite existing entry as part of FUSE
+                     // operation, hence, insert the db row only when it doesn't exist.
+                     try {
+-                        insertFileForFuse(path, FileUtils.getContentUriForPath(path),
++                        final Uri item = insertFileForFuse(path, FileUtils.getContentUriForPath(path),
+                                 mimeType, /*useData*/ callerRequestingLegacy);
++                        if (item != null) return ContentUris.parseId(item);
+                     } catch (Exception ignored) {
+                     }
+                 } else {
+@@ -6899,7 +6978,7 @@ public class MediaProvider extends ContentProvider {
+                     if (callerRequestingLegacy) {
+                         final String owner = getCallingPackageOrSelf();
+                         if (owner != null && !updateOwnerForPath(path, owner)) {
+-                            return OsConstants.EPERM;
++                            return -OsConstants.EPERM;
+                         }
+                     }
+                 }
+@@ -6910,22 +6989,56 @@ public class MediaProvider extends ContentProvider {
+             // Legacy apps that made is this far don't have the right storage permission and hence
+             // are not allowed to access anything other than their external app directory
+             if (isCallingPackageRequestingLegacy()) {
+-                return OsConstants.EPERM;
++                return -OsConstants.EPERM;
+             }
+ 
+             if (fileExists(path)) {
+                 // If the file already exists in the db, we shouldn't allow the file creation.
+-                return OsConstants.EEXIST;
++                return -OsConstants.EEXIST;
+             }
+ 
+             final Uri contentUri = getContentUriForFile(path, mimeType);
+             final Uri item = insertFileForFuse(path, contentUri, mimeType, /*useData*/ false);
+             if (item == null) {
+-                return OsConstants.EPERM;
++                return -OsConstants.EPERM;
+             }
+-            return 0;
++            return ContentUris.parseId(item);
+         } catch (IllegalArgumentException e) {
+             Log.e(TAG, "insertFileIfNecessary failed", e);
++            return -OsConstants.EPERM;
++        } finally {
++            restoreLocalCallingIdentity(token);
++        }
++    }
++
++    /**
++     * Roll back only the still-pending row inserted by this FUSE CREATE.
++     * Never call delete(uri), deleteFileForFuse, or unlink here: those may
++     * remove a different process's physical file after a pathname race.
++     */
++    @Keep
++    public int rollbackPendingCreationForFuse(@NonNull String path, int uid, long insertedId) {
++        if (insertedId <= 0) return 0;
++        final LocalCallingIdentity token =
++                clearLocalCallingIdentity(getCachedCallingIdentityForFuse(uid));
++        try {
++            if (!path.equals(getAbsoluteSanitizedPath(path))) return OsConstants.EPERM;
++            if (new File(path).exists()) return OsConstants.EEXIST;
++            final String owner = getCallingPackageOrSelf();
++            if (owner == null) return OsConstants.EPERM;
++            final DatabaseHelper helper;
++            try {
++                helper = getDatabaseForUri(FileUtils.getContentUriForPath(path));
++            } catch (VolumeNotFoundException e) {
++                return OsConstants.ENOENT;
++            }
++            final String[] args = {Long.toString(insertedId), path, owner};
++            final int deleted = helper.runWithoutTransaction((db) ->
++                    db.delete("files", "_id=? AND _data=? AND is_pending=1"
++                            + " AND owner_package_name=?", args));
++            return deleted == 1 ? 0 : OsConstants.ENOENT;
++        } catch (IllegalArgumentException e) {
++            Log.e(TAG, "rollbackPendingCreationForFuse failed", e);
+             return OsConstants.EPERM;
+         } finally {
+             restoreLocalCallingIdentity(token);
+diff --git a/tests/src/com/android/providers/media/MediaProviderForFuseTest.java b/tests/src/com/android/providers/media/MediaProviderForFuseTest.java
+index 277acf28570d5754324980460d4a961ddb6cceb4..b5d12a1ea35b32bdae7d14b24e6771c2063faaa4 100644
+--- a/tests/src/com/android/providers/media/MediaProviderForFuseTest.java
++++ b/tests/src/com/android/providers/media/MediaProviderForFuseTest.java
+@@ -22,6 +22,7 @@ import android.content.Context;
+ import android.content.pm.PackageManager;
+ import android.os.Environment;
+ import android.provider.MediaStore;
++import android.system.OsConstants;
+ 
+ import androidx.test.InstrumentationRegistry;
+ import androidx.test.runner.AndroidJUnit4;
+@@ -118,6 +119,50 @@ public class MediaProviderForFuseTest {
+                 sTestDir.getPath(), sTestUid))).doesNotContain(renamed.getName());
+     }
+ 
++    @Test
++    public void testFailedCreateRollbackRemovesOnlyPendingRow() throws Exception {
++        final File file = new File(sTestDir, "rollback" + System.nanoTime() + ".jpg");
++        Truth.assertThat(file.exists()).isFalse();
++        final long rowId = sMediaProvider.insertFileWithTokenForFuse(file.getPath(), sTestUid);
++        Truth.assertThat(rowId).isGreaterThan(0L);
++        Truth.assertThat(sMediaProvider.rollbackPendingCreationForFuse(
++                file.getPath(), sTestUid, rowId)).isEqualTo(0);
++        Truth.assertThat(file.exists()).isFalse();
++        Truth.assertThat(Arrays.asList(sMediaProvider.getFilesInDirectoryForFuse(
++                sTestDir.getPath(), sTestUid))).doesNotContain(file.getName());
++    }
++
++    @Test
++    public void testRollbackRejectsWrongRowToken() throws Exception {
++        final File file = new File(sTestDir, "rollback-wrong-id" + System.nanoTime() + ".jpg");
++        final long rowId = sMediaProvider.insertFileWithTokenForFuse(file.getPath(), sTestUid);
++        Truth.assertThat(rowId).isGreaterThan(0L);
++        Truth.assertThat(sMediaProvider.rollbackPendingCreationForFuse(
++                file.getPath(), sTestUid, rowId + 1L)).isEqualTo(OsConstants.ENOENT);
++        Truth.assertThat(Arrays.asList(sMediaProvider.getFilesInDirectoryForFuse(
++                sTestDir.getPath(), sTestUid))).contains(file.getName());
++        Truth.assertThat(sMediaProvider.rollbackPendingCreationForFuse(
++                file.getPath(), sTestUid, rowId)).isEqualTo(0);
++        Truth.assertThat(Arrays.asList(sMediaProvider.getFilesInDirectoryForFuse(
++                sTestDir.getPath(), sTestUid))).doesNotContain(file.getName());
++    }
++
++    @Test
++    public void testRollbackNeverUnlinksExistingPhysicalFile() throws Exception {
++        final File file = new File(sTestDir, "rollback-collision" + System.nanoTime() + ".jpg");
++        final long rowId = sMediaProvider.insertFileWithTokenForFuse(file.getPath(), sTestUid);
++        Truth.assertThat(rowId).isGreaterThan(0L);
++        Truth.assertThat(file.createNewFile()).isTrue();
++        try {
++            Truth.assertThat(sMediaProvider.rollbackPendingCreationForFuse(
++                    file.getPath(), sTestUid, rowId)).isEqualTo(OsConstants.EEXIST);
++            Truth.assertThat(file.exists()).isTrue();
++        } finally {
++            Truth.assertThat(sMediaProvider.deleteFileForFuse(
++                    file.getPath(), sTestUid)).isEqualTo(0);
++        }
++    }
++
+     @Test
+     public void testRenameDirectory() throws Exception {
+         sTestDir = new File(sTestDir, "subdir" + System.nanoTime());
+diff --git a/tests/src/com/android/providers/media/MediaProviderTest.java b/tests/src/com/android/providers/media/MediaProviderTest.java
+index 9cc65eff0ae84ec9ff0d615bb4b06d3da512f9f6..28d3645577fe941933ae3a0ec399c8ad08486592 100644
+--- a/tests/src/com/android/providers/media/MediaProviderTest.java
++++ b/tests/src/com/android/providers/media/MediaProviderTest.java
+@@ -75,6 +75,10 @@ import org.junit.runner.RunWith;
+ 
+ import java.io.ByteArrayOutputStream;
+ import java.io.File;
++import java.io.FileInputStream;
++import java.lang.reflect.Field;
++
++import com.android.providers.media.util.MimeUtils;
+ import java.io.PrintWriter;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+@@ -297,13 +301,13 @@ public class MediaProviderTest {
+         final Uri uri = sIsolatedResolver.insert(
+                 MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values);
+         assumeTrue(uri != null);
+-        final Collection<Uri> uris = List.of(uri);
++        final Collection<Uri> uris = Arrays.asList(uri);
+         assertNotNull(MediaStore.createWriteRequest(sIsolatedResolver, uris));
+     }
+ 
+     @Test
+     public void testCreateRequest_invalidUri_throwsException() throws Exception {
+-        final Collection<Uri> uris = List.of(
++        final Collection<Uri> uris = Arrays.asList(
+                 MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY, 42));
+         assertThrows(IllegalArgumentException.class,
+                 () -> MediaStore.createWriteRequest(sIsolatedResolver, uris));
+@@ -421,6 +425,52 @@ public class MediaProviderTest {
+         assertNotNull(MediaProvider.getRedactionRanges(file));
+     }
+ 
++    /**
++     * G151: EXIF spans computed from a caller-owned frozen descriptor must
++     * exactly agree with existing G134 path behavior for unchanged media.
++     * The test checks both image and ISO container parser paths.
++     */
++    private static long[] extractPrivateRedactionRanges(Object result) throws Exception {
++        final Field ranges = result.getClass().getDeclaredField("redactionRanges");
++        ranges.setAccessible(true); // Production RedactionInfo is a PRIVATE nested class
++        return (long[]) ranges.get(result);
++    }
++
++    @Test
++    public void testGetRedactionRanges_SnapshotFdImageParity() throws Exception {
++        final File file = File.createTempFile("g151-snapshot-image", ".jpg");
++        try {
++            stage(R.raw.test_image, file);
++            try (FileInputStream is = new FileInputStream(file)) {
++                assertArrayEquals(extractPrivateRedactionRanges(
++                                MediaProvider.getRedactionRanges(file)),
++                        extractPrivateRedactionRanges(MediaProvider.getRedactionRanges(
++                                is.getFD(), MimeUtils.resolveMimeType(file))));
++                // The FD is owned by FileInputStream, not closed by the parser.
++                assertTrue(is.getFD().valid());
++            }
++        } finally {
++            file.delete();
++        }
++    }
++
++    @Test
++    public void testGetRedactionRanges_SnapshotFdVideoParity() throws Exception {
++        final File file = File.createTempFile("g151-snapshot-video", ".mp4");
++        try {
++            stage(R.raw.test_video, file);
++            try (FileInputStream is = new FileInputStream(file)) {
++                assertArrayEquals(extractPrivateRedactionRanges(
++                                MediaProvider.getRedactionRanges(file)),
++                        extractPrivateRedactionRanges(MediaProvider.getRedactionRanges(
++                                is.getFD(), MimeUtils.resolveMimeType(file))));
++                assertTrue(is.getFD().valid());
++            }
++        } finally {
++            file.delete();
++        }
++    }
++
+     @Test
+     public void testComputeCommonPrefix_Single() {
+         assertEquals(Uri.parse("content://authority/1/2/3"),
+diff --git a/tests/src/com/android/providers/media/util/FileUtilsTest.java b/tests/src/com/android/providers/media/util/FileUtilsTest.java
+index 0acf8eafbeceab1af2d5a90771442e355c82f1d2..0b0d3d9129ef11956d1e793c7da3b19e59af76f9 100644
+--- a/tests/src/com/android/providers/media/util/FileUtilsTest.java
++++ b/tests/src/com/android/providers/media/util/FileUtilsTest.java
+@@ -814,7 +814,7 @@ public class FileUtilsTest {
+     }
+ 
+     @Test
+-    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.S)
++    @SdkSuppress(minSdkVersion = 31)  // Android 12 S, absent in Android 11 API stubs
+     public void testNormalizeAndFilterDefaultIgnorableCodepoints() {
+         String pathWithZws = "/storage/emulated/0/An\u200Bdroid/data/com.google.example/files";
+         String pathWithZwsFiltered = "/storage/emulated/0/Android/data/com.google.example/files";

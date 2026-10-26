@@ -1,0 +1,5 @@
+# G682 — why two concurrent shared-writable mmap creators each need RCU grace
+
+Kernel Git `a88214cd5` adds THREE actual herd7/LKMM models: one writer skips grace based on already-positive i_mmap_writable => Sometimes 1/5 bad observations; both independent mmap creators wait RCU GP => Never 0/5; replacing writer2 GP with smp_mb => Sometimes 1/5. Distinct process mmap_locks but the same file mapping counter make the prior count insufficient to prove first publication already synchronized. 13/13 real bounded source predicates PASS; 6/6 changed C-source mutations rejected. Kernel machine/plan commit `0aa2a32a9` preserves S1 ACTIVE and S2/S3 BLOCKED.
+
+**No executable G682 changes.** Existing three STAGED NOT INSTALLED runtime source paths vs physical G650: mm/filemap.c G674/G680, mm/page_alloc.c G676, mm/vma.c G680. Real Cortex-A9 GP latency under mmap_lock and global lockdep remain unmeasured and not proven safe. The LKMM counterexample does NOT establish actual observed UAF or full protected-algorithm correctness. Kernel physical G650, no-ref RCU default OFF, no experimental BOOT flash, backup, nighttime audio/camera/calls/PIN/OTG. GitHub owner-only.

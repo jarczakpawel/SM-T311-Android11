@@ -1,0 +1,279 @@
+{
+  "stage": "G709",
+  "model": "exhaustive sequentially-consistent schedule interleavings of one reader and one writer with two physical incarnations of the SAME PFN, not LKMM or an end-to-end kernel proof",
+  "source_checks": {
+    "raw_load_and_unpinned_flag_source": true,
+    "marked_only_allocator_deferral": true,
+    "speculative_reference_fallback": true,
+    "staged_debugfs_no_ref_enable_denied": true,
+    "config_EXP_compiled_release_OFF": true,
+    "G708_previous_new_safety_anchors_passed": true,
+    "baseline_untagged_allows_same_PFN_generation_ABA": true,
+    "baseline_tagged_has_no_ABA_in_THIS_model": true,
+    "full_lifetime_defer_eliminates_ABA_in_THIS_model": true,
+    "full_lifetime_defer_no_raw_mismatch_in_THIS_model": true,
+    "full_lifetime_defer_blocks_some_writer_schedules": true,
+    "slot_epoch_catches_ABA_acceptance_in_THIS_model": true,
+    "slot_epoch_STILL_dereferences_reused_incarnation": true,
+    "refcounted_reader_never_accepts_invalid_generation_in_model": true,
+    "refcounted_reader_does_not_raw_check_freed_folio_in_model": true,
+    "mutant_skipping_universal_grace_reopens_ABA": true,
+    "mutant_missing_epoch_recheck_reopens_ABA": true,
+    "mutant_missing_refcount_reopens_ABA": true,
+    "all_profiles_have_completed_schedules": true,
+    "physical_Normal_zone_sample_nonzero": true,
+    "pinned_G700_host_boot_hash_unchanged": true
+  },
+  "protocol_comparisons": {
+    "current_conditional_old_untagged": {
+      "completed_interleavings": 462,
+      "accepted_reads": 12,
+      "ABA_accepted": 1,
+      "raw_dereference_other_generation": 15,
+      "raw_dereference_after_free": 20,
+      "RCU_wait_blocked_schedule_edges": 0,
+      "ABA_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "W_insert",
+        "W_mark",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit"
+      ],
+      "generation_mismatch_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit",
+        "W_insert",
+        "W_mark"
+      ]
+    },
+    "current_conditional_old_tagged": {
+      "completed_interleavings": 56,
+      "accepted_reads": 11,
+      "ABA_accepted": 0,
+      "raw_dereference_other_generation": 0,
+      "raw_dereference_after_free": 0,
+      "RCU_wait_blocked_schedule_edges": 55,
+      "ABA_witness": null,
+      "generation_mismatch_witness": null
+    },
+    "candidate_defer_every_sampled_old": {
+      "completed_interleavings": 56,
+      "accepted_reads": 5,
+      "ABA_accepted": 0,
+      "raw_dereference_other_generation": 0,
+      "raw_dereference_after_free": 0,
+      "RCU_wait_blocked_schedule_edges": 55,
+      "ABA_witness": null,
+      "generation_mismatch_witness": null
+    },
+    "candidate_atomic_slot_epoch_without_retire_lifetime": {
+      "completed_interleavings": 462,
+      "accepted_reads": 11,
+      "ABA_accepted": 0,
+      "raw_dereference_other_generation": 15,
+      "raw_dereference_after_free": 20,
+      "RCU_wait_blocked_schedule_edges": 0,
+      "ABA_witness": null,
+      "generation_mismatch_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit",
+        "W_insert",
+        "W_mark"
+      ]
+    },
+    "known_good_refcounted_fallback": {
+      "completed_interleavings": 385,
+      "accepted_reads": 46,
+      "ABA_accepted": 0,
+      "raw_dereference_other_generation": 0,
+      "raw_dereference_after_free": 0,
+      "RCU_wait_blocked_schedule_edges": 16,
+      "ABA_witness": null,
+      "generation_mismatch_witness": null
+    }
+  },
+  "deliberately_broken_protocols": {
+    "omit_all_folio_RCU_grace": {
+      "completed_interleavings": 462,
+      "accepted_reads": 12,
+      "ABA_accepted": 1,
+      "raw_dereference_other_generation": 15,
+      "raw_dereference_after_free": 0,
+      "RCU_wait_blocked_schedule_edges": 0,
+      "ABA_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "W_insert",
+        "W_mark",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit"
+      ],
+      "generation_mismatch_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit",
+        "W_insert",
+        "W_mark"
+      ]
+    },
+    "drop_slot_epoch_compare": {
+      "completed_interleavings": 462,
+      "accepted_reads": 12,
+      "ABA_accepted": 1,
+      "raw_dereference_other_generation": 15,
+      "raw_dereference_after_free": 20,
+      "RCU_wait_blocked_schedule_edges": 0,
+      "ABA_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "W_insert",
+        "W_mark",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit"
+      ],
+      "generation_mismatch_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit",
+        "W_insert",
+        "W_mark"
+      ]
+    },
+    "drop_reference_pin": {
+      "completed_interleavings": 462,
+      "accepted_reads": 12,
+      "ABA_accepted": 1,
+      "raw_dereference_other_generation": 15,
+      "raw_dereference_after_free": 20,
+      "RCU_wait_blocked_schedule_edges": 0,
+      "ABA_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "W_insert",
+        "W_mark",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit"
+      ],
+      "generation_mismatch_witness": [
+        "R_enter",
+        "R_load",
+        "W_remove",
+        "W_retire",
+        "W_reuse",
+        "R_guard",
+        "R_reload",
+        "R_copy",
+        "R_exit",
+        "W_insert",
+        "W_mark"
+      ]
+    }
+  },
+  "physical_snapshot": {
+    "source": "read-only physical Android G650 /proc/zoneinfo and /proc/meminfo snapshot 2026-10-21",
+    "MemTotal_kB": 1483332,
+    "Normal_managed_pages": 203153,
+    "Normal_free_pages": 75863,
+    "Normal_high_watermark_pages": 1350,
+    "note": "Snapshots vary. This is NOT the available pages for a new kernel image; total memory and zone managed/free must not be conflated."
+  },
+  "illustrative_burst_costs": [
+    {
+      "deferred_pages": 1024,
+      "held_MiB": 4.0,
+      "fraction_of_sampled_Normal_managed_percent": 0.5,
+      "fraction_of_sampled_Normal_free_percent": 1.35
+    },
+    {
+      "deferred_pages": 4096,
+      "held_MiB": 16.0,
+      "fraction_of_sampled_Normal_managed_percent": 2.02,
+      "fraction_of_sampled_Normal_free_percent": 5.4
+    },
+    {
+      "deferred_pages": 16384,
+      "held_MiB": 64.0,
+      "fraction_of_sampled_Normal_managed_percent": 8.06,
+      "fraction_of_sampled_Normal_free_percent": 21.6
+    }
+  ],
+  "illustrative_retire_rate_grace_costs": [
+    {
+      "assumed_retired_pages_per_second": 100,
+      "assumed_grace_ms": 10,
+      "estimated_concurrent_pending_pages": 1,
+      "estimated_held_MiB": 0.004
+    },
+    {
+      "assumed_retired_pages_per_second": 1000,
+      "assumed_grace_ms": 100,
+      "estimated_concurrent_pending_pages": 100,
+      "estimated_held_MiB": 0.391
+    },
+    {
+      "assumed_retired_pages_per_second": 10000,
+      "assumed_grace_ms": 500,
+      "estimated_concurrent_pending_pages": 5000,
+      "estimated_held_MiB": 19.531
+    }
+  ],
+  "decision": "KEEP_REFCOUNTED_RELEASE_AND_NO_REF_ON_FAIL_CLOSED",
+  "candidate_priority": "A universal RCU lifetime protocol is worth proving but has real low-memory implications; a standalone atomic slot epoch blocks acceptance only, not stale unpinned memory dereferences; reference-backed fallback is the safe supported production path.",
+  "remaining_gates": [
+    "S1 reader/writer complete Linux LKMM",
+    "S2 folio recycling across ALL free paths",
+    "S3 HighMem/VIPT/mmap/lockdep",
+    "S6 verified physical TWRP/BOOT"
+  ],
+  "rcu_ON_approved": false,
+  "new_runtime_kernel_code": false,
+  "G700_physically_installed": false,
+  "flash_authorized": false
+}

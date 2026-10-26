@@ -1,0 +1,30 @@
+<resources>
+    <bool name="config_automatic_brightness_available">true</bool>
+    <integer name="config_autoBrightnessLightSensorRate">250</integer>
+    <integer name="config_autoBrightnessInitialLightSensorRate">125</integer>
+    <integer name="config_autoBrightnessBrighteningLightDebounce">1000</integer>
+    <integer name="config_autoBrightnessDarkeningLightDebounce">2000</integer>
+
+    <!-- CM36653 clear-channel raw thresholds; calibrated conservatively from hardware bring-up. -->
+    <integer-array name="config_autoBrightnessLevels">
+        <item>5</item>
+        <item>20</item>
+        <item>60</item>
+        <item>150</item>
+        <item>400</item>
+        <item>1000</item>
+        <item>3000</item>
+    </integer-array>
+    <integer-array name="config_autoBrightnessLcdBacklightValues">
+        <item>12</item>
+        <item>22</item>
+        <item>38</item>
+        <item>68</item>
+        <item>112</item>
+        <item>164</item>
+        <item>218</item>
+        <item>255</item>
+    </integer-array>
+    <item name="config_wallpaperMaxScale" format="float" type="dimen">1.0</item>
+    <bool name="config_lidControlsSleep">true</bool>
+</resources>

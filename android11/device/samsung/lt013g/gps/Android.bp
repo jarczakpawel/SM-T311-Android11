@@ -1,0 +1,24 @@
+// Copyright (C) 2026 Pawel Jarczak
+cc_binary {
+    name: "lt013g-gpsd-wrapper",
+    vendor: true,
+    srcs: ["gpsd_wrapper.cpp"],
+    init_rc: ["init.lt013g.gps.rc"],
+    shared_libs: ["liblog"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+prebuilt_etc {
+    name: "lt013g_gps.xml",
+    src: "gps.xml",
+    vendor: true,
+    filename: "gps.xml",
+}
+
+prebuilt_etc {
+    name: "manifest.lt013g.gnss.xml",
+    src: "manifest.gnss.xml",
+    vendor: true,
+    sub_dir: "vintf/manifest",
+    filename: "manifest.lt013g.gnss.xml",
+}

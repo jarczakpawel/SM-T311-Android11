@@ -1,0 +1,9 @@
+cc_binary {
+    name: "t311_mesa26_winprobe",
+    srcs: ["main.cpp"],
+    cflags: ["-Wall", "-Wno-unused-parameter"],
+    shared_libs: ["libgui", "libui", "libutils", "libbinder", "liblog", "libcutils", "libnativewindow"],
+    stl: "libc++",
+    compile_multilib: "32",
+    strip: { none: true },
+}

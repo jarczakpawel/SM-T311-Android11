@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-10-17",
+  "status": "G414_EXPERIMENTAL_TWO_CPU_ATOMIC_PRECHARGE_FULL_NATIVE_ASAN_ORACLE_75K_AND_ARM32_ELF_OBJECT_PASS_NOT_LINKED_NOT_FLASHABLE",
+  "changes": "G413 originally wrote CPU0 counters then CPU1; if CPU1 encountered UID slot exhaustion or sum overflow CPU0 would remain changed despite aborted frequency/purge event. Preflight checks aggregate two CPU charging, row slots, overflow before writing to either CPU or changing shared policy frequency.",
+  "tests": {
+    "G413_scenario_replayed_ASAN_UBSAN": "PASS",
+    "G413_75000_deterministic_random_event_independent_oracle_ASAN_UBSAN": "PASS",
+    "G414_4095_of_4096_occupied_UID_slots_abort_both_before_partial_write_ASAN_UBSAN": "PASS",
+    "G414_two_CPU_combined_U64_overflow_abort_without_any_charges_ASAN_UBSAN": "PASS",
+    "ARM32_ELF32_compiler_object": "PASS",
+    "kernel_full_link": "NOT_PERFORMED_G414",
+    "physical_device": "NOT_PERFORMED_G414"
+  },
+  "risks": [
+    "preflight adds O(2cpu+UID lookup) under spin_lock_irqsave scheduler hotpath; actual CortexA9 latency unknown",
+    "no /proc/uid_time_in_state and no real Android remove_uid_range connection",
+    "trace_cpu_frequency callback after actual hardware change, so exact physical bin accounting not confirmed",
+    "UID pool bounded 4096 and no real SELinux/hotplug/suspend validation"
+  ],
+  "source_files": {
+    "g414_event_core.c": {
+      "bytes": 7161,
+      "sha256": "88c4359824c1e8f04d5f0f2e25588972421f7c45bdc10bb964c1027516b4f8fa"
+    },
+    "g413_event_core.h": {
+      "bytes": 1653,
+      "sha256": "0a7037a364f9706fe2fd02807aff66026c1f37560bce3df8c42c8e9f2886d644"
+    },
+    "g414_event_core_arm32.o": {
+      "bytes": 2948,
+      "sha256": "fa121b81c120cabf2cf9136bb5c9f275ac7231506bac30b6578522f7b534909c"
+    },
+    "test_g414_atomic_failure.c": {
+      "bytes": 2437,
+      "sha256": "901ebec1f7300cf0fccd8e8fea0da0e70f4946877c90054cc8b2a5ce36df2929"
+    },
+    "test_g414_events.c": {
+      "bytes": 2100,
+      "sha256": "1844367ddcb8285cdf26e456710f735c28add9884a0954ce7152adc6d34fd5ad"
+    },
+    "test_g414_oracle.c": {
+      "bytes": 2941,
+      "sha256": "1ebbca3ef1c9ac6c09a3780e3325b581b9e92d2bbb80ba7e70b95f0faccbde42"
+    }
+  },
+  "canonical_kernel_modified": false,
+  "live_G379_modified": false,
+  "signed_G408_modified": false,
+  "safe_for_install": false
+}

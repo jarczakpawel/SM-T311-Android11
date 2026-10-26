@@ -1,0 +1,36 @@
+C SMT311+IsizeNoSeqRetry+32Smp
+
+(*
+ * G656 illustrative NEGATIVE CONTROL to study what may go wrong if
+ * a 64bit i_size is read in two halves without the seqcount retry.
+ * No actual ARMv7 Linux i_size_read uses this incorrect variant.
+ *)
+
+{
+seq=0;
+size_low=0;
+size_high=0;
+}
+
+P0(int *seq, int *size_low, int *size_high)
+{
+	WRITE_ONCE(*seq, 1);
+	smp_wmb();
+	WRITE_ONCE(*size_low, 1);
+	WRITE_ONCE(*size_high, 1);
+	smp_wmb();
+	WRITE_ONCE(*seq, 2);
+}
+
+P1(int *seq, int *size_low, int *size_high)
+{
+	int rseq1;
+	int rlo;
+	int rhi;
+
+	rseq1 = READ_ONCE(*seq);
+	rlo = READ_ONCE(*size_low);
+	rhi = READ_ONCE(*size_high);
+}
+
+exists (1:rlo=1 /\ 1:rhi=0)

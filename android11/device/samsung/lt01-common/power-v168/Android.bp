@@ -1,0 +1,25 @@
+cc_binary {
+    name: "android.hardware.power@1.0-service.lt013g",
+    defaults: ["hidl_defaults"],
+    vendor: true,
+    relative_install_path: "hw",
+    srcs: [
+        "Power.cpp",
+        "service.cpp",
+    ],
+    init_rc: ["android.hardware.power@1.0-service.lt013g.rc"],
+    vintf_fragments: ["manifest.power.lt013g.xml"],
+    shared_libs: [
+        "android.hardware.power@1.0",
+        "libbase",
+        "libhidlbase",
+        "liblog",
+        "libutils",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-parameter",
+    ],
+}

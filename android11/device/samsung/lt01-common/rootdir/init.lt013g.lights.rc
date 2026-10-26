@@ -1,0 +1,9 @@
+# SM-T311 LP8556 backlight access for the unprivileged Light HAL.
+on boot
+    chown system system /sys/class/backlight/lcd-bl/brightness
+    chmod 0664 /sys/class/backlight/lcd-bl/brightness
+
+# SM-T311 V176 - regulator-led appears after early boot.
+on property:sys.boot_completed=1
+    chown system system /sys/class/leds/white:kbd_backlight/brightness
+    chmod 0664 /sys/class/leds/white:kbd_backlight/brightness

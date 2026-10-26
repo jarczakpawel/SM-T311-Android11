@@ -1,0 +1,89 @@
+# SM-T311 PJARCZAK v186 clean XMM6262 radio integration.
+
+on early-init
+    setprop debug.stagefright.ccodec 0
+
+on fs
+    symlink /dev/block/mmcblk0p13 /dev/mbin0
+    chown radio radio /sys/devices/virtual/misc/multipdp/waketime
+    chown system radio /dev/umts_boot0
+    chmod 0660 /dev/umts_boot0
+    chown system radio /dev/umts_ipc0
+    chmod 0660 /dev/umts_ipc0
+    chown system radio /dev/umts_rfs0
+    chmod 0660 /dev/umts_rfs0
+    chown system radio /dev/umts_router
+    chmod 0660 /dev/umts_router
+    chown system radio /dev/umts_csd
+    chmod 0660 /dev/umts_csd
+    chown system radio /dev/umts_ramdump0
+    chmod 0660 /dev/umts_ramdump0
+    chown system radio /dev/umts_loopback0
+    chmod 0660 /dev/umts_loopback0
+    chown system radio /dev/link_pm
+    chmod 0660 /dev/link_pm
+
+on post-fs-data
+    setprop ril.cbd.boot_done 0
+    setprop ril.cbd.rfs_check_done 0
+    mkdir /cache/smt311-radio-diagnostics 0700 root root
+    restorecon_recursive /cache/smt311-radio-diagnostics
+
+# v226: restarting userspace RIL must not tear down a healthy XMM6262
+# hardware link or cause an unrelated native CBD firmware reload.
+# Initial service startup remains the previously verified class-main layout.
+on property:init.svc.ril-daemon=restarting
+    stop t311-audio-ril
+
+service cpboot-daemon /vendor/bin/t311-cbd -d -p 13
+    override
+    class main
+    user root
+    group radio cache inet misc audio log system
+    seclabel u:r:rild:s0
+
+service ril-daemon /vendor/bin/hw/rild -l /vendor/lib/t311-ril/libsec-ril.so -- -d /dev/ttyS0
+    override
+    class main
+    user root
+    group radio cache inet misc audio log readproc wakelock system
+    capabilities DAC_OVERRIDE BLOCK_SUSPEND NET_ADMIN NET_RAW
+    setenv LD_LIBRARY_PATH /vendor/lib:/vendor/lib/t311-ril:/system/vendor/lib:/system/lib
+    setenv LD_PRELOAD /vendor/lib/t311-ril/libt311_alarm_compat.so:/vendor/lib/t311-ril/libt311_cutils_compat.so
+    seclabel u:r:rild:s0
+
+service vendor_flash_recovery /vendor/bin/t311-recovery-noop
+    override
+    class main
+    disabled
+    oneshot
+    user root
+    group root
+    seclabel u:r:rild:s0
+
+on property:persist.vendor.recovery_update=true
+    setprop persist.vendor.recovery_update false
+
+# V191_AUDIO_RIL_HOTFIX1_BEGIN
+on property:init.svc.ril-daemon=running
+    start t311-audio-ril
+
+on property:init.svc.ril-daemon=stopped
+    stop t311-audio-ril
+
+service t311-audio-ril /vendor/bin/t311-audio-ril
+    class late_start
+    disabled
+    user media
+    group radio audio system
+    seclabel u:r:rild:s0
+# V191_AUDIO_RIL_HOTFIX1_END
+
+# v223: bound the automatic XMM6262 boot recovery to exactly one CBD restart.
+# Healthy modem -> watchdog exits without changing anything.
+service t311-modem-watchdog /vendor/bin/t311-modem-watchdog
+    class late_start
+    user root
+    group radio
+    seclabel u:r:lt013g_modem_watchdog:s0
+    oneshot

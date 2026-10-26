@@ -1,0 +1,13 @@
+device=lt013g
+build=SMT311G1441
+kernel=7.3.0-pjarczak
+systemui=591
+selinux=Enforcing
+lmkd=running
+refresh_period_ns=17107264
+Total frames rendered: 307
+Janky frames: 253 (82.41%)
+50th percentile: 31ms
+90th percentile: 65ms
+50th gpu percentile: 8ms
+90th gpu percentile: 11ms

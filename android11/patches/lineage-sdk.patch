@@ -1,0 +1,52 @@
+diff --git a/Android.bp b/Android.bp
+index 41394bf57cc509726c437a951c859854744b6d62..c2fbda0913ce7ee98b350aed2bef3558d265e203 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -94,6 +94,10 @@ java_library {
+         lineage_sdk_internal_src + "/**/I*.aidl",
+     ],
+ 
++    exclude_srcs: [
++        library_src + "/org/lineageos/platform/internal/TrustInterfaceService.java",
++    ],
++
+     // Include aidl files from lineageos.app namespace as well as internal src aidl files
+     aidl: {
+         local_include_dirs: ["sdk/src/java"],
+diff --git a/lineage/res/res/values/config.xml b/lineage/res/res/values/config.xml
+index bfd4ba70296c189872d37f65cc397a7079ab2bb1..2d9de91a899a2699901c00cff13830487d50b340 100644
+--- a/lineage/res/res/values/config.xml
++++ b/lineage/res/res/values/config.xml
+@@ -106,7 +106,6 @@
+         <item>org.lineageos.platform.internal.PerformanceManagerService</item>
+         <item>org.lineageos.platform.internal.display.LiveDisplayService</item>
+         <item>org.lineageos.platform.internal.LineageAudioService</item>
+-        <item>org.lineageos.platform.internal.TrustInterfaceService</item>
+         <item>org.lineageos.platform.internal.LineageSettingsService</item>
+         <item>org.lineageos.platform.internal.LineageGlobalActionsService</item>
+     </string-array>
+diff --git a/sdk/src/java/lineageos/hardware/LineageHardwareManager.java b/sdk/src/java/lineageos/hardware/LineageHardwareManager.java
+index f60291b472ca32bc28c5df6bfcdd4e64d4f967d7..b586a145cfde1ddb0a81830e83aafed4e21ade95 100644
+--- a/sdk/src/java/lineageos/hardware/LineageHardwareManager.java
++++ b/sdk/src/java/lineageos/hardware/LineageHardwareManager.java
+@@ -18,6 +18,7 @@ package lineageos.hardware;
+ 
+ import android.content.Context;
+ import android.hidl.base.V1_0.IBase;
++import android.os.Build;
+ import android.os.IBinder;
+ import android.os.RemoteException;
+ import android.os.ServiceManager;
+@@ -259,6 +260,12 @@ public final class LineageHardwareManager {
+     }
+ 
+     private boolean isSupportedHIDL(int feature) {
++        // SM-T311 has no vendor.lineage HIDL implementations. Repeated optional
++        // getService(true) probes issue futile ctl.interface_start requests at
++        // boot. Keep the working LineageHardwareService software fallback.
++        if ("lt013g".equals(Build.DEVICE)) {
++            return false;
++        }
+         if (!mHIDLMap.containsKey(feature)) {
+             mHIDLMap.put(feature, getHIDLService(feature));
+         }

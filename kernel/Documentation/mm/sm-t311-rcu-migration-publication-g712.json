@@ -1,0 +1,89 @@
+{
+  "stage": "G712",
+  "checks": {
+    "G711_previous_source_and_SC_gates": true,
+    "ext4_three_regular_pagecache_mapping_variants": true,
+    "ext4_ordered_writeback_use_buffer_migrate_folio": true,
+    "ext4_journal_data_uses_norefs_buffer_migration": true,
+    "buffer_migrate_no_buffers_dispatches_migrate_folio": true,
+    "buffer_migrate_with_buffers_dispatches_filemap_migrate_folio": true,
+    "buffer_migration_has_extra_refcount_and_buffer_lock_criteria": true,
+    "data_copied_before_xarray_replacement_call": true,
+    "flag_transfer_after_XArray_replacement_call": true,
+    "XArray_store_done_under_irq_lock": true,
+    "migration_flags_must_not_be_described_as_atomic_XArray_transaction": true,
+    "migration_does_not_explicitly_copy_PG_rcu_free": true,
+    "migration_device_has_same_post_publication_flag_copy": true,
+    "aio_has_later_flags_transfer_under_completion_lock": true,
+    "RCU_raw_reader_checks_tag_before_XArray_reload": true,
+    "tagging_ordinary_path_has_key_guard": true,
+    "old_tagged_source_deferred_but_new_unmarked_folio_is_not": true,
+    "staged_G692_setter_denies_rcu_ON": true,
+    "normal_refcounted_get_then_reload": true,
+    "G700_host_binary_sha_kept": true,
+    "all_252_source_interleavings": true,
+    "actual_destination_can_be_published_untagged": true,
+    "late_copy_has_published_untagged_window": true,
+    "late_copy_only_marks_after_data_copy": true,
+    "prepublish_copy_eliminates_tag_absence_under_SC_model": true,
+    "prepublish_tag_happens_after_data_ready_in_model": true,
+    "as_built_no_read_new_tag_from_migration": true,
+    "all_six_source_mutations_rejected": true
+  },
+  "mutated_source_controls": {
+    "omit_XArray_store": true,
+    "omit_late_folio_flag_copy": true,
+    "remove_ext4_journalled_callback": true,
+    "disable_refcounted_fallback": true,
+    "permit_experimental_RCU_enable": true,
+    "remove_migration_buffer_lock": true
+  },
+  "publication_model": {
+    "as_built_no_tag_transfer": {
+      "total_interleavings": 252,
+      "reader_saw_old": 186,
+      "reader_saw_new_untagged": 66,
+      "reader_saw_new_tagged": 0,
+      "transient_flag_missing_at_published_dst": 756,
+      "safe_fallback_on_untagged": 66,
+      "unsafe_new_tagged_before_data_ready": 0,
+      "witness_untagged": "reader_loaded_new_between_publish_and_tag"
+    },
+    "hypothetical_late_tag_copy": {
+      "total_interleavings": 252,
+      "reader_saw_old": 186,
+      "reader_saw_new_untagged": 24,
+      "reader_saw_new_tagged": 42,
+      "transient_flag_missing_at_published_dst": 252,
+      "safe_fallback_on_untagged": 24,
+      "unsafe_new_tagged_before_data_ready": 0,
+      "witness_untagged": "reader_loaded_new_between_publish_and_tag"
+    },
+    "hypothetical_prepublication_tag": {
+      "total_interleavings": 252,
+      "reader_saw_old": 186,
+      "reader_saw_new_untagged": 0,
+      "reader_saw_new_tagged": 66,
+      "transient_flag_missing_at_published_dst": 0,
+      "safe_fallback_on_untagged": 0,
+      "unsafe_new_tagged_before_data_ready": 0,
+      "witness_untagged": null
+    }
+  },
+  "established_source_order": "folio_mc_copy before __folio_migrate_mapping XArray publish, then folio_migrate_flags (not atomic with slot publish)",
+  "ext4_pagecache_migration": "regular+delalloc buffer_migrate_folio; journalled buffer_migrate_folio_norefs; both through filemap_migrate_folio and later flag transfer",
+  "critical_limits": [
+    "The 252 schedule toy model deliberately represents ONE reader and ONE migration writer; it does not test subsequent destination eviction/reuse modeled in G711.",
+    "A tag checked as zero triggers slow/refcounted fallback; the source-level publication window alone is NOT proof of data corruption.",
+    "Prepublish tagging is not authorized: requires correct data and lifetime publication ordering, all filesystem callbacks, lock constraints, memory pressure and ARMv7/LKMM proof.",
+    "No-ref RCU stays fail-closed; G700 remains host-only and no physical BOOT/recovery was modified."
+  ],
+  "candidate_release_decision": "KEEP_G700_OFF_AND_SLOW_REFCOUNTED_FALLBACK",
+  "migration_tag_patch_approved": false,
+  "RCU_no_ref_ON_approved": false,
+  "S1_LKMM_closed": false,
+  "S2_PFN_ABA_closed": false,
+  "S3_ARMv7_cache_closed": false,
+  "G700_flashed": false,
+  "new_runtime_kernel_C_change": false
+}

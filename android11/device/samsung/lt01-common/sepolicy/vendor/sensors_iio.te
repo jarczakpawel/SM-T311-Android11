@@ -1,0 +1,8 @@
+# IIO attributes are read-only hardware state. Device-specific genfs labels
+# will replace this broad rule once exact stable sysfs physical paths are frozen.
+allow hal_sensors_default sysfs:dir r_dir_perms;
+allow hal_sensors_default sysfs:file r_file_perms;
+allow hal_sensors_default sysfs:lnk_file r_file_perms;
+
+# Keep the Android 11 native HAL able to read the relabeled IIO attributes.
+allow hal_sensors_default sysfs_lt013g_legacy_iio:file r_file_perms;

@@ -1,0 +1,52 @@
+C SMT311+AddrABA+FlagSizeReload
+
+(*
+ * G654 RISK EXPLORER, NOT ACTUAL KERNEL LOCKING / FREE MODEL:
+ * XArray pointer ID 1 initially references address A generation 1.
+ * Writer clears slot, recycles A as generation 2, marks HOT and writes
+ * the same pointer ID 1. Read-side equality can be fooled by address ABA.
+ *
+ * The extra 'generation' is a TEST ORACLE ONLY, absent from filemap code.
+ * A permitted outcome would demand further work; it does not prove UAF,
+ * wrong data, or a real Linux execution path. Writer ordering, RCU grace,
+ * allocation, inode lifetime and lock serialization are NOT modeled.
+ *)
+
+{
+slot=1;
+generation=1;
+size=4096;
+flag=0;
+}
+
+P0(int *slot, int *generation, int *size, int *flag)
+{
+	int r0;
+	int r1;
+	int r2;
+	int r3;
+	int r4;
+
+	rcu_read_lock();
+	r0 = READ_ONCE(*slot);
+	r1 = READ_ONCE(*flag);
+	smp_rmb();
+	r2 = READ_ONCE(*size);
+	smp_rmb();
+	r3 = READ_ONCE(*slot);
+	smp_rmb();
+	r4 = READ_ONCE(*generation);
+	rcu_read_unlock();
+}
+
+P1(int *slot, int *generation, int *size, int *flag)
+{
+	WRITE_ONCE(*slot, 0);
+	WRITE_ONCE(*flag, 0);
+	WRITE_ONCE(*generation, 2);
+	WRITE_ONCE(*size, 4096);
+	WRITE_ONCE(*slot, 1);
+	WRITE_ONCE(*flag, 1);
+}
+
+exists (0:r0=1 /\ 0:r1=1 /\ 0:r2=4096 /\ 0:r3=1 /\ 0:r4=2)

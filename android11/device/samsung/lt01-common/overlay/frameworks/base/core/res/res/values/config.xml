@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- TAB3 Headset is an ALSA input-switch device (EV_SW). -->
+    <bool name="config_useDevInputEventForAudioJack">true</bool>
+</resources>

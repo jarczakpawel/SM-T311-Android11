@@ -1,0 +1,58 @@
+{
+  "stage": "G669",
+  "source_gates_pass": 24,
+  "gates": {
+    "board_config_vipt": true,
+    "board_config_smp": true,
+    "arm_pte_checks_valid_user": true,
+    "arm_pte_avoids_special_sync": true,
+    "arm_pte_sync_before_publish": true,
+    "armv7_update_mmu_cache_is_noop": true,
+    "armv7_real_sync_defined": true,
+    "arm_alias_selected_by_runtime_cacheid": true,
+    "arm_sync_flushes_dirty_kernel_alias": true,
+    "arm_nonalias_nonexec_skips_flush": true,
+    "arm_flush_lowmem_direct_map": true,
+    "arm_flush_alias_colour": true,
+    "arm_flush_cachepage_alias": true,
+    "arm_mmap_file_colour_alignment": true,
+    "arm_fixed_shared_alias_rejection": true,
+    "file_ext4_mkwrite_hook": true,
+    "mm_shared_fault_mkwrite_before_pte": true,
+    "mm_set_pte_uses_set_ptes": true,
+    "mm_fault_reuse_flushes_before_marking_writable": true,
+    "ext4_mkwrite_takes_shared_invalidate": true,
+    "ext4_mkwrite_has_folio_identity_check": true,
+    "mmap_counter_inc_precedes_region": true,
+    "noref_counter_guard_precedes_rcu": true,
+    "noref_copy_lacks_mmap_lock": true
+  },
+  "mutated_source_rejections": {
+    "pte_flush_deleted": [
+      "arm_pte_sync_before_publish"
+    ],
+    "arm_dcache_clean_flush_deleted": [
+      "arm_sync_flushes_dirty_kernel_alias"
+    ],
+    "arm_colour_alias_deleted": [
+      "arm_flush_alias_colour"
+    ],
+    "shared_fault_page_mkwrite_deleted": [
+      "mm_shared_fault_mkwrite_before_pte"
+    ],
+    "arm_map_fixed_colour_check_deleted": [
+      "arm_fixed_shared_alias_rejection"
+    ],
+    "reader_mmap_guard_deleted": [
+      "noref_counter_guard_precedes_rcu"
+    ]
+  },
+  "key_arch_correction": "For ARMv7 update_mmu_cache_range is an intentional no-op. set_ptes performs __sync_icache_dcache before publishing valid user PTEs. An earlier G668 guard observation still need not exclude later writable mmap creation and write while no-ref RCU copy is in progress.",
+  "not_proven": [
+    "No physical Cortex-A9 wrong-byte read, UAF, cache alias failure or security issue observed.",
+    "Presence of PTE sync/flush is not a whole-core coherence or ordering proof.",
+    "Actual physical D-cache VIPT aliasing vs nonaliasing runtime classification not read.",
+    "Host G665 XArray userspace binary remains unrun without liburcu-dev.",
+    "S0 PASS, S1 ACTIVE, S2 and S3 BLOCKED; no-ref RCU remains OFF."
+  ]
+}

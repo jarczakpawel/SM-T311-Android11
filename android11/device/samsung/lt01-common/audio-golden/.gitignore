@@ -1,0 +1,3 @@
+# G507: OEM-compatible golden HAL ELF is a private archived binary.
+# It is byte-for-byte checked against physical device but not published in source Git.
+/audio.primary.lt013g.so

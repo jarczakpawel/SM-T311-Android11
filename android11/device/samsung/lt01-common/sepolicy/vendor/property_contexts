@@ -1,0 +1,3 @@
+ctl.restart$cpboot-daemon u:object_r:lt013g_modem_watchdog_ctl_prop:s0 exact string
+vendor.smt311.usb.bootstrap u:object_r:lt013g_usb_bootstrap_prop:s0 exact string
+vendor.smt311.usb.fallback u:object_r:lt013g_usb_bootstrap_prop:s0 exact string

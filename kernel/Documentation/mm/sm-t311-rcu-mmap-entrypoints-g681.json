@@ -1,0 +1,78 @@
+{
+  "stage": "G681",
+  "scope": "source-anchored writable VMA origin audit",
+  "source_guards": {
+    "rcu_read_lock_before_writable_count": true,
+    "ref_free_rcu_copy_no_mmap_lock": true,
+    "user_faults_disabled_before_copy": true,
+    "rcu_reader_releases_after_user_faults_restored": true,
+    "mmap_writer_requires_mmap_lock": true,
+    "mmap_writer_publish_count_then_gp_then_vma": true,
+    "mmap_gp_predicated_on_ext4_magic": true,
+    "mmap_temp_count_balanced": true,
+    "other_positive_counter_origin_is_prior_existing_vma": true,
+    "vma_split_keeps_original_vma": true,
+    "fork_clones_prior_vma_and_adds_positive_count": true,
+    "fork_holds_parent_mmap_lock": true,
+    "mprotect_does_not_increment_mapping_count": true,
+    "mremap_does_not_increment_mapping_count": true,
+    "memfd_rollback_only_after_deny": true,
+    "counter_counts_shared_maywrite_not_only_current_write": true,
+    "unmap_removes_positive_count": true,
+    "rcu_mark_precedes_as_rcu_read_enable": true,
+    "reader_is_eligible_only_with_as_rcu_read": true,
+    "RCU_experiment_compile_time_guard_only": true
+  },
+  "source_guards_passed": 20,
+  "mutated_source_rejected": {
+    "reader_check_before_rcu": [
+      "rcu_read_lock_before_writable_count"
+    ],
+    "reader_may_sleep_on_fault": [
+      "rcu_read_lock_before_writable_count",
+      "user_faults_disabled_before_copy"
+    ],
+    "new_mapping_gp_deleted": [
+      "mmap_writer_publish_count_then_gp_then_vma"
+    ],
+    "new_mapping_count_after_gp": [
+      "mmap_writer_publish_count_then_gp_then_vma",
+      "mmap_temp_count_balanced"
+    ],
+    "fork_does_not_copy_existing_vma": [
+      "fork_clones_prior_vma_and_adds_positive_count",
+      "fork_holds_parent_mmap_lock"
+    ],
+    "fork_count_untracked": [
+      "fork_clones_prior_vma_and_adds_positive_count"
+    ],
+    "split_count_untracked": [
+      "other_positive_counter_origin_is_prior_existing_vma"
+    ],
+    "remove_mutual_exclusion_vma": [
+      "mmap_writer_requires_mmap_lock"
+    ],
+    "remove_memory_refcheck": [
+      "reader_is_eligible_only_with_as_rcu_read"
+    ],
+    "memfd_writable_rollback_missing": [
+      "memfd_rollback_only_after_deny"
+    ]
+  },
+  "conclusions": [
+    "mmap_region is source-visible first transition from zero to positive shared-maywrite count.",
+    "fork duplicates an existing positive-count source VMA while parent remains mapped.",
+    "vma_prepare split inserts beside a pre-existing source VMA; it increments the existing source count.",
+    "mprotect changes write permission of previously VM_MAYWRITE shared mapping; no count increment in mm/mprotect.c.",
+    "mremap moves/extends existing VMAs, no new writable count increment found.",
+    "memfd mapping_allow_writable here only rolls back deny_writable on an error and does not create an ext4 VMA.",
+    "filemap_read_rcu_batch does not take mmap_lock and disables faults during its bounded copy."
+  ],
+  "unproven": [
+    "Full lockdep proof for all kernel RCU read-side critical sections while mmap_lock write is held.",
+    "Real completion/latency of synchronize_rcu under mmap_lock on Cortex-A9, especially under page faults.",
+    "All driver/filesystem-specific mm hooks and archived code outside inspected entrypoints.",
+    "Cache coherency under actual ARMv7 aliasing; no physical RCU ON testing."
+  ],
+  "safety": "S0 PASS; S1 ACTIVE; S2/S3 BLOCKED; runtime still staged not installed"
+}

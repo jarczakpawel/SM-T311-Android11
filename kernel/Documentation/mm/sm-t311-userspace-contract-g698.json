@@ -1,0 +1,108 @@
+{
+  "stage": "G698",
+  "date": "2026-10-21",
+  "scope": "Cross-tree source contract and ONE passive Android G650 observation, NOT a release-off boot",
+  "android_device_tree_used": "device/samsung/lt013g",
+  "common_sepolicy_and_ueventd": "device/samsung/lt01-common",
+  "positive_source_device_contracts": {
+    "physical_G650_booted_and_enforcing": true,
+    "observed_RIL_and_modem_services_running": true,
+    "observed_GNSS_and_isolated_stock_service_running": true,
+    "kernel_DTS_bcm4752_gpio_and_clock": true,
+    "kernel_GPS_attribute_dedicated_sysfs_power_and_0664": true,
+    "stock_GNSS_same_exact_sysfs_power_path_as_kernel": true,
+    "GPS_serial_TTY_consistent_in_kernel_and_init": true,
+    "GPS_serial_policy_actual_group_and_type": true,
+    "GPS_power_genfs_and_SELinux_permit_domain_not_shell": true,
+    "GPS_init_uses_isolated_stock_runtime_and_seclabel": true,
+    "HIDL_GNSS_manifest_v1_service": true,
+    "XMM6262_DTS_control_and_driver_CONFIG": true,
+    "modem_device_init_permission_and_file_contexts": true,
+    "modem_live_nodes_match_declared_RADIO_type_and_DAC": true,
+    "RIL_init_keeps_root_S0_and_stock_libsec_RIL": true,
+    "RIL_healthy_link_restart_does_not_reset_CP": true,
+    "binderfs_expected_both_kernel_and_live": true,
+    "serial_DWC2_audio_and_GNSS_kconfigs_survive_RCU_OFF": true,
+    "Android_vendor_bootimg_make_still_old_not_G696": true,
+    "no_claim_of_user_space_runtime_validation_for_new_boot": true
+  },
+  "positive_count": 20,
+  "deliberately_broken_contracts_detected": {
+    "gps_kernel_node_renamed": [
+      "kernel_GPS_attribute_dedicated_sysfs_power_and_0664"
+    ],
+    "gps_legacy_domain_too_broad": [
+      "GPS_init_uses_isolated_stock_runtime_and_seclabel"
+    ],
+    "gps_power_genfs_missing": [
+      "GPS_power_genfs_and_SELinux_permit_domain_not_shell"
+    ],
+    "gps_serial_context_wrong": [
+      "GPS_serial_policy_actual_group_and_type"
+    ],
+    "umts_init_permissions_gone": [
+      "modem_device_init_permission_and_file_contexts"
+    ],
+    "RIL_uses_wrong_radio_library": [
+      "RIL_init_keeps_root_S0_and_stock_libsec_RIL"
+    ],
+    "modem_config_disabled": [
+      "XMM6262_DTS_control_and_driver_CONFIG",
+      "serial_DWC2_audio_and_GNSS_kconfigs_survive_RCU_OFF"
+    ],
+    "binderfs_disabled": [
+      "binderfs_expected_both_kernel_and_live"
+    ],
+    "unsafe_claim_device_booted": [
+      "no_claim_of_user_space_runtime_validation_for_new_boot"
+    ]
+  },
+  "physical_passive_observation": {
+    "timestamp_local": "2026-10-21 05:15-05:40 Europe/Warsaw (single read-only observation, approximate)",
+    "boot_completed": "1",
+    "kernel": "7.3.0-pjarczak",
+    "selinux": "Enforcing",
+    "ril_daemon": "running",
+    "cpboot_daemon": "running",
+    "audio_ril": "running",
+    "gnss_service": "running",
+    "legacy_gps_v195": "running",
+    "sim_state": "LOADED",
+    "ttySAC1_label": "lt013g_gps_serial_device",
+    "ttySAC1_mode": "crw-rw----",
+    "ttySAC1_owner": "root",
+    "ttySAC1_group": "system",
+    "umts_boot0_label": "radio_device",
+    "umts_boot0_mode": "crw-rw----",
+    "umts_ipc0_label": "radio_device",
+    "umts_ipc0_mode": "crw-rw----",
+    "umts_owner": "system",
+    "umts_group": "radio",
+    "ttyS0_label": "serial_device",
+    "ttyS0_mode": "crw-------",
+    "ttyS0_owner": "root",
+    "binderfs_binder_label": "binder_device",
+    "unprivileged_gps_power_file_readable": false,
+    "gps_power_kernel_object_created_on_boot_proven": false,
+    "gnss_fix_tested": false,
+    "ril_call_tested": false,
+    "usb_otg_stress_tested": false,
+    "rcu_off_physically_booted": false,
+    "BOOT_p9_SHA_read_in_G698": false
+  },
+  "limitations": [
+    "Single snapshot of existing physical G650: services running, no call/SMS/GNSS-fix/audio/USB test and no new BOOT.",
+    "SELinux shell denial at /sys/class/sec/gps/GPS_PWR_EN/value does not demonstrate a GNSS domain denial; kernel creates a dedicated 0664 sysfs attribute and Android grants GPS domain explicit access.",
+    "Static source and present device-node contexts do not prove complete Android ioctl/syscall ABI or physical RCU-OFF compatibility.",
+    "No live BOOT p9 read, recovery test, backup, reboot, OTA creation, kernel flashing or PIN activity."
+  ],
+  "flash_authorized": false,
+  "physical_G650_unchanged": true,
+  "physical_RCU_OFF_tested": false,
+  "four_kernel_executable_source_paths_staged_not_installed": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

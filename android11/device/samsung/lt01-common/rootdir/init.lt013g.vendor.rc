@@ -1,0 +1,28 @@
+# SM-T311 PJARCZAK v130 - real Android second-stage mount graph.
+on early-init
+    mkdir /efs 0771 radio system
+    mkdir /cache 0770 system cache
+    mkdir /data 0771 system system
+
+on fs
+    mount_all /vendor/etc/fstab.lt013g
+
+# Linux 7.3: the ZRAM sysfs node and vendor fstab may not yet be available
+# when the early fs action runs. Configure swap after mounts are settled.
+# Do not initialize /dev/block/zram0 twice. No eMMC backing, no OTG changes.
+on post-fs-data
+    swapon_all /vendor/etc/fstab.lt013g
+    mkdir /data/vendor/wifi 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa/sockets 0770 wifi wifi
+    restorecon_recursive /data/vendor/wifi
+
+
+# G408: reduce zram swap read amplification without eMMC writes.
+# 'write' from this VENDOR rc executes in vendor_init SELinux subcontext.
+# /proc/sys/vm/page-cluster is proc_page_cluster and vendor_init may write it.
+# Physical G379 /proc/sys/vm/swappiness is labeled generic proc and a vendor
+# write to it is not authorized; retain the stable 60 default pending measured
+# tuning rather than granting broad vendor_init proc write access.
+on boot
+    write /proc/sys/vm/page-cluster 0

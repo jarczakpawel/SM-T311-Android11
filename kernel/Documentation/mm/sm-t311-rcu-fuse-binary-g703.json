@@ -1,0 +1,141 @@
+{
+  "stage": "G703",
+  "profile": "ARM EABI5, two existing full host vmlinux builds, no compilation",
+  "five_FUSE_function_lengths": {
+    "experiment": {
+      "fuse_file_io_open": {
+        "arm_instructions": 108,
+        "literal_pool_words": 0,
+        "linked_bytes": 432,
+        "call_count": 6
+      },
+      "fuse_copy_folio": {
+        "arm_instructions": 485,
+        "literal_pool_words": 1,
+        "linked_bytes": 1944,
+        "call_count": 29
+      },
+      "fuse_conn_init": {
+        "arm_instructions": 154,
+        "literal_pool_words": 1,
+        "linked_bytes": 620,
+        "call_count": 11
+      },
+      "fuse_ctl_add_conn": {
+        "arm_instructions": 114,
+        "literal_pool_words": 1,
+        "linked_bytes": 460,
+        "call_count": 11
+      },
+      "fuse_direct_io": {
+        "arm_instructions": 585,
+        "literal_pool_words": 0,
+        "linked_bytes": 2340,
+        "call_count": 45
+      }
+    },
+    "release": {
+      "fuse_file_io_open": {
+        "arm_instructions": 96,
+        "literal_pool_words": 0,
+        "linked_bytes": 384,
+        "call_count": 6
+      },
+      "fuse_copy_folio": {
+        "arm_instructions": 481,
+        "literal_pool_words": 1,
+        "linked_bytes": 1928,
+        "call_count": 29
+      },
+      "fuse_conn_init": {
+        "arm_instructions": 148,
+        "literal_pool_words": 1,
+        "linked_bytes": 596,
+        "call_count": 11
+      },
+      "fuse_ctl_add_conn": {
+        "arm_instructions": 104,
+        "literal_pool_words": 1,
+        "linked_bytes": 420,
+        "call_count": 10
+      },
+      "fuse_direct_io": {
+        "arm_instructions": 586,
+        "literal_pool_words": 0,
+        "linked_bytes": 2344,
+        "call_count": 45
+      }
+    }
+  },
+  "five_FUSE_object_compilation_fingerprints": {
+    "experiment": {
+      "file": {
+        "object_sha256": "062047db612b8808ac68af5a4248e4670a934a9f828303b6c4a8db5f26935e7a",
+        "command_sha256": "a7c6ab8fbd612cd5224b748af53fb4ae5d2ad2500585e0ff097d36e5de472cbb"
+      },
+      "dev": {
+        "object_sha256": "902811bfc3b99669612abe990c85b07df4dc9d1e0365a66ad053a6f6e9e0b8e7",
+        "command_sha256": "aeb7623aecc85a71bccc3f779c9f5941c64c9a71b4d1d943335bf63439b39208"
+      },
+      "inode": {
+        "object_sha256": "1c26713ee935450bb0e304ff883047417accdbc467c328ed70cc7186a365cc16",
+        "command_sha256": "54ec4e782876b004ab531918498e9463da022ccdf618453d271aac24f76890ff"
+      },
+      "control": {
+        "object_sha256": "e8a5359ab89323a690ab4ed71157d1cd52eaa78f5d8b2f7a4f680be8d9c7bdce",
+        "command_sha256": "0b6b9f9d9330d19ca304baa14a4ed73377251ba772bff8e8c813452710b507b9"
+      },
+      "iomode": {
+        "object_sha256": "35f3628c1c3e84210a8454a2f25061775630ed796c2b3abd1553c52b28c0e93e",
+        "command_sha256": "9fb3fb80a793e10655b94f2918bea9c77acbd8460d3d35ac1327a287b8d6f0a8"
+      }
+    },
+    "release": {
+      "file": {
+        "object_sha256": "b45df3a74eac214dcbe573a867571637f4a62502594fa3e08b5e601aab3be521",
+        "command_sha256": "a7c6ab8fbd612cd5224b748af53fb4ae5d2ad2500585e0ff097d36e5de472cbb"
+      },
+      "dev": {
+        "object_sha256": "9ec71fc5063ff80b8e88d65debb7f28a6002adb6de7a6be16e40619da03289f3",
+        "command_sha256": "aeb7623aecc85a71bccc3f779c9f5941c64c9a71b4d1d943335bf63439b39208"
+      },
+      "inode": {
+        "object_sha256": "1700db02490c7bb70dc82d16c6fa497df9f17dae71755d9c7654086f679b8386",
+        "command_sha256": "54ec4e782876b004ab531918498e9463da022ccdf618453d271aac24f76890ff"
+      },
+      "control": {
+        "object_sha256": "eaf483bb159f0edadb5d103a16b86c758f1d97e7aa6d6191573e5263d05e4755",
+        "command_sha256": "0b6b9f9d9330d19ca304baa14a4ed73377251ba772bff8e8c813452710b507b9"
+      },
+      "iomode": {
+        "object_sha256": "dcc2186c5a6ec04202f349dd08e077b644838a0a49374718e3a7f5d81361c2a8",
+        "command_sha256": "9fb3fb80a793e10655b94f2918bea9c77acbd8460d3d35ac1327a287b8d6f0a8"
+      }
+    }
+  },
+  "checks": {
+    "pinned_existing_ARM32_ELF_hashes": true,
+    "exact_five_FUSE_sized_symbols": true,
+    "all_A32_instruction_lengths_match_nm": true,
+    "same_FUSE_compile_commands_but_different_objects": true,
+    "experiment_two_Kconfig_flags_ON_release_OFF": true,
+    "DEBUG_FS_FUSE_kept_built_in": true,
+    "fuse_conn_has_conditional_atomic64_field": true,
+    "fuse_conn_init_memset_240_to_224": true,
+    "experiment_atomic_counter_in_passthrough_open_only": true,
+    "experiment_extra_passthrough_opens_control_entry": true,
+    "FUSE_folio_RCU_tag_check_conditional_by_PAGE_RCU_FREE": true,
+    "FUSE_direct_io_member_load_offset_shift": true,
+    "source_fs_fuse_identical_since_G650": true,
+    "not_runtime_ABI_or_perf_proof": true,
+    "no_flash_permission": true
+  },
+  "conclusion": "Different FUSE binary is explained by conditional diagnostics, struct fuse_conn layout and PAGE_RCU_FREE page-flag logic; semantics and ABI are not proven equivalent",
+  "fuse_conn_initializer_size_EXP": 240,
+  "fuse_conn_initializer_size_OFF": 224,
+  "passthrough_opens_diagnostic_in_G700": false,
+  "RCU_free_flag_in_G700": false,
+  "physical_G700_FUSE_tested": false,
+  "hardware_qualification": "BLOCKED",
+  "flash_authorized": false
+}

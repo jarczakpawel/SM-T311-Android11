@@ -1,0 +1,8 @@
+cc_binary {
+    name: "t311_alsa_period_isolated_offline",
+    vendor: true,
+    srcs: ["main.c"],
+    shared_libs: ["libtinyalsa"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c11", "-O2", "-D_POSIX_C_SOURCE=200809L"],
+    include_dirs: ["external/tinyalsa/include"],
+}

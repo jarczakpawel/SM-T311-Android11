@@ -1,0 +1,91 @@
+{
+  "stage": "G688",
+  "result": "ARM32 linked release OFF shmem stub call eliminated; experiment path preserved; HOST ONLY",
+  "source_gates": {
+    "original_release_shmem_stub_call_existed": true,
+    "G688_release_guard_has_constant_zero": true,
+    "experiment_always_falls_back_for_shmem": true,
+    "keep_upstream_ref_free_route_when_available": true,
+    "ordinary_filemap_G687_opt_retained": true,
+    "release_opted_out_PAGE_RCU_FREE": true,
+    "experimental_overlay_opted_in": true,
+    "kernel_release_pinned": true
+  },
+  "source_gates_pass": 8,
+  "changed_source_mutants_rejected": {
+    "restore_original_shmem_stub": [
+      "G688_release_guard_has_constant_zero",
+      "keep_upstream_ref_free_route_when_available"
+    ],
+    "remove_available_feature_shmem_call": [
+      "G688_release_guard_has_constant_zero",
+      "keep_upstream_ref_free_route_when_available"
+    ],
+    "remove_experimental_shmem_guard": [
+      "experiment_always_falls_back_for_shmem"
+    ],
+    "remove_filemap_G687_release_guard": [
+      "ordinary_filemap_G687_opt_retained"
+    ],
+    "release_feature_accidentally_on": [
+      "release_opted_out_PAGE_RCU_FREE"
+    ],
+    "experimental_feature_accidentally_off": [
+      "experimental_overlay_opted_in"
+    ]
+  },
+  "linked_ARMv7_disassembly_checks": {
+    "shmem_release_no_stub_call": true,
+    "shmem_experiment_no_ext4_only_reader_call": true,
+    "filemap_release_no_stub_call": true,
+    "filemap_experiment_still_calls_reader": true,
+    "release_rcu_stub_returns_zero": true,
+    "filemap_rcu_key_absent_from_release": true
+  },
+  "linked_disassembly_negative_controls": {
+    "inject_stub_call_into_release_shmem_detected": true,
+    "missing_expected_experiment_filemap_call_detected": true
+  },
+  "linked_object_hashes": {
+    "release_OFF": {
+      "vmlinux": {
+        "sha256": "e929387d60fec5233cab1c36ccdb6ad50e2d7699ccc22c7d231f9992e8cc97c8",
+        "bytes": 24734388
+      },
+      "arch/arm/boot/zImage": {
+        "sha256": "1c2dd2e521cbfec48c95c89518487b5cfd1887027e7f9d74146027d777e86c49",
+        "bytes": 6299344
+      },
+      "mm/shmem.o": {
+        "sha256": "9deeaf67d0ccc296ef2122cf6efaf0e004e2967c8652bd981dec01f28e374031",
+        "bytes": 61528
+      }
+    },
+    "experiment_test": {
+      "vmlinux": {
+        "sha256": "6674571cbe202e69692a9b9279e6eb2b629b108d390719fb8296fd2e79f44ed4",
+        "bytes": 25128244
+      },
+      "arch/arm/boot/zImage": {
+        "sha256": "5d72282b95b43ef9309a0d4b1eaf4077f15118daece95882f784f1d0d36a82dd",
+        "bytes": 6384904
+      },
+      "mm/shmem.o": {
+        "sha256": "9deeaf67d0ccc296ef2122cf6efaf0e004e2967c8652bd981dec01f28e374031",
+        "bytes": 61528
+      }
+    }
+  },
+  "source_runtime_paths_STAGED_NOT_INSTALLED": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ],
+  "limits": [
+    "No Cortex-A9 measured benchmark: assembly call removal does not quantify speedup.",
+    "No change to experimental RCU safety; S2/S3 BLOCKED and no physical RCU ON.",
+    "Release stub symbol still linked for other users; shmem/filemap callers shown skip it.",
+    "Experimental ext4 mmap GP still expensive even at key OFF; host-only kernels are not Samsung BOOT images."
+  ]
+}

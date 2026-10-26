@@ -1,0 +1,101 @@
+diff --git a/src/com/android/camera/CaptureModule.java b/src/com/android/camera/CaptureModule.java
+index 00a58cd3c463056bc816afe7ae4dfa31d5dbd213..c4618bf2aec1ac6ecb60af234461f1a8d23a0bcc 100644
+--- a/src/com/android/camera/CaptureModule.java
++++ b/src/com/android/camera/CaptureModule.java
+@@ -1531,7 +1531,8 @@ public class CaptureModule extends CameraModule implements
+             return;
+         }
+         cancelCountDown();
+-        mAppController.freezeScreenUntilPreviewReady();
++        Log.i(TAG, "SMT311_Q35S_CAMERA_SWITCH_NEUTRAL_COVER");
++        mAppController.getCameraAppUI().showModeCoverUntilPreviewReady();
+         initSurfaceTextureConsumer();
+     }
+ 
+diff --git a/src/com/android/camera/PhotoModule.java b/src/com/android/camera/PhotoModule.java
+index f29b08eda5db5bf3d06aa38cbc56a95ddc36442f..5242ed1689bb96ced2739275681b844773c69aad 100644
+--- a/src/com/android/camera/PhotoModule.java
++++ b/src/com/android/camera/PhotoModule.java
+@@ -233,6 +233,11 @@ public class PhotoModule
+     public long mJpegCallbackFinishTime;
+     public long mCaptureStartTime;
+ 
++    // G821: passive, Samsung-only still-capture diagnosis. Do not forcibly
++    // re-enable the shutter while the HAL owns an in-flight JPEG buffer.
++    private static final long SMT311_JPEG_CALLBACK_DIAG_TIMEOUT_MS = 8000L;
++    private long mLastJpegCallbackCaptureStartTime = -1L;
++
+     // This handles everything about focus.
+     private FocusOverlayManager mFocusManager;
+ 
+@@ -865,6 +870,9 @@ public class PhotoModule
+         @Override
+         public void onPictureTaken(final byte[] originalJpegData, final CameraProxy camera) {
+             Log.i(TAG, "onPictureTaken");
++            // G821: mark the callback before any camera preview/session changes.
++            // The callback can arrive while the UI is being recreated.
++            mLastJpegCallbackCaptureStartTime = mCaptureStartTime;
+             mAppController.setShutterEnabled(true);
+             if (mPaused) {
+                 return;
+@@ -1154,6 +1162,27 @@ public class PhotoModule
+ 
+         mNamedImages.nameNewImage(mCaptureStartTime);
+ 
++        if ("lt013g".equals(Build.DEVICE)) {
++            final long capturedAt = mCaptureStartTime;
++            mHandler.postDelayed(new Runnable() {
++                @Override
++                public void run() {
++                    // Only report the SAME accepted capture while Camera2 is
++                    // still open and awaiting the corresponding JPEG callback.
++                    // Do not restart the camera or issue another capture: that
++                    // could strand still-owned HAL/BufferQueue buffers.
++                    if (!mPaused && mCameraDevice != null
++                            && mCaptureStartTime == capturedAt
++                            && mLastJpegCallbackCaptureStartTime != capturedAt
++                            && mCameraState == SNAPSHOT_IN_PROGRESS) {
++                        Log.e(TAG, "SMT311_G821_JPEG_CALLBACK_TIMEOUT captureStartedMs="
++                                + capturedAt + " captureState=" + mCameraState
++                                + " shutterEnabled=" + mAppController.isShutterEnabled());
++                    }
++                }
++            }, SMT311_JPEG_CALLBACK_DIAG_TIMEOUT_MS);
++        }
++
+         mFaceDetectionStarted = false;
+         return true;
+     }
+diff --git a/src/com/android/camera/VideoModule.java b/src/com/android/camera/VideoModule.java
+index e8222f6d34c67ca38b5ea5ef40ae55b932e290b8..0da611722eb3e7ef690504d61a4550a9e0c399c9 100644
+--- a/src/com/android/camera/VideoModule.java
++++ b/src/com/android/camera/VideoModule.java
+@@ -817,6 +817,15 @@ public class VideoModule extends CameraModule
+         final int previewScreenShortSide = (previewScreenSize.x < previewScreenSize.y ?
+                 previewScreenSize.x : previewScreenSize.y);
+         List<Size> sizes = Size.convert(capabilities.getSupportedPreviewSizes());
++        if ("lt013g".equals(Build.DEVICE)
++                && profile.videoFrameWidth == 1280 && profile.videoFrameHeight == 720) {
++            for (Size size : sizes) {
++                if (size.width() == 1024 && size.height() == 576) {
++                    Log.i(TAG, "SMT311_Q35S_REAR_720P_PREVIEW=1024x576");
++                    return new Point(1024, 576);
++                }
++            }
++        }
+         Size preferred = new Size(capabilities.getPreferredPreviewSizeForVideo());
+         final int preferredPreviewSizeShortSide = (preferred.width() < preferred.height() ?
+                 preferred.width() : preferred.height());
+diff --git a/src/com/android/camera/app/CameraAppUI.java b/src/com/android/camera/app/CameraAppUI.java
+index 44b4d3b1eb8b33eb070219a3f623ab2603a118fc..6349aac8d6dc778952b90f17aef35102b9e6b1e2 100644
+--- a/src/com/android/camera/app/CameraAppUI.java
++++ b/src/com/android/camera/app/CameraAppUI.java
+@@ -1042,7 +1042,7 @@ public class CameraAppUI implements ModeListView.ModeSwitchListener,
+      * top of preview until preview is ready (i.e. camera preview is started and
+      * the first frame has been received).
+      */
+-    private void showModeCoverUntilPreviewReady() {
++    public void showModeCoverUntilPreviewReady() {
+         int modeId = mController.getCurrentModuleIndex();
+         int colorId = R.color.camera_gray_background;;
+         int iconId = CameraUtil.getCameraModeCoverIconResId(modeId, mController.getAndroidContext());

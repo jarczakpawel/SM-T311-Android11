@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- TAB3 Headset is an ALSA input-switch device (EV_SW). -->
+    <bool name="config_useDevInputEventForAudioJack">true</bool>
+    <!-- G879: actual SM-T311 GPX2_4 hall sensor generates EV_SW/SW_LID via
+         gpio-keys. AOSP PhoneWindowManager already handles standard lid sleep
+         and wake; do not spawn a GPIO polling daemon or custom sensor HAL.
+         This supplies the default for *fresh* SettingsProvider databases;
+         existing installations keep their current global lid_behavior. -->
+    <bool name="config_lidControlsSleep">true</bool>
+</resources>

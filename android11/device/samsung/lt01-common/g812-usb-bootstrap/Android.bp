@@ -1,0 +1,11 @@
+// G807 source-only experimental replacement for opaque historical USB V115.
+// Do NOT include in production G775 until functionality and SELinux match
+// have been verified on supervised hardware with a recovery path.
+cc_binary {
+    name: "smt311-usb-v115-source-g807",
+    stem: "smt311-usb-v115",
+    srcs: ["g807_usb_bootstrap.c"],
+    compile_multilib: "32",
+    static_executable: true,
+    cflags: ["-std=c11", "-Wall", "-Wextra", "-Werror"],
+}

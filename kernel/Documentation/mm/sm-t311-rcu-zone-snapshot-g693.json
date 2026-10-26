@@ -1,0 +1,39 @@
+{
+  "stage": "G693",
+  "date": "2026-10-21",
+  "device": "Samsung SM-T311",
+  "physical_kernel": "7.3.0-pjarczak",
+  "physical_boot_stage": "G650",
+  "capture": "passive ADB read: /proc/meminfo, /proc/zoneinfo, /proc/vmstat, no memory stress",
+  "page_bytes": 4096,
+  "mem_total_kib": 1483332,
+  "mem_available_kib": 892372,
+  "cma_total_kib": 131072,
+  "normal": {
+    "managed_pages": 203153,
+    "free_pages": 74692,
+    "min_pages": 900,
+    "low_pages": 1125,
+    "high_pages": 1350
+  },
+  "highmem": {
+    "managed_pages": 167680,
+    "free_pages": 308,
+    "min_pages": 128,
+    "low_pages": 314,
+    "high_pages": 500
+  },
+  "vmstat": {
+    "nr_free_pages": 75102,
+    "nr_file_pages": 160524,
+    "nr_shmem": 7899,
+    "nr_free_rcu": 0,
+    "pgfree_rcu": 0,
+    "pgfree_rcu_mark": 0
+  },
+  "limits": [
+    "Single passive point-in-time; zone and filecache counters can change after this snapshot.",
+    "nr_file_pages is global, not solely filecache in ZONE_NORMAL or hot EXT4 pages.",
+    "Any percent-deferred scenario is illustrative, not an observed runtime allocation."
+  ]
+}

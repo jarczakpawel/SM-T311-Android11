@@ -1,0 +1,209 @@
+{
+  "stage": "G663",
+  "status": "DIAGNOSTIC ONLY - S2 BLOCKED",
+  "source_anchors": {
+    "lockless_reader": true,
+    "reader_tag_before_slot_before_mapping": true,
+    "reader_section_contains_copy": true,
+    "single_delete_slot_before_mapping_null": true,
+    "new_tag_under_reference": true,
+    "flagged_folio_deferred_before_buddy": true
+  },
+  "test_model": "source-ordered finite SC interleaving, NOT herd7/LKMM/real XArray allocator",
+  "initially_unmarked_donor": {
+    "counts": {
+      "schedules": 6435,
+      "accepted": 72,
+      "mixed_generation": 6,
+      "flag_copy_mixed": 0,
+      "dead_copy": 0,
+      "foreign_mapping_copy": 0
+    },
+    "example_schedules": {
+      "mixed_generation": [
+        "R_lock",
+        "R_load",
+        "W_erase_old",
+        "W_old_last_put",
+        "W_allocate_new",
+        "W_publish_new",
+        "W_mark_new_under_ref",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "R_mapping",
+        "W_erase_new",
+        "W_new_last_put",
+        "R_copy",
+        "R_unlock"
+      ]
+    }
+  },
+  "initially_marked_donor": {
+    "counts": {
+      "schedules": 6435,
+      "accepted": 102,
+      "mixed_generation": 0,
+      "flag_copy_mixed": 0,
+      "dead_copy": 0,
+      "foreign_mapping_copy": 0
+    },
+    "example_schedules": {}
+  },
+  "counterfactual_missing_grace": {
+    "counts": {
+      "schedules": 6435,
+      "accepted": 72,
+      "mixed_generation": 17,
+      "flag_copy_mixed": 12,
+      "dead_copy": 12,
+      "foreign_mapping_copy": 0
+    },
+    "example_schedules": {
+      "mixed_generation": [
+        "W_erase_old",
+        "W_old_last_put",
+        "W_allocate_new",
+        "W_publish_new",
+        "W_mark_new_under_ref",
+        "R_lock",
+        "R_load",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "R_mapping",
+        "W_erase_new",
+        "W_new_last_put",
+        "R_copy",
+        "R_unlock"
+      ],
+      "flag_copy_mixed": [
+        "W_erase_old",
+        "W_old_last_put",
+        "W_allocate_new",
+        "W_publish_new",
+        "W_mark_new_under_ref",
+        "R_lock",
+        "R_load",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "R_mapping",
+        "W_erase_new",
+        "W_new_last_put",
+        "R_copy",
+        "R_unlock"
+      ],
+      "dead_copy": [
+        "W_erase_old",
+        "W_old_last_put",
+        "W_allocate_new",
+        "W_publish_new",
+        "W_mark_new_under_ref",
+        "R_lock",
+        "R_load",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "R_mapping",
+        "W_erase_new",
+        "W_new_last_put",
+        "R_copy",
+        "R_unlock"
+      ]
+    }
+  },
+  "counterfactual_missing_mapping_check": {
+    "counts": {
+      "schedules": 6435,
+      "accepted": 120,
+      "mixed_generation": 10,
+      "flag_copy_mixed": 0,
+      "dead_copy": 0,
+      "foreign_mapping_copy": 36
+    },
+    "example_schedules": {
+      "foreign_mapping_copy": [
+        "W_erase_old",
+        "W_old_last_put",
+        "W_allocate_new",
+        "W_publish_new",
+        "W_mark_new_under_ref",
+        "R_lock",
+        "R_load",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "R_mapping",
+        "R_copy",
+        "W_erase_new",
+        "W_new_last_put",
+        "R_unlock"
+      ],
+      "mixed_generation": [
+        "R_lock",
+        "R_load",
+        "W_erase_old",
+        "W_old_last_put",
+        "W_allocate_new",
+        "W_publish_new",
+        "W_mark_new_under_ref",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "W_erase_new",
+        "W_new_last_put",
+        "R_mapping",
+        "R_copy",
+        "R_unlock"
+      ]
+    }
+  },
+  "foreign_mapping_guard_on": {
+    "counts": {
+      "schedules": 6435,
+      "accepted": 0,
+      "mixed_generation": 0,
+      "flag_copy_mixed": 0,
+      "dead_copy": 0,
+      "foreign_mapping_copy": 0
+    },
+    "example_schedules": {}
+  },
+  "counterfactual_missing_slot_reload": {
+    "counts": {
+      "schedules": 6435,
+      "accepted": 72,
+      "mixed_generation": 6,
+      "flag_copy_mixed": 0,
+      "dead_copy": 0,
+      "foreign_mapping_copy": 0
+    },
+    "example_schedules": {
+      "mixed_generation": [
+        "R_lock",
+        "R_load",
+        "W_erase_old",
+        "W_old_last_put",
+        "W_allocate_new",
+        "W_publish_new",
+        "W_mark_new_under_ref",
+        "R_flag",
+        "R_size",
+        "R_reload",
+        "R_mapping",
+        "W_erase_new",
+        "W_new_last_put",
+        "R_copy",
+        "R_unlock"
+      ]
+    }
+  },
+  "limitations": [
+    "A same-address mixed-generation observation can copy live B; it is not automatically UAF or data corruption.",
+    "Reader flag on B and deferred B final free are distinct from A's earlier unmarked lifetime.",
+    "New allocation and marking happen under references in this simplified schedule; real allocator timing and reordering are not modeled.",
+    "The proof still needs weak-memory and actual XArray node/slot, i_size, truncate, eviction, migration and ARMv7 cache review.",
+    "The source gate covers selected anchors, not a complete callgraph; no permission for RCU ON or physical flash."
+  ]
+}

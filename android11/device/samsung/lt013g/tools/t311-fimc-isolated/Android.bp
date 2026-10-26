@@ -1,0 +1,56 @@
+cc_binary {
+    name: "T311FimcIsolated",
+    vendor: true,
+    srcs: ["t311_fimc_isolated.c"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+cc_binary {
+    name: "T311FimcTiled",
+    vendor: true,
+    srcs: ["t311_fimc_tiled.c"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+cc_binary {
+    name: "T311FimcDmabuf",
+    vendor: true,
+    srcs: ["t311_fimc_dmabuf.c"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+    include_dirs: ["external/libdrm/exynos"],
+    shared_libs: ["libdrm"],
+}
+
+cc_binary {
+    name: "T311FimcCpuCopy",
+    vendor: true,
+    srcs: ["t311_fimc_cpucopy.c"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+    include_dirs: ["external/libdrm/exynos"],
+    shared_libs: ["libdrm"],
+}
+
+cc_binary {
+    name: "T311GemCpuOnly",
+    vendor: true,
+    srcs: ["t311_gem_cpu_only.c"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+    include_dirs: ["external/libdrm/exynos"],
+    shared_libs: ["libdrm"],
+}
+
+cc_binary {
+    name: "T311V4l2MmapCpuOnly",
+    vendor: true,
+    srcs: ["t311_v4l2_mmap_cpu_only.c"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+cc_binary {
+    name: "t311_fimc_rotate90_singlepass_offline",
+    vendor: true,
+    srcs: ["t311_fimc_rotate90_singlepass.c"],
+    include_dirs: ["external/libdrm/exynos"],
+    shared_libs: ["libdrm"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c11", "-O2"],
+}

@@ -1,0 +1,36 @@
+# SM-T311 V195 - Android 11 proxy + isolated stock KitKat GNSS runtime.
+on post-fs-data
+    mkdir /data/system/gps 0771 system system
+    mkdir /data/vendor/gps 0771 root root
+    mkdir /data/vendor/gps/legacy-v195 0750 root gps
+    mkdir /data/vendor/gps/legacy-v195/data-gps 0770 gps gps
+    mkdir /data/vendor/gps/legacy-v195/dev-socket 0770 gps system
+    mkdir /data/vendor/gps/legacy-v195/storage 0770 root gps
+    mkdir /data/vendor/gps/legacy-v195/storage/angrygps 0770 gps gps
+    mkdir /data/vendor/gps/legacy-v195/storage/broadcom 0770 gps gps
+    restorecon_recursive /data/vendor/gps
+
+    wait /sys/class/sec/gps/GPS_PWR_EN/value 10
+    chown root system /dev/ttySAC1
+    chmod 0660 /dev/ttySAC1
+    chown root system /sys/class/sec/gps/GPS_PWR_EN/value
+    chmod 0664 /sys/class/sec/gps/GPS_PWR_EN/value
+    write /sys/class/sec/gps/GPS_PWR_EN/value 0
+
+    restorecon /vendor/bin/lt013g-gps-legacy-launcher-v195
+    # G1390: Opt-in-only legacy LTO payload injection caused gpsd SIGSEGV
+    # (exit signal 11 / bridge code 90). With LTO disabled the stock BCM4752
+    # resumed NMEA GN/GLSV reports (14 GPS + 5 GLONASS seen).
+    # Do not touch power, UART, GNSS OEM libs, network AGPS or location HAL.
+    # Persistent across reboot because init applies this on every boot.
+    setprop debug.lt013g.gps.v357.lto 0
+    start vendor.lt013g-gps-legacy-v195
+
+service vendor.lt013g-gps-legacy-v195 /vendor/bin/lt013g-gps-legacy-launcher-v195 --archive /vendor/etc/lt013g-gps-legacy/rootfs-mutable.tar --work-root /data/vendor/gps/legacy-v195
+    class core
+    namespace mnt
+    user root
+    group root system gps inet net_raw
+    disabled
+    seclabel u:r:lt013g_gps_legacy:s0
+    capabilities SYS_ADMIN SYS_CHROOT SETUID SETGID CHOWN DAC_OVERRIDE FOWNER KILL

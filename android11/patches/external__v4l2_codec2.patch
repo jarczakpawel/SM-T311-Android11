@@ -1,0 +1,3044 @@
+diff --git a/SM-T311-G1012-RELEASE.md b/SM-T311-G1012-RELEASE.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..aac0a336ef3c266c808969e5ca4dde47964a4248
+--- /dev/null
++++ b/SM-T311-G1012-RELEASE.md
+@@ -0,0 +1,32 @@
++# SM-T311 G1012 - G1002 physically accepted decoder on active Codec2 source branch
++
++This source tree on branch sm-t311-q31m-v4l2-codec2 was fast-forwarded from previously physically installed G975 (a4ef67b) to code lineage 042c008, 722a610, 33605d2 on 2026-10-23 after guarded physical acceptance of the H.264 decoder.
++
++Specific change: on lt013g when visible hardware H.264 decoder geometry is 640 x 1024, request the firmware-advertised 14 MFC CAPTURE DPB buffers instead of G975 18 (MIN_BUFFERS_FOR_CAPTURE+4), and at most 8 downstream Codec2 display BufferQueue blocks instead of 14/18. Hardware FIMC remains in the DMA conversion path. The 1280x720 coded 1280x736 pathway uses original 15 capture/display allocations without reduction. All encoder modes, radio, camera/audio source, BOOT, recovery and kernel source are unchanged by this commit.
++
++Physical tested exact ARM32 library (permanent SYSTEM/vendor/lib install G1012):
++f735ad9ed95bff53eb0f928476b61b27f9875e23465f3f196bfe5d24877dd7c9
++Original G975 rollback library:
++6137f22dad0e0d7670020d50fb86266c7755b24dd546cb7ce3830a2bb89f75f6
++
++Hardware quality gates previously observed:
++- G1002 short 640x1024 complete drain 394 frames.
++- G1003/G1005 same portrait long 125s, 2316 decoded frames and no reported drops; entire 301s video not played.
++- G1010 full 1280x720 72s hardware 2154 FIMC frames Q29L_DRAIN_COMPLETE; NuPlayer reported 2155 frames, 0 drops, AAC audio.
++- G1011 same HAL hot switch 640x1024 portrait 576 frames, zero dropped -> 1280x720 full hardware drain 2154, NuPlayer 2155 frames, **1 dropped on switch**. No during-playback codec timeout.
++- G1008/G1009 alternative BQ-only periodic polling physically rejected 44 frames / 6651ms; not included in this source.
++- G1006 increased CMA160 alone physically rejected; kernel G958 original CMA128 remains.
++
++G1012 signed Codec2-only TWRP install and restore source lives under project linux-7.3-port/tools/g1012-codec2-signed-twrp-only.py, manifest in linux-7.3-port/G1012_CODECONLY_TWRP_PACKAGE_MANIFEST.json. Install physically flashed only Codec2 via TWRP3.1.1, verified exact SHA from mounted SYSTEM in recovery, then Android rebooted (boot_completed=1, SELinux Enforcing, Codec2 HAL, RIL, SurfaceFlinger running) and exact library SHA independently read back. Original RIL, BOOT, TWRP unchanged, no backups.
++
++IMPORTANT LIMITATIONS: screenrecord H264 portrait bitstream remains intermittently corrupted, independent of decoder; camera 720p AAC previously passes. With this buffer policy, CMA may have CmaFree~0KB during media playback, no proven OOM but also no reserve; continue reviewing memory allocation pressure. A 1-frame drop happened on hot switching to 720p. Encoder corruption and force-stop FLUSHING error are NOT declared fixed. Real telephone/SMS, USB and GNSS open; do not claim total device ready.
++
++Host reproducibility: G1012 private isolated rebuild built a different ELF SHA due .gnu_debugdata and build-ID; loadable .text/.rodata/dynamic sections matched byte-for-byte. Do not use rebuilt ELF for release without re-testing. The staged candidate artifact is an exact copy of the physically tested SHA. The signed restore G975 ZIP is always available. Maintain g960 exact source/built lock and g994 physical release snapshot: full ROM/RIL MUST remain blocked because host rebuilt libril bb1e67... does not equal original installed 4e6bb8a9. User publishes GitHub personally, never push.
++
++Current permanent device expected:
++- Codec2 f735ad9ed95bff53eb0f928476b61b27f9875e23465f3f196bfe5d24877dd7c9
++- BOOT e42c1b09b4c4d3c91b1a3c5330619d37560287821994d269ba67a970069cd5fd
++- TWRP f818c29f65d2082cb642cac85e27715c5255c87aac627bb542b777129d4f784f
++- RIL 4e6bb8a9465005a01f5bebd92a7e0ad247c0c4b609809c2600547bc97999bcb7
++
++Do not rerun completed physical QA; commit source changes and preserve historical ledger.
+diff --git a/accel/v4l2_device.cc b/accel/v4l2_device.cc
+index 5c258abf3ce3326b0b78e84328d776954540631b..4b9c5131718589e791e54db7c00c726217da087d 100644
+--- a/accel/v4l2_device.cc
++++ b/accel/v4l2_device.cc
+@@ -635,6 +635,13 @@ bool V4L2ReadableBuffer::IsLast() const {
+   return buffer_data_->v4l2_buffer_.flags & V4L2_BUF_FLAG_LAST;
+ }
+ 
++bool V4L2ReadableBuffer::IsError() const {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(buffer_data_);
++
++  return buffer_data_->v4l2_buffer_.flags & V4L2_BUF_FLAG_ERROR;
++}
++
+ bool V4L2ReadableBuffer::IsKeyframe() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   DCHECK(buffer_data_);
+@@ -980,9 +987,20 @@ std::pair<bool, V4L2ReadableBufferRef> V4L2Queue::DequeueBuffer() {
+     }
+   }
+ 
++  if (v4l2_buffer.type != type_ || v4l2_buffer.memory != memory_ ||
++      v4l2_buffer.index >= buffers_.size() ||
++      v4l2_buffer.length != planes_count_ ||
++      v4l2_buffer.length > VIDEO_MAX_PLANES) {
++    VPQLOGF(1) << "VIDIOC_DQBUF returned invalid buffer metadata";
++    return std::make_pair(false, nullptr);
++  }
++
+   auto it = queued_buffers_.find(v4l2_buffer.index);
+-  DCHECK(it != queued_buffers_.end());
+-  queued_buffers_.erase(*it);
++  if (it == queued_buffers_.end()) {
++    VPQLOGF(1) << "VIDIOC_DQBUF returned a buffer not queued by this client";
++    return std::make_pair(false, nullptr);
++  }
++  queued_buffers_.erase(it);
+ 
+   if (QueuedBuffersCount() > 0)
+     device_->SchedulePoll();
+diff --git a/accel/v4l2_device.h b/accel/v4l2_device.h
+index f00a604fa19e7ee890518acbd898c8a1f8ed8d56..cab40bf424ca4c4e765ec6972f0116af714efcf5 100644
+--- a/accel/v4l2_device.h
++++ b/accel/v4l2_device.h
+@@ -201,6 +201,7 @@ class V4L2ReadableBuffer
+  public:
+   // Returns whether the V4L2_BUF_FLAG_LAST flag is set for this buffer.
+   bool IsLast() const;
++  bool IsError() const;
+   // Returns whether the V4L2_BUF_FLAG_KEYFRAME flag is set for this buffer.
+   bool IsKeyframe() const;
+   // Return the timestamp set by the driver on this buffer.
+diff --git a/common/EncodeHelpers.cpp b/common/EncodeHelpers.cpp
+index 757d0642860d3137ffa3c6e5c3840561ad9a3f2d..d536c206e79b0d959e90eea61e4c444cede5304e 100644
+--- a/common/EncodeHelpers.cpp
++++ b/common/EncodeHelpers.cpp
+@@ -88,7 +88,7 @@ uint8_t c2LevelToLevelIDC(C2Config::level_t level) {
+     }
+ }
+ 
+-android_ycbcr getGraphicBlockInfo(const C2ConstGraphicBlock& block) {
++std::optional<android_ycbcr> getGraphicBlockInfo(const C2ConstGraphicBlock& block) {
+     uint32_t width, height, format, stride, igbp_slot, generation;
+     uint64_t usage, igbp_id;
+     android::_UnwrapNativeCodec2GrallocMetadata(block.handle(), &width, &height, &format, &usage,
+@@ -102,8 +102,15 @@ android_ycbcr getGraphicBlockInfo(const C2ConstGraphicBlock& block) {
+     // Usage flag without SW_READ/WRITE bits.
+     constexpr uint32_t kNonSWLockUsage = 0;
+     int32_t status = buf->lockYCbCr(kNonSWLockUsage, &ycbcr);
+-    if (status != OK) ALOGE("lockYCbCr is failed: %d", (int)status);
+-    buf->unlock();
++    if (status != OK) {
++        ALOGE("lockYCbCr failed: %d", (int)status);
++        return std::nullopt;
++    }
++    status = buf->unlock();
++    if (status != OK) {
++        ALOGE("unlock after lockYCbCr failed: %d", (int)status);
++        return std::nullopt;
++    }
+     return ycbcr;
+ }
+ 
+diff --git a/common/FormatConverter.cpp b/common/FormatConverter.cpp
+index 9ab91611beb3666d9465c2a0fb65594df7a183bc..075162e7301530d6bce539ddb237d32b0418f71d 100644
+--- a/common/FormatConverter.cpp
++++ b/common/FormatConverter.cpp
+@@ -152,6 +152,7 @@ c2_status_t FormatConverter::initialize(media::VideoPixelFormat outFormat,
+ 
+     mOutFormat = outFormat;
+     mVisibleSize = visibleSize;
++    mCodedSize = codedSize;
+ 
+     mTempPlaneU = std::unique_ptr<uint8_t[]>(
+             new uint8_t[mVisibleSize.width() * mVisibleSize.height() / 4]);
+@@ -190,7 +191,39 @@ C2ConstGraphicBlock FormatConverter::convertBlock(uint64_t frameIndex,
+         inputLayout.type = C2PlanarLayout::TYPE_RGB;
+     }
+ 
++    if (inputView.error() != C2_OK && !idMap) {
++        *status = inputView.error();
++        return inputBlock;
++    }
++
++    // MFC v5 uses the negotiated coded pitch, not the producer's C2 rowInc.
++    // Only pass the original DMABUF when both pitches and the NV12 layout match.
++    const bool nv12DirectLayout =
++            mOutFormat == media::VideoPixelFormat::PIXEL_FORMAT_NV12 &&
++            inputLayout.type == C2PlanarLayout::TYPE_YUV && inputLayout.rootPlanes == 2 &&
++            inputBlock.width() >= mCodedSize.width() &&
++            inputBlock.height() >= mCodedSize.height() &&
++            inputView.data()[C2PlanarLayout::PLANE_Y] &&
++            inputView.data()[C2PlanarLayout::PLANE_U] &&
++            inputView.data()[C2PlanarLayout::PLANE_V] ==
++                    inputView.data()[C2PlanarLayout::PLANE_U] + 1 &&
++            inputLayout.planes[C2PlanarLayout::PLANE_Y].colInc == 1 &&
++            inputLayout.planes[C2PlanarLayout::PLANE_U].colInc == 2 &&
++            inputLayout.planes[C2PlanarLayout::PLANE_V].colInc == 2 &&
++            inputLayout.planes[C2PlanarLayout::PLANE_Y].rowInc == mCodedSize.width() &&
++            inputLayout.planes[C2PlanarLayout::PLANE_U].rowInc == mCodedSize.width() &&
++            inputLayout.planes[C2PlanarLayout::PLANE_V].rowInc == mCodedSize.width();
++    if (nv12DirectLayout) {
++        mGraphicBlocks.emplace_back(new BlockEntry(frameIndex));
++        *status = C2_OK;
++        return inputBlock;
++    }
++
+     C2GraphicView outputView = outputBlock->map().get();
++    if (outputView.error() != C2_OK) {
++        *status = outputView.error();
++        return inputBlock;
++    }
+     C2PlanarLayout outputLayout = outputView.layout();
+     uint8_t* dstY = outputView.data()[C2PlanarLayout::PLANE_Y];
+     uint8_t* dstU = outputView.data()[C2PlanarLayout::PLANE_V];   // only for I420
+@@ -202,6 +235,7 @@ C2ConstGraphicBlock FormatConverter::convertBlock(uint64_t frameIndex,
+     const int dstStrideUV = outputLayout.planes[C2PlanarLayout::PLANE_U].rowInc;  // only for NV12
+ 
+     media::VideoPixelFormat inputFormat = media::VideoPixelFormat::PIXEL_FORMAT_UNKNOWN;
++    int conversionResult = 0;
+     *status = C2_OK;
+     if (inputLayout.type == C2PlanarLayout::TYPE_YUV) {
+         const uint8_t* srcY = inputView.data()[C2PlanarLayout::PLANE_Y];
+@@ -217,34 +251,71 @@ C2ConstGraphicBlock FormatConverter::convertBlock(uint64_t frameIndex,
+                                         : media::VideoPixelFormat::PIXEL_FORMAT_NV21;
+         }
+ 
+-        if (inputFormat == mOutFormat) {
++        if (inputFormat == mOutFormat &&
++            (mOutFormat != media::VideoPixelFormat::PIXEL_FORMAT_NV12 || nv12DirectLayout)) {
+             ALOGV("Zero-Copy is applied");
+             mGraphicBlocks.emplace_back(new BlockEntry(frameIndex));
+             return inputBlock;
+         }
+ 
+         switch (convertMap(inputFormat, mOutFormat)) {
++        case convertMap(media::VideoPixelFormat::PIXEL_FORMAT_NV12,
++                        media::VideoPixelFormat::PIXEL_FORMAT_NV12):
++            // The source is NV12 but its pitch or coded dimensions differ from MFC.
++            // Copy visible pixels into our correctly sized encoder input allocation.
++            if (!srcY || !srcU || !srcV || srcV != srcU + 1 ||
++                inputLayout.planes[C2PlanarLayout::PLANE_Y].colInc != 1 ||
++                inputLayout.planes[C2PlanarLayout::PLANE_U].colInc != 2 ||
++                inputLayout.planes[C2PlanarLayout::PLANE_V].colInc != 2 ||
++                srcStrideY < mVisibleSize.width() ||
++                srcStrideU < mVisibleSize.width() || srcStrideV != srcStrideU ||
++                !dstY || !dstUV || dstStrideY < mVisibleSize.width() ||
++                dstStrideUV < mVisibleSize.width()) {
++                ALOGE("Incompatible NV12 input or output plane layout");
++                *status = C2_CORRUPTED;
++                return inputBlock;
++            }
++            libyuv::CopyPlane(srcY, srcStrideY, dstY, dstStrideY,
++                              mVisibleSize.width(), mVisibleSize.height());
++            libyuv::CopyPlane(srcU, srcStrideU, dstUV, dstStrideUV,
++                              mVisibleSize.width(), mVisibleSize.height() / 2);
++            break;
+         case convertMap(media::VideoPixelFormat::PIXEL_FORMAT_YV12,
+                         media::VideoPixelFormat::PIXEL_FORMAT_I420):
+-            libyuv::I420Copy(srcY, srcStrideY, srcU, srcStrideU, srcV, srcStrideV, dstY, dstStrideY,
++            conversionResult =
++                    libyuv::I420Copy(srcY, srcStrideY, srcU, srcStrideU, srcV, srcStrideV, dstY, dstStrideY,
+                              dstU, dstStrideU, dstV, dstStrideV, mVisibleSize.width(),
+                              mVisibleSize.height());
+             break;
+         case convertMap(media::VideoPixelFormat::PIXEL_FORMAT_YV12,
+                         media::VideoPixelFormat::PIXEL_FORMAT_NV12):
+-            libyuv::I420ToNV12(srcY, srcStrideY, srcU, srcStrideU, srcV, srcStrideV, dstY,
++            ALOGV("H27Q8_NV12_CONVERT frame=%" PRIu64
++                  " size=%dx%d srcY=%p srcU=%p srcV=%p dstY=%p dstUV=%p "
++                  "srcStride=%d/%d/%d dstStride=%d/%d",
++                  frameIndex, mVisibleSize.width(), mVisibleSize.height(),
++                  srcY, srcU, srcV, dstY, dstUV,
++                  srcStrideY, srcStrideU, srcStrideV, dstStrideY, dstStrideUV);
++            if (!dstY || !dstUV || dstY == dstUV) {
++                ALOGE("H27Q8_NV12_LAYOUT_INVALID dstY=%p dstUV=%p", dstY, dstUV);
++                *status = C2_CORRUPTED;
++                return inputBlock;
++            }
++            conversionResult =
++                    libyuv::I420ToNV12(srcY, srcStrideY, srcU, srcStrideU, srcV, srcStrideV, dstY,
+                                dstStrideY, dstUV, dstStrideUV, mVisibleSize.width(),
+                                mVisibleSize.height());
+             break;
+         case convertMap(media::VideoPixelFormat::PIXEL_FORMAT_NV12,
+                         media::VideoPixelFormat::PIXEL_FORMAT_I420):
+-            libyuv::NV12ToI420(srcY, srcStrideY, srcU, srcStrideU, dstY, dstStrideY, dstU,
++            conversionResult =
++                    libyuv::NV12ToI420(srcY, srcStrideY, srcU, srcStrideU, dstY, dstStrideY, dstU,
+                                dstStrideU, dstV, dstStrideV, mVisibleSize.width(),
+                                mVisibleSize.height());
+             break;
+         case convertMap(media::VideoPixelFormat::PIXEL_FORMAT_NV21,
+                         media::VideoPixelFormat::PIXEL_FORMAT_I420):
+-            libyuv::NV21ToI420(srcY, srcStrideY, srcV, srcStrideV, dstY, dstStrideY, dstU,
++            conversionResult =
++                    libyuv::NV21ToI420(srcY, srcStrideY, srcV, srcStrideV, dstY, dstStrideY, dstU,
+                                dstStrideU, dstV, dstStrideV, mVisibleSize.width(),
+                                mVisibleSize.height());
+             break;
+@@ -276,7 +347,8 @@ C2ConstGraphicBlock FormatConverter::convertBlock(uint64_t frameIndex,
+         switch (convertMap(inputFormat, mOutFormat)) {
+         case convertMap(media::VideoPixelFormat::PIXEL_FORMAT_ABGR,
+                         media::VideoPixelFormat::PIXEL_FORMAT_I420):
+-            libyuv::ABGRToI420(srcRGB, srcStrideRGB, dstY, dstStrideY, dstU, dstStrideU, dstV,
++            conversionResult =
++                    libyuv::ABGRToI420(srcRGB, srcStrideRGB, dstY, dstStrideY, dstU, dstStrideU, dstV,
+                                dstStrideV, mVisibleSize.width(), mVisibleSize.height());
+             break;
+         case convertMap(media::VideoPixelFormat::PIXEL_FORMAT_ABGR,
+@@ -285,9 +357,15 @@ C2ConstGraphicBlock FormatConverter::convertBlock(uint64_t frameIndex,
+             // I420 on dst-Y plane and temporary U/V plane. Then we copy U and V pixels from
+             // temporary planes to dst-UV interleavedly.
+             const int tempStride = mVisibleSize.width() / 2;
+-            libyuv::ABGRToI420(srcRGB, srcStrideRGB, dstY, dstStrideY, mTempPlaneU.get(),
++            conversionResult =
++                    libyuv::ABGRToI420(srcRGB, srcStrideRGB, dstY, dstStrideY, mTempPlaneU.get(),
+                                tempStride, mTempPlaneV.get(), tempStride, mVisibleSize.width(),
+                                mVisibleSize.height());
++            if (conversionResult != 0) {
++                ALOGE("ABGRToI420 conversion failed: %d", conversionResult);
++                *status = C2_CORRUPTED;
++                return inputBlock;
++            }
+             libyuv::MergeUVPlane(mTempPlaneU.get(), tempStride, mTempPlaneV.get(), tempStride,
+                                  dstUV, dstStrideUV, mVisibleSize.width() / 2,
+                                  mVisibleSize.height() / 2);
+@@ -306,6 +384,12 @@ C2ConstGraphicBlock FormatConverter::convertBlock(uint64_t frameIndex,
+         return inputBlock;  // This is actually redundant and should not be used.
+     }
+ 
++    if (conversionResult != 0) {
++        ALOGE("Pixel conversion failed: %d", conversionResult);
++        *status = C2_CORRUPTED;
++        return inputBlock;
++    }
++
+     ALOGV("convertBlock(frame_index=%" PRIu64 ", format=%s)", frameIndex,
+           media::VideoPixelFormatToString(inputFormat).c_str());
+     entry->mAssociatedFrameIndex = frameIndex;
+diff --git a/common/include/v4l2_codec2/common/EncodeHelpers.h b/common/include/v4l2_codec2/common/EncodeHelpers.h
+index d152ba8cd0940d7a419eda988e7165b7a84debe6..e7f315deac2c247dd0a35867ecf1466b8c1c619a 100644
+--- a/common/include/v4l2_codec2/common/EncodeHelpers.h
++++ b/common/include/v4l2_codec2/common/EncodeHelpers.h
+@@ -5,6 +5,8 @@
+ #ifndef ANDROID_V4L2_CODEC2_COMMON_HELPERS_H
+ #define ANDROID_V4L2_CODEC2_COMMON_HELPERS_H
+ 
++#include <optional>
++
+ #include <C2Config.h>
+ #include <C2ParamDef.h>
+ #include <system/graphics.h>
+@@ -45,7 +47,7 @@ media::VideoCodecProfile c2ProfileToVideoCodecProfile(C2Config::profile_t profil
+ uint8_t c2LevelToLevelIDC(C2Config::level_t level);
+ 
+ // Get the specified graphics block in YCbCr format.
+-android_ycbcr getGraphicBlockInfo(const C2ConstGraphicBlock& block);
++std::optional<android_ycbcr> getGraphicBlockInfo(const C2ConstGraphicBlock& block);
+ 
+ // When encoding a video the codec-specific data (CSD; e.g. SPS and PPS for H264 encoding) will be
+ // concatenated to the first encoded slice. This function extracts the CSD out of the bitstream and
+diff --git a/common/include/v4l2_codec2/common/FormatConverter.h b/common/include/v4l2_codec2/common/FormatConverter.h
+index f00f1158bdd9b23ae04424cff4ea0607f360270d..8b87aafc0b91c810eb74ae1ea5e8cb7b3816fc3a 100644
+--- a/common/include/v4l2_codec2/common/FormatConverter.h
++++ b/common/include/v4l2_codec2/common/FormatConverter.h
+@@ -108,6 +108,7 @@ private:
+ 
+     media::VideoPixelFormat mOutFormat = media::VideoPixelFormat::PIXEL_FORMAT_UNKNOWN;
+     media::Size mVisibleSize;
++    media::Size mCodedSize;
+ };
+ 
+ }  // namespace android
+diff --git a/components/V4L2DecodeComponent.cpp b/components/V4L2DecodeComponent.cpp
+index 1ea9a7b61a5ad1f62ab0d426a83b78cbd823a7ac..ae159e90b2e78d348341ae5c2619229c73224178 100644
+--- a/components/V4L2DecodeComponent.cpp
++++ b/components/V4L2DecodeComponent.cpp
+@@ -282,6 +282,10 @@ c2_status_t V4L2DecodeComponent::stop() {
+     std::lock_guard<std::mutex> lock(mStartStopLock);
+ 
+     auto currentState = mComponentState.load();
++    // MediaCodec clients may call stop() followed by release()/reset(). The
++    // second call must be harmless once the component has already stopped;
++    // rejecting it as an error emits a false failure on successful playback.
++    if (currentState == ComponentState::STOPPED) return C2_OK;
+     if (currentState != ComponentState::RUNNING && currentState != ComponentState::ERROR) {
+         ALOGE("Could not stop at %s state", ComponentStateToString(currentState));
+         return C2_BAD_STATE;
+@@ -455,7 +459,8 @@ void V4L2DecodeComponent::pumpPendingWorks() {
+ 
+             std::unique_ptr<BitstreamBuffer> buffer =
+                     std::make_unique<BitstreamBuffer>(bitstreamId, linearBlock.handle()->data[0],
+-                                                      linearBlock.offset(), linearBlock.size());
++                                                      linearBlock.offset(), linearBlock.size(),
++                                                      isCSDWork);
+             if (!buffer) {
+                 reportError(C2_CORRUPTED);
+                 return;
+diff --git a/components/V4L2Decoder.cpp b/components/V4L2Decoder.cpp
+index d52bd6c1f1212c11a32d290ba28e81471585e3fb..0c490a55918348e0055a0e939ed5454ae48d6fcf 100644
+--- a/components/V4L2Decoder.cpp
++++ b/components/V4L2Decoder.cpp
+@@ -8,9 +8,18 @@
+ #include <v4l2_codec2/components/V4L2Decoder.h>
+ 
+ #include <stdint.h>
++#include <string.h>
++
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <sys/ioctl.h>
++#include <sys/mman.h>
++#include <unistd.h>
+ 
+ #include <vector>
+ 
++#include <cutils/properties.h>
+ #include <base/bind.h>
+ #include <base/files/scoped_file.h>
+ #include <base/memory/ptr_util.h>
+@@ -19,9 +28,22 @@
+ namespace android {
+ namespace {
+ 
+-constexpr size_t kNumInputBuffers = 16;
++constexpr size_t kNumInputBuffers = 4;
+ // Extra buffers for transmitting in the whole video pipeline.
+ constexpr size_t kNumExtraOutputBuffers = 4;
++#ifndef V4L2_PIX_FMT_NV12MT
++#define V4L2_PIX_FMT_NV12MT v4l2_fourcc('T', 'M', '1', '2')
++#endif
++constexpr char kFimcDevice[] = "/dev/video2";
++constexpr int kFimcTimeoutMs = 3000;
++
++int xioctl(int fd, unsigned long request, void* arg) {
++    int ret;
++    do {
++        ret = ioctl(fd, request, arg);
++    } while (ret < 0 && errno == EINTR);
++    return ret;
++}
+ 
+ uint32_t VideoCodecToV4L2PixFmt(VideoCodec codec) {
+     switch (codec) {
+@@ -62,6 +84,10 @@ V4L2Decoder::~V4L2Decoder() {
+ 
+     mWeakThisFactory.InvalidateWeakPtrs();
+ 
++    resetFimc();
++    mOutputDmabufs.clear();
++    mOutputPlaneSizes.clear();
++
+     // Streamoff input and output queue.
+     if (mOutputQueue) {
+         mOutputQueue->Streamoff();
+@@ -166,11 +192,14 @@ bool V4L2Decoder::setupInputFormat(const uint32_t inputPixelFormat, const size_t
+         return false;
+     }
+     ALOG_ASSERT(format->fmt.pix_mp.pixelformat == inputPixelFormat);
++    mInputBufferSize = format->fmt.pix_mp.plane_fmt[0].sizeimage;
+ 
+-    if (mInputQueue->AllocateBuffers(kNumInputBuffers, V4L2_MEMORY_DMABUF) == 0) {
+-        ALOGE("Failed to allocate input buffer.");
++    const size_t inputBuffers = mInputQueue->AllocateBuffers(kNumInputBuffers, V4L2_MEMORY_MMAP);
++    if (inputBuffers == 0) {
++        ALOGE("Failed to allocate MFC-owned MMAP input buffers.");
+         return false;
+     }
++    ALOGI("Q29E_MFC_INPUT_MMAP_READY buffers=%zu size=%zu", inputBuffers, inputBufferSize);
+     if (!mInputQueue->Streamon()) {
+         ALOGE("Failed to streamon input queue.");
+         return false;
+@@ -178,6 +207,23 @@ bool V4L2Decoder::setupInputFormat(const uint32_t inputPixelFormat, const size_t
+     return true;
+ }
+ 
++bool V4L2Decoder::copyBitstreamBuffer(const BitstreamBuffer& buffer, uint8_t* dst,
++                                           size_t dstSize, size_t dstOffset) {
++    if (!dst || dstOffset > dstSize || buffer.size > dstSize - dstOffset ||
++        buffer.offset > SIZE_MAX - buffer.size) {
++        return false;
++    }
++    const size_t mapLength = buffer.offset + buffer.size;
++    void* src = mmap(nullptr, mapLength, PROT_READ, MAP_SHARED, buffer.dmabuf_fd, 0);
++    if (src == MAP_FAILED) {
++        ALOGE("Failed to mmap compressed input fd=%d: %d", buffer.dmabuf_fd, errno);
++        return false;
++    }
++    memcpy(dst + dstOffset, static_cast<const uint8_t*>(src) + buffer.offset, buffer.size);
++    munmap(src, mapLength);
++    return true;
++}
++
+ void V4L2Decoder::decode(std::unique_ptr<BitstreamBuffer> buffer, DecodeCB decodeCb) {
+     ALOGV("%s(id=%d)", __func__, buffer->id);
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
+@@ -190,6 +236,8 @@ void V4L2Decoder::decode(std::unique_ptr<BitstreamBuffer> buffer, DecodeCB decod
+     }
+ 
+     if (mState == State::Idle) {
++        mDrainLastSeen = false;
++        mFimcFrameCount = 0;
+         setState(State::Decoding);
+     }
+ 
+@@ -232,24 +280,27 @@ void V4L2Decoder::pumpDecodeRequest() {
+         // Drain the decoder.
+         if (mDecodeRequests.front().buffer == nullptr) {
+             ALOGV("Get drain request.");
+-            // Send the flush command after all input buffers are dequeued. This makes
+-            // sure all previous resolution changes have been handled because the
+-            // driver must hold the input buffer that triggers resolution change. The
+-            // driver cannot decode data in it without new output buffers. If we send
+-            // the flush now and a queued input buffer triggers resolution change
+-            // later, the driver will send an output buffer that has
+-            // V4L2_BUF_FLAG_LAST. But some queued input buffer have not been decoded
+-            // yet. Also, V4L2VDA calls STREAMOFF and STREAMON after resolution
+-            // change. They implicitly send a V4L2_DEC_CMD_STOP and V4L2_DEC_CMD_START
+-            // to the decoder.
+-            if (mInputQueue->QueuedBuffersCount() > 0) {
+-                ALOGD("Wait for all input buffers dequeued.");
++            if (mResolutionChangePending) {
++                ALOGD("Wait for pending resolution change before drain.");
+                 return;
+             }
+ 
+             auto request = std::move(mDecodeRequests.front());
+             mDecodeRequests.pop();
+ 
++            if (mOutputQueue->AllocatedBuffersCount() == 0) {
++                mCodecConfig.clear();
++                mTaskRunner->PostTask(
++                        FROM_HERE, ::base::BindOnce(std::move(request.decodeCb),
++                                                    VideoDecoder::DecodeStatus::kOk));
++                setState(State::Idle);
++                return;
++            }
++
++            mDrainLastSeen = false;
++            ALOGI("Q29L_DRAIN_STOP queued_input=%zu pending_decode=%zu pending_output=%zu frame_request=%d",
++                  mInputQueue->QueuedBuffersCount(), mPendingDecodeCbs.size(),
++                  mPendingOutputFrames.size(), mFrameRequestPending);
+             if (!sendV4L2DecoderCmd(false)) {
+                 std::move(request.decodeCb).Run(VideoDecoder::DecodeStatus::kError);
+                 onError();
+@@ -260,6 +311,31 @@ void V4L2Decoder::pumpDecodeRequest() {
+             return;
+         }
+ 
++        if (mDecodeRequests.front().buffer->isCodecConfig) {
++            auto request = std::move(mDecodeRequests.front());
++            mDecodeRequests.pop();
++            const size_t oldSize = mCodecConfig.size();
++            if (oldSize > mInputBufferSize || request.buffer->size > mInputBufferSize - oldSize) {
++                ALOGE("Codec config exceeds MFC CPB: cached=%zu add=%zu cpb=%zu", oldSize,
++                      request.buffer->size, mInputBufferSize);
++                onError();
++                return;
++            }
++            mCodecConfig.resize(oldSize + request.buffer->size);
++            if (!copyBitstreamBuffer(*request.buffer, mCodecConfig.data(), mCodecConfig.size(),
++                                     oldSize)) {
++                mCodecConfig.resize(oldSize);
++                onError();
++                return;
++            }
++            ALOGI("Q29E_CSD_CACHED id=%d bytes=%zu total=%zu", request.buffer->id,
++                  request.buffer->size, mCodecConfig.size());
++            mTaskRunner->PostTask(
++                    FROM_HERE, ::base::BindOnce(std::move(request.decodeCb),
++                                                VideoDecoder::DecodeStatus::kOk));
++            continue;
++        }
++
+         // Pause if no free input buffer. We resume decoding after dequeueing input buffers.
+         auto inputBuffer = mInputQueue->GetFreeBuffer();
+         if (!inputBuffer) {
+@@ -281,19 +357,50 @@ void V4L2Decoder::pumpDecodeRequest() {
+             return;
+         }
+ 
+-        ALOGV("Set bytes_used=%zu, offset=%zu", request.buffer->offset + request.buffer->size,
+-              request.buffer->offset);
+-        inputBuffer->SetPlaneDataOffset(0, request.buffer->offset);
+-        inputBuffer->SetPlaneBytesUsed(0, request.buffer->offset + request.buffer->size);
+-        std::vector<int> fds;
+-        fds.push_back(std::move(request.buffer->dmabuf_fd));
+-        if (!std::move(*inputBuffer).QueueDMABuf(fds)) {
+-            ALOGE("%s(): Failed to QBUF to input queue, bitstreamId=%d", __func__, bitstreamId);
++        const size_t prefixSize = mCodecConfig.size();
++        if (request.buffer->size > planeSize || prefixSize > planeSize - request.buffer->size) {
++            ALOGE("Compressed input does not fit MFC CPB: csd=%zu frame=%zu plane=%zu",
++                  prefixSize, request.buffer->size, planeSize);
++            onError();
++            return;
++        }
++        uint8_t* dst = static_cast<uint8_t*>(inputBuffer->GetPlaneMapping(0));
++        if (!dst) {
++            ALOGE("Failed to mmap MFC compressed input buffer");
++            onError();
++            return;
++        }
++        if (prefixSize) memcpy(dst, mCodecConfig.data(), prefixSize);
++        if (!copyBitstreamBuffer(*request.buffer, dst, planeSize, prefixSize)) {
++            onError();
++            return;
++        }
++        const size_t bytesUsed = prefixSize + request.buffer->size;
++        if (prefixSize) {
++            ALOGI("Q29E_CSD_PREPENDED bitstream=%d csd=%zu frame=%zu total=%zu", bitstreamId,
++                  prefixSize, request.buffer->size, bytesUsed);
++        }
++        inputBuffer->SetPlaneDataOffset(0, 0);
++        inputBuffer->SetPlaneBytesUsed(0, bytesUsed);
++        if (!std::move(*inputBuffer).QueueMMap()) {
++            ALOGE("%s(): Failed to QBUF MMAP input, bitstreamId=%d", __func__, bitstreamId);
+             onError();
+             return;
+         }
+ 
+         mPendingDecodeCbs.insert(std::make_pair(bitstreamId, std::move(request.decodeCb)));
++        mCodecConfig.clear();
++
++        if (mOutputQueue->AllocatedBuffersCount() == 0) {
++            ALOGI("Q29E_INITIAL_HEADER_WAIT bitstream=%d", bitstreamId);
++            if (!changeResolution()) {
++                ALOGE("Failed to bootstrap MFC capture after initial bitstream buffer");
++                onError();
++                return;
++            }
++            ALOGI("Q29E_INITIAL_CAPTURE_READY coded=%s visible=%s", mCodedSize.ToString().c_str(),
++                  mVisibleRect.ToString().c_str());
++        }
+     }
+ }
+ 
+@@ -301,8 +408,8 @@ void V4L2Decoder::flush() {
+     ALOGV("%s()", __func__);
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
+ 
+-    if (mState == State::Idle) {
+-        ALOGD("Nothing need to flush, ignore.");
++    if (mState == State::Idle && mOutputQueue->AllocatedBuffersCount() == 0) {
++        ALOGD("Flush on uninitialized decoder, no capture buffers to reset.");
+         return;
+     }
+     if (mState == State::Error) {
+@@ -310,7 +417,12 @@ void V4L2Decoder::flush() {
+         return;
+     }
+ 
+-    // Call all pending callbacks.
++    while (!mDecodeRequests.empty()) {
++        auto request = std::move(mDecodeRequests.front());
++        mDecodeRequests.pop();
++        if (request.decodeCb)
++            std::move(request.decodeCb).Run(VideoDecoder::DecodeStatus::kAborted);
++    }
+     for (auto& item : mPendingDecodeCbs) {
+         std::move(item.second).Run(VideoDecoder::DecodeStatus::kAborted);
+     }
+@@ -319,15 +431,32 @@ void V4L2Decoder::flush() {
+         std::move(mDrainCb).Run(VideoDecoder::DecodeStatus::kAborted);
+     }
+ 
+-    // Streamoff both V4L2 queues to drop input and output buffers.
+     mDevice->StopPolling();
+-    mOutputQueue->Streamoff();
+-    mFrameAtDevice.clear();
+-    mInputQueue->Streamoff();
+-
+-    // Streamon both V4L2 queues.
+-    mInputQueue->Streamon();
+-    mOutputQueue->Streamon();
++    mResolutionChangePending = false;
++    mDrainLastSeen = false;
++    mFimcFrameCount = 0;
++    mCodecConfig.clear();
++    resetFimc();
++    while (!mPendingOutputFrames.empty()) mPendingOutputFrames.pop();
++
++    const bool haveCapture = mOutputQueue->AllocatedBuffersCount() > 0;
++    if (haveCapture && !mOutputQueue->Streamoff()) {
++        ALOGE("Failed to streamoff capture queue during flush");
++        onError();
++        return;
++    }
++    if (!mInputQueue->Streamoff() || !mInputQueue->Streamon()) {
++        ALOGE("Failed to restart input queue during flush");
++        onError();
++        return;
++    }
++    if (haveCapture) {
++        if (!queueAllOutputBuffers() || !mOutputQueue->Streamon() || !setupFimc()) {
++            ALOGE("Q29E flush capture reinitialize failed");
++            onError();
++            return;
++        }
++    }
+ 
+     if (!mDevice->StartPolling(::base::BindRepeating(&V4L2Decoder::serviceDeviceTask, mWeakThis),
+                                ::base::BindRepeating(&V4L2Decoder::onError, mWeakThis))) {
+@@ -336,6 +465,7 @@ void V4L2Decoder::flush() {
+         return;
+     }
+ 
++    ALOGI("Q29E_FLUSH_READY capture=%d", haveCapture);
+     setState(State::Idle);
+ }
+ 
+@@ -391,56 +521,42 @@ void V4L2Decoder::serviceDeviceTask(bool event) {
+         if (!dequeuedBuffer) break;
+ 
+         outputDequeued = true;
+-
+         const size_t bufferId = dequeuedBuffer->BufferId();
+         const int32_t bitstreamId = static_cast<int32_t>(dequeuedBuffer->GetTimeStamp().tv_sec);
+-        const size_t bytesUsed = dequeuedBuffer->GetPlaneBytesUsed(0);
++        size_t bytesUsed = 0;
++        for (size_t i = 0; i < dequeuedBuffer->PlanesCount(); ++i) {
++            bytesUsed += dequeuedBuffer->GetPlaneBytesUsed(i);
++        }
+         const bool isLast = dequeuedBuffer->IsLast();
+-        ALOGV("DQBUF from output queue, bufferId=%zu, corresponding bitstreamId=%d, bytesused=%zu",
+-              bufferId, bitstreamId, bytesUsed);
+-
+-        // Get the corresponding VideoFrame of the dequeued buffer.
+-        auto it = mFrameAtDevice.find(bufferId);
+-        ALOG_ASSERT(it != mFrameAtDevice.end(), "buffer %zu is not found at mFrameAtDevice",
+-                    bufferId);
+-        auto frame = std::move(it->second);
+-        mFrameAtDevice.erase(it);
++        ALOGV("Q29_MFC_DQ buffer=%zu bitstream=%d bytes=%zu last=%d", bufferId, bitstreamId,
++              bytesUsed, isLast);
++
++        if (isLast && mDrainCb) {
++            if (!mDrainLastSeen) {
++                ALOGI("Q29L_DRAIN_LAST_SEEN buffer=%zu bytes=%zu pending_decode=%zu pending_output=%zu frame_request=%d",
++                      bufferId, bytesUsed, mPendingDecodeCbs.size(), mPendingOutputFrames.size(),
++                      mFrameRequestPending);
++            }
++            mDrainLastSeen = true;
++        }
+ 
+         if (bytesUsed > 0) {
+-            ALOGV("Send output frame(bitstreamId=%d) to client", bitstreamId);
+-            frame->setBitstreamId(bitstreamId);
+-            frame->setVisibleRect(mVisibleRect);
+-            mOutputCb.Run(std::move(frame));
++            mPendingOutputFrames.push({dequeuedBuffer, bitstreamId, isLast});
+         } else {
+-            // Workaround(b/168750131): If the buffer is not enqueued before the next drain is done,
+-            // then the driver will fail to notify EOS. So we recycle the buffer immediately.
+-            ALOGV("Recycle empty buffer %zu back to V4L2 output queue.", bufferId);
+             dequeuedBuffer.reset();
+-            auto outputBuffer = mOutputQueue->GetFreeBuffer(bufferId);
+-            ALOG_ASSERT(outputBuffer, "V4L2 output queue slot %zu is not freed.", bufferId);
+-
+-            if (!std::move(*outputBuffer).QueueDMABuf(frame->getFDs())) {
+-                ALOGE("%s(): Failed to recycle empty buffer to output queue.", __func__);
+-                onError();
+-                return;
+-            }
+-            mFrameAtDevice.insert(std::make_pair(bufferId, std::move(frame)));
+-        }
+-
+-        if (mDrainCb && isLast) {
+-            ALOGV("All buffers are drained.");
+-            sendV4L2DecoderCmd(true);
+-            std::move(mDrainCb).Run(VideoDecoder::DecodeStatus::kOk);
+-            setState(State::Idle);
++            recycleOutputBuffer(bufferId);
++            if (mState == State::Error) return;
+         }
+     }
+ 
+-    // Handle resolution change event.
+     if (event && dequeueResolutionChangeEvent()) {
+-        if (!changeResolution()) {
+-            onError();
+-            return;
+-        }
++        mResolutionChangePending = true;
++        ALOGI("Q29E_RES_CHANGE_PENDING frames=%zu request=%d", mPendingOutputFrames.size(),
++              mFrameRequestPending);
++    }
++    if (!applyPendingResolutionChange()) {
++        onError();
++        return;
+     }
+ 
+     // We freed some input buffers, continue handling decode requests.
+@@ -448,11 +564,11 @@ void V4L2Decoder::serviceDeviceTask(bool event) {
+         mTaskRunner->PostTask(FROM_HERE,
+                               ::base::BindOnce(&V4L2Decoder::pumpDecodeRequest, mWeakThis));
+     }
+-    // We free some output buffers, try to get VideoFrame.
+-    if (outputDequeued) {
++    if (outputDequeued && !mPendingOutputFrames.empty()) {
+         mTaskRunner->PostTask(FROM_HERE,
+                               ::base::BindOnce(&V4L2Decoder::tryFetchVideoFrame, mWeakThis));
+     }
++    maybeCompleteDrain();
+ }
+ 
+ bool V4L2Decoder::dequeueResolutionChangeEvent() {
+@@ -470,6 +586,21 @@ bool V4L2Decoder::dequeueResolutionChangeEvent() {
+     return false;
+ }
+ 
++bool V4L2Decoder::applyPendingResolutionChange() {
++    ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
++    if (!mResolutionChangePending) return true;
++    if (mFrameRequestPending || !mPendingOutputFrames.empty()) return true;
++
++    ALOGI("Q29E_RES_CHANGE_APPLY");
++    if (!changeResolution()) return false;
++    mResolutionChangePending = false;
++    ALOGI("Q29E_RES_CHANGE_READY coded=%s visible=%s", mCodedSize.ToString().c_str(),
++          mVisibleRect.ToString().c_str());
++    mTaskRunner->PostTask(FROM_HERE,
++                          ::base::BindOnce(&V4L2Decoder::pumpDecodeRequest, mWeakThis));
++    return true;
++}
++
+ bool V4L2Decoder::changeResolution() {
+     ALOGV("%s()", __func__);
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
+@@ -480,8 +611,34 @@ bool V4L2Decoder::changeResolution() {
+         return false;
+     }
+ 
++    if (format->fmt.pix_mp.pixelformat != V4L2_PIX_FMT_NV12MT ||
++        format->fmt.pix_mp.num_planes != 2) {
++        ALOGE("Unexpected MFC capture format fourcc=0x%x planes=%u",
++              format->fmt.pix_mp.pixelformat, format->fmt.pix_mp.num_planes);
++        return false;
++    }
+     mCodedSize.SetSize(format->fmt.pix_mp.width, format->fmt.pix_mp.height);
+     mVisibleRect = getVisibleRect(mCodedSize);
++    // G1002 EXPERIMENT ONLY: MFC reports the MINIMUM reference/DPB count
++    // through V4L2_CID_MIN_BUFFERS_FOR_CAPTURE. G975 adds four optional
++    // buffers. For the exact 640x1024 failure geometry, test the hardware
++    // minimum without altering its DPB layout or other stream sizes. The
++    // separate eight-graphic-buffer G998 experiment remains in this branch.
++    // Do NOT release without a full actual hardware decode/drain test.
++    char board[PROPERTY_VALUE_MAX] = {};
++    property_get("ro.product.device", board, "");
++    if (strcmp(board, "lt013g") == 0 && mVisibleRect.width() == 640 &&
++            mVisibleRect.height() == 1024) {
++        if (*numOutputBuffers <= kNumExtraOutputBuffers) {
++            ALOGE("G1002 invalid firmware minimum: requested=%zu", *numOutputBuffers);
++            return false;
++        }
++        const size_t before = *numOutputBuffers;
++        *numOutputBuffers -= kNumExtraOutputBuffers;
++        ALOGI("G1002_MIN_DPB_CMA_TRIAL mfc_before=%zu mfc_min=%zu",
++              before, *numOutputBuffers);
++    }
++    ALOGI("Q29E_MFC_CAPTURE_TM12 coded=%s", mCodedSize.ToString().c_str());
+ 
+     ALOGI("Need %zu output buffers. coded size: %s, visible rect: %s", *numOutputBuffers,
+           mCodedSize.ToString().c_str(), mVisibleRect.ToString().c_str());
+@@ -490,44 +647,336 @@ bool V4L2Decoder::changeResolution() {
+         return false;
+     }
+ 
++    resetFimc();
++    if (!mPendingOutputFrames.empty() || mFrameRequestPending) {
++        ALOGE("Resolution change attempted with pending output frames");
++        return false;
++    }
++    mOutputDmabufs.clear();
++    mOutputPlaneSizes.clear();
++    mVideoFramePool.reset();
+     mOutputQueue->Streamoff();
+     mOutputQueue->DeallocateBuffers();
+-    mFrameAtDevice.clear();
+-    mBlockIdToV4L2Id.clear();
+ 
+-    if (mOutputQueue->AllocateBuffers(*numOutputBuffers, V4L2_MEMORY_DMABUF) == 0) {
+-        ALOGE("Failed to allocate output buffer.");
++    const size_t allocated = mOutputQueue->AllocateBuffers(*numOutputBuffers, V4L2_MEMORY_MMAP);
++    if (allocated == 0) {
++        ALOGE("Failed to allocate MFC-owned MMAP output buffers.");
+         return false;
+     }
+-    if (!mOutputQueue->Streamon()) {
+-        ALOGE("Failed to streamon output queue.");
++    if (!exportOutputBuffers(allocated, format->fmt.pix_mp.num_planes) ||
++        !queueAllOutputBuffers() || !mOutputQueue->Streamon()) {
++        ALOGE("Failed to initialize MFC-owned output buffers.");
+         return false;
+     }
+ 
+-    // Always use fexible pixel 420 format YCBCR_420_888 in Android.
+-    mGetPoolCb.Run(&mVideoFramePool, mCodedSize, HalPixelFormat::YCBCR_420_888, *numOutputBuffers);
++    /* SMT311_Q29P_VISIBLE_OUTPUT_POOL:
++     * MFC reports the padded coded size (e.g. 1280x736 for 720p), but FIMC
++     * converts/crops into the visible frame. The Android output allocation must
++     * therefore use the visible size. With a single-GEM NV12 allocation, using
++     * coded height shifts the chroma offset by stride * (coded-visible). */
++    media::Size outputPoolSize;
++    outputPoolSize.SetSize(mVisibleRect.width(), mVisibleRect.height());
++    ALOGI("Q29P_OUTPUT_POOL_VISIBLE pool=%s coded=%s visible=%s",
++          outputPoolSize.ToString().c_str(), mCodedSize.ToString().c_str(),
++          mVisibleRect.ToString().c_str());
++    // G998 DIAGNOSTIC ONLY (never a release without long hardware playback QA):
++    // The Exynos MFC needs its full firmware-reported CAPTURE buffer count;
++    // it is independent from the number of *display* buffers requested via
++    // C2VdaBqBlockPool.  On SM-T311 640x1024 we measured 18 MFC buffers and
++    // a 34MiB->0.2MiB CMA drop followed by a failed 1000-page CMA alloc and
++    // a Codec2 queue timeout.  Request fewer graphics BufferQueue slots,
++    // WITHOUT touching the MFC reference/DMA buffer allocation or the
++    // camera/720p paths.  Eight is a trial only, not a proven stable setting.
++    size_t surfaceBufferCount = allocated;
++    char device[PROPERTY_VALUE_MAX] = {};
++    property_get("ro.product.device", device, "");
++    if (strcmp(device, "lt013g") == 0 &&
++            mVisibleRect.width() == 640 && mVisibleRect.height() == 1024) {
++        surfaceBufferCount = std::min<size_t>(allocated, 8);
++        ALOGI("G998_PORTRAIT_CMA_TRIAL mfc_buffers=%zu surface_buffers=%zu",
++              allocated, surfaceBufferCount);
++    }
++    mGetPoolCb.Run(&mVideoFramePool, outputPoolSize, HalPixelFormat::YCBCR_420_888,
++                   surfaceBufferCount);
+     if (!mVideoFramePool) {
+-        ALOGE("Failed to get block pool with size: %s", mCodedSize.ToString().c_str());
++        ALOGE("Failed to get block pool with visible size: %s", outputPoolSize.ToString().c_str());
+         return false;
+     }
++    if (!setupFimc()) return false;
+ 
+-    tryFetchVideoFrame();
++    ALOGI("Q29_MFC_MMAP_EXPBUF_FIMC_READY buffers=%zu coded=%s visible=%s", allocated,
++          mCodedSize.ToString().c_str(), mVisibleRect.ToString().c_str());
+     return true;
+ }
+ 
+-void V4L2Decoder::tryFetchVideoFrame() {
+-    ALOGV("%s()", __func__);
++bool V4L2Decoder::queueAllOutputBuffers() {
++    for (size_t i = 0; i < mOutputQueue->AllocatedBuffersCount(); ++i) {
++        auto buffer = mOutputQueue->GetFreeBuffer(i);
++        if (!buffer || !std::move(*buffer).QueueMMap()) return false;
++    }
++    return true;
++}
++
++bool V4L2Decoder::exportOutputBuffers(size_t count, size_t numPlanes) {
++    mOutputDmabufs.clear();
++    mOutputPlaneSizes.clear();
++    mOutputDmabufs.resize(count);
++    mOutputPlaneSizes.resize(count);
++    for (size_t i = 0; i < count; ++i) {
++        struct v4l2_buffer query = {};
++        struct v4l2_plane planes[VIDEO_MAX_PLANES] = {};
++        query.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++        query.memory = V4L2_MEMORY_MMAP;
++        query.index = i;
++        query.length = VIDEO_MAX_PLANES;
++        query.m.planes = planes;
++        if (mDevice->Ioctl(VIDIOC_QUERYBUF, &query) != 0 || query.length != numPlanes) return false;
++        for (size_t p = 0; p < query.length; ++p) {
++            struct v4l2_exportbuffer exp = {};
++            exp.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++            exp.index = i;
++            exp.plane = p;
++            exp.flags = O_CLOEXEC;
++            if (mDevice->Ioctl(VIDIOC_EXPBUF, &exp) != 0) return false;
++            mOutputDmabufs[i].emplace_back(exp.fd);
++            mOutputPlaneSizes[i].push_back(planes[p].length);
++        }
++    }
++    return true;
++}
++
++void V4L2Decoder::resetFimc() {
++    if (mFimcFd.is_valid() && mFimcStreaming) {
++        enum v4l2_buf_type out = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++        enum v4l2_buf_type cap = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++        xioctl(mFimcFd.get(), VIDIOC_STREAMOFF, &out);
++        xioctl(mFimcFd.get(), VIDIOC_STREAMOFF, &cap);
++    }
++    mFimcStreaming = false;
++    mFimcFd.reset();
++    memset(&mFimcOutputFormat, 0, sizeof(mFimcOutputFormat));
++    memset(&mFimcCaptureFormat, 0, sizeof(mFimcCaptureFormat));
++}
++
++bool V4L2Decoder::setupFimc() {
++    resetFimc();
++    mFimcFd.reset(open(kFimcDevice, O_RDWR | O_NONBLOCK | O_CLOEXEC));
++    if (!mFimcFd.is_valid()) {
++        ALOGE("Q29 FIMC open failed: %d", errno);
++        return false;
++    }
++
++    mFimcOutputFormat.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++    mFimcOutputFormat.fmt.pix_mp.width = mCodedSize.width();
++    mFimcOutputFormat.fmt.pix_mp.height = mCodedSize.height();
++    mFimcOutputFormat.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12MT;
++    mFimcOutputFormat.fmt.pix_mp.field = V4L2_FIELD_NONE;
++    mFimcOutputFormat.fmt.pix_mp.num_planes = 2;
++    if (xioctl(mFimcFd.get(), VIDIOC_S_FMT, &mFimcOutputFormat) != 0) return false;
++    if (mFimcOutputFormat.fmt.pix_mp.pixelformat != V4L2_PIX_FMT_NV12MT ||
++        mFimcOutputFormat.fmt.pix_mp.num_planes != 2) return false;
++
++    mFimcCaptureFormat.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++    mFimcCaptureFormat.fmt.pix_mp.width = mVisibleRect.width();
++    mFimcCaptureFormat.fmt.pix_mp.height = mVisibleRect.height();
++    mFimcCaptureFormat.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12;
++    mFimcCaptureFormat.fmt.pix_mp.field = V4L2_FIELD_NONE;
++    mFimcCaptureFormat.fmt.pix_mp.num_planes = 1;
++    if (xioctl(mFimcFd.get(), VIDIOC_S_FMT, &mFimcCaptureFormat) != 0) return false;
++    if (mFimcCaptureFormat.fmt.pix_mp.pixelformat != V4L2_PIX_FMT_NV12 ||
++        mFimcCaptureFormat.fmt.pix_mp.num_planes != 1) return false;
++    ALOGI("Q29O_FIMC_NV12_SINGLE_READY size=%dx%d stride=%u sizeimage=%u",
++          mVisibleRect.width(), mVisibleRect.height(),
++          mFimcCaptureFormat.fmt.pix_mp.plane_fmt[0].bytesperline,
++          mFimcCaptureFormat.fmt.pix_mp.plane_fmt[0].sizeimage);
++
++    if (mVisibleRect.x() != 0 || mVisibleRect.y() != 0 || mVisibleRect.width() != mCodedSize.width() ||
++        mVisibleRect.height() != mCodedSize.height()) {
++        struct v4l2_selection sel = {};
++        sel.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
++        sel.target = V4L2_SEL_TGT_CROP;
++        sel.r.left = mVisibleRect.x();
++        sel.r.top = mVisibleRect.y();
++        sel.r.width = mVisibleRect.width();
++        sel.r.height = mVisibleRect.height();
++        if (xioctl(mFimcFd.get(), VIDIOC_S_SELECTION, &sel) != 0) return false;
++    }
++
++    struct v4l2_requestbuffers outReq = {};
++    outReq.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++    outReq.memory = V4L2_MEMORY_DMABUF;
++    outReq.count = 1;
++    if (xioctl(mFimcFd.get(), VIDIOC_REQBUFS, &outReq) != 0 || outReq.count < 1) return false;
++
++    struct v4l2_requestbuffers capReq = {};
++    capReq.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++    capReq.memory = V4L2_MEMORY_DMABUF;
++    capReq.count = 1;
++    if (xioctl(mFimcFd.get(), VIDIOC_REQBUFS, &capReq) != 0 || capReq.count < 1) return false;
++
++    ALOGI("Q29_FIMC_READY src=%dx%d dst=%dx%d", mCodedSize.width(), mCodedSize.height(),
++          mVisibleRect.width(), mVisibleRect.height());
++    return true;
++}
++
++bool V4L2Decoder::convertWithFimc(size_t bufferId, VideoFrame* frame) {
++    if (!mFimcFd.is_valid() || bufferId >= mOutputDmabufs.size() || !frame) return false;
++    const auto& srcFds = mOutputDmabufs[bufferId];
++    const auto& srcSizes = mOutputPlaneSizes[bufferId];
++    const auto& dstFds = frame->getFDs();
++    if (srcFds.size() < 2 || srcSizes.size() < 2 || dstFds.empty()) {
++        ALOGE("Q29O invalid FIMC planes src=%zu dstfds=%zu", srcFds.size(), dstFds.size());
++        return false;
++    }
++
++    struct v4l2_buffer cap = {};
++    struct v4l2_plane capPlanes[VIDEO_MAX_PLANES] = {};
++    cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++    cap.memory = V4L2_MEMORY_DMABUF;
++    cap.index = 0;
++    cap.length = 1;
++    cap.m.planes = capPlanes;
++    capPlanes[0].m.fd = dstFds[0];
++    capPlanes[0].length = mFimcCaptureFormat.fmt.pix_mp.plane_fmt[0].sizeimage;
++    if (mFimcFrameCount == 0) {
++        ALOGI("Q29O_FIMC_SINGLE_DMABUF dstfds=%zu fd0=%d length=%u", dstFds.size(),
++              dstFds[0], capPlanes[0].length);
++    }
++    if (xioctl(mFimcFd.get(), VIDIOC_QBUF, &cap) != 0) return false;
++
++    struct v4l2_buffer out = {};
++    struct v4l2_plane outPlanes[VIDEO_MAX_PLANES] = {};
++    out.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++    out.memory = V4L2_MEMORY_DMABUF;
++    out.index = 0;
++    out.length = 2;
++    out.m.planes = outPlanes;
++    for (size_t i = 0; i < 2; ++i) {
++        outPlanes[i].m.fd = srcFds[i].get();
++        outPlanes[i].length = srcSizes[i];
++        outPlanes[i].bytesused = srcSizes[i];
++    }
++    if (xioctl(mFimcFd.get(), VIDIOC_QBUF, &out) != 0) return false;
++
++    if (!mFimcStreaming) {
++        enum v4l2_buf_type capType = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++        enum v4l2_buf_type outType = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++        if (xioctl(mFimcFd.get(), VIDIOC_STREAMON, &capType) != 0) return false;
++        if (xioctl(mFimcFd.get(), VIDIOC_STREAMON, &outType) != 0) {
++            xioctl(mFimcFd.get(), VIDIOC_STREAMOFF, &capType);
++            return false;
++        }
++        mFimcStreaming = true;
++    }
++
++    bool capDone = false;
++    bool outDone = false;
++    int elapsed = 0;
++    while ((!capDone || !outDone) && elapsed < kFimcTimeoutMs) {
++        if (!capDone) {
++            struct v4l2_buffer b = {};
++            struct v4l2_plane p[VIDEO_MAX_PLANES] = {};
++            b.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++            b.memory = V4L2_MEMORY_DMABUF;
++            b.length = VIDEO_MAX_PLANES;
++            b.m.planes = p;
++            if (xioctl(mFimcFd.get(), VIDIOC_DQBUF, &b) == 0) capDone = true;
++            else if (errno != EAGAIN) return false;
++        }
++        if (!outDone) {
++            struct v4l2_buffer b = {};
++            struct v4l2_plane p[VIDEO_MAX_PLANES] = {};
++            b.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++            b.memory = V4L2_MEMORY_DMABUF;
++            b.length = VIDEO_MAX_PLANES;
++            b.m.planes = p;
++            if (xioctl(mFimcFd.get(), VIDIOC_DQBUF, &b) == 0) outDone = true;
++            else if (errno != EAGAIN) return false;
++        }
++        if (!capDone || !outDone) {
++            struct pollfd pfd = {mFimcFd.get(), POLLIN | POLLOUT | POLLERR, 0};
++            int ret = poll(&pfd, 1, 10);
++            if (ret < 0 && errno != EINTR) return false;
++            elapsed += 10;
++        }
++    }
++    if (!capDone || !outDone) {
++        ALOGE("Q29 FIMC timeout cap=%d out=%d", capDone, outDone);
++        return false;
++    }
++
++    /*
++     * SMT311_Q29V_FIMC_FRAME_BARRIER_STREAMOFF:
++     * Q28B's bit-exact bridge completed each FIMC transaction with STREAMOFF
++     * before userspace consumed the destination. Keep the same hardware-idle
++     * boundary here. This is not a CPU cache flush and does not copy pixels.
++     */
++    {
++        enum v4l2_buf_type outType = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++        enum v4l2_buf_type capType = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++        if (xioctl(mFimcFd.get(), VIDIOC_STREAMOFF, &outType) != 0) {
++            ALOGE("Q29V FIMC STREAMOFF output failed: %s", strerror(errno));
++            return false;
++        }
++        if (xioctl(mFimcFd.get(), VIDIOC_STREAMOFF, &capType) != 0) {
++            ALOGE("Q29V FIMC STREAMOFF capture failed: %s", strerror(errno));
++            return false;
++        }
++        mFimcStreaming = false;
++        if (mFimcFrameCount == 0)
++            ALOGI("Q29V_FIMC_FRAME_BARRIER_STREAMOFF active");
++    }
++
++    ++mFimcFrameCount;
++    if (mFimcFrameCount == 1) {
++        ALOGI("Q29L_FIMC_ACTIVE first_buffer=%zu", bufferId);
++    }
++    ALOGV("Q29_FIMC_FRAME buffer=%zu count=%zu", bufferId, mFimcFrameCount);
++    return true;
++}
++
++void V4L2Decoder::recycleOutputBuffer(size_t bufferId) {
++    auto outputBuffer = mOutputQueue->GetFreeBuffer(bufferId);
++    if (!outputBuffer || !std::move(*outputBuffer).QueueMMap()) {
++        ALOGE("Q29 failed to recycle MFC buffer %zu", bufferId);
++        onError();
++    }
++}
++
++void V4L2Decoder::maybeCompleteDrain() {
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
+-    ALOG_ASSERT(mVideoFramePool, "mVideoFramePool is null, haven't get the instance yet?");
++    if (!mDrainCb || !mDrainLastSeen) return;
++    if (mFrameRequestPending || !mPendingOutputFrames.empty() || !mPendingDecodeCbs.empty()) {
++        ALOGV("Q29L_DRAIN_WAIT pending_decode=%zu pending_output=%zu frame_request=%d",
++              mPendingDecodeCbs.size(), mPendingOutputFrames.size(), mFrameRequestPending);
++        return;
++    }
++    completeDrain();
++}
+ 
+-    if (mOutputQueue->FreeBuffersCount() == 0) {
+-        ALOGD("No free V4L2 output buffers, ignore.");
++void V4L2Decoder::completeDrain() {
++    if (!mDrainCb) return;
++    ALOGI("Q29L_DRAIN_COMPLETE pending_decode=%zu pending_output=%zu frame_request=%d fimc_frames=%zu",
++          mPendingDecodeCbs.size(), mPendingOutputFrames.size(), mFrameRequestPending,
++          mFimcFrameCount);
++    if (!sendV4L2DecoderCmd(true)) {
++        std::move(mDrainCb).Run(VideoDecoder::DecodeStatus::kError);
++        onError();
+         return;
+     }
++    mDrainLastSeen = false;
++    std::move(mDrainCb).Run(VideoDecoder::DecodeStatus::kOk);
++    setState(State::Idle);
++}
+ 
++void V4L2Decoder::tryFetchVideoFrame() {
++    ALOGV("%s()", __func__);
++    ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
++    if (!mVideoFramePool || mFrameRequestPending || mPendingOutputFrames.empty()) return;
++    mFrameRequestPending = true;
+     if (!mVideoFramePool->getVideoFrame(
+                 ::base::BindOnce(&V4L2Decoder::onVideoFrameReady, mWeakThis))) {
+-        ALOGV("%s(): Previous callback is running, ignore.", __func__);
++        mFrameRequestPending = false;
+     }
+ }
+ 
+@@ -535,59 +984,50 @@ void V4L2Decoder::onVideoFrameReady(
+         std::optional<VideoFramePool::FrameWithBlockId> frameWithBlockId) {
+     ALOGV("%s()", __func__);
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
++    mFrameRequestPending = false;
+ 
+     if (!frameWithBlockId) {
+-        ALOGE("Got nullptr VideoFrame.");
++        ALOGE("Q29 output frame allocation failed");
+         onError();
+         return;
+     }
++    if (mPendingOutputFrames.empty()) {
++        ALOGV("Ignore stale VideoFramePool callback after flush/reconfigure");
++        if (!applyPendingResolutionChange()) onError();
++        return;
++    }
+ 
+-    // Unwrap our arguments.
+     std::unique_ptr<VideoFrame> frame;
+     uint32_t blockId;
+     std::tie(frame, blockId) = std::move(*frameWithBlockId);
++    auto pending = std::move(mPendingOutputFrames.front());
++    mPendingOutputFrames.pop();
++    const size_t bufferId = pending.buffer->BufferId();
+ 
+-    ::base::Optional<media::V4L2WritableBufferRef> outputBuffer;
+-    // Find the V4L2 buffer that is associated with this block.
+-    auto iter = mBlockIdToV4L2Id.find(blockId);
+-    if (iter != mBlockIdToV4L2Id.end()) {
+-        // If we have met this block in the past, reuse the same V4L2 buffer.
+-        outputBuffer = mOutputQueue->GetFreeBuffer(iter->second);
+-    } else if (mBlockIdToV4L2Id.size() < mOutputQueue->AllocatedBuffersCount()) {
+-        // If this is the first time we see this block, give it the next
+-        // available V4L2 buffer.
+-        const size_t v4l2BufferId = mBlockIdToV4L2Id.size();
+-        mBlockIdToV4L2Id.emplace(blockId, v4l2BufferId);
+-        outputBuffer = mOutputQueue->GetFreeBuffer(v4l2BufferId);
+-    } else {
+-        // If this happens, this is a bug in VideoFramePool. It should never
+-        // provide more blocks than we have V4L2 buffers.
+-        ALOGE("Got more different blocks than we have V4L2 buffers for.");
+-    }
+-
+-    if (!outputBuffer) {
+-        ALOGE("V4L2 buffer not available.");
++    if (!convertWithFimc(bufferId, frame.get())) {
++        ALOGE("Q29 FIMC conversion failed for MFC buffer %zu block %u", bufferId, blockId);
+         onError();
+         return;
+     }
+ 
+-    uint32_t v4l2Id = outputBuffer->BufferId();
+-    ALOGV("QBUF to output queue, blockId=%u, V4L2Id=%u", blockId, v4l2Id);
+-
+-    if (!std::move(*outputBuffer).QueueDMABuf(frame->getFDs())) {
+-        ALOGE("%s(): Failed to QBUF to output queue, blockId=%u, V4L2Id=%u", __func__, blockId,
+-              v4l2Id);
+-        onError();
+-        return;
++    pending.buffer.reset();
++    if (!mResolutionChangePending) {
++        recycleOutputBuffer(bufferId);
++        if (mState == State::Error) return;
+     }
+-    if (mFrameAtDevice.find(v4l2Id) != mFrameAtDevice.end()) {
+-        ALOGE("%s(): V4L2 buffer %d already enqueued.", __func__, v4l2Id);
++
++    frame->setBitstreamId(pending.bitstreamId);
++    frame->setVisibleRect(mVisibleRect);
++    mOutputCb.Run(std::move(frame));
++
++    if (!mPendingOutputFrames.empty()) {
++        mTaskRunner->PostTask(FROM_HERE,
++                              ::base::BindOnce(&V4L2Decoder::tryFetchVideoFrame, mWeakThis));
++    } else if (!applyPendingResolutionChange()) {
+         onError();
+         return;
+     }
+-    mFrameAtDevice.insert(std::make_pair(v4l2Id, std::move(frame)));
+-
+-    tryFetchVideoFrame();
++    maybeCompleteDrain();
+ }
+ 
+ std::optional<size_t> V4L2Decoder::getNumOutputBuffers() {
+@@ -682,6 +1122,13 @@ void V4L2Decoder::onError() {
+     ALOGV("%s()", __func__);
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
+ 
++    resetFimc();
++    mCodecConfig.clear();
++    while (!mPendingOutputFrames.empty()) mPendingOutputFrames.pop();
++    mFrameRequestPending = false;
++    mResolutionChangePending = false;
++    mDrainLastSeen = false;
++    mFimcFrameCount = 0;
+     setState(State::Error);
+     mErrorCb.Run();
+ }
+diff --git a/components/V4L2EncodeComponent.cpp b/components/V4L2EncodeComponent.cpp
+index ab2230e6e357387d8c887f5adcf3fbc6f47fc114..6a9d1c7fa106bfa6af84c4293b42493dafc94b65 100644
+--- a/components/V4L2EncodeComponent.cpp
++++ b/components/V4L2EncodeComponent.cpp
+@@ -10,11 +10,16 @@
+ #include <inttypes.h>
+ 
+ #include <algorithm>
++#include <limits>
+ #include <utility>
+ 
++#include <linux/dma-buf.h>
++#include <sys/ioctl.h>
++#include <errno.h>
+ #include <C2AllocatorGralloc.h>
+ #include <C2PlatformSupport.h>
+ #include <C2Work.h>
++#include <cutils/properties.h>
+ #include <android/hardware/graphics/common/1.0/types.h>
+ #include <base/bind.h>
+ #include <base/bind_helpers.h>
+@@ -70,16 +75,20 @@ std::optional<std::vector<VideoFramePlane>> getVideoFrameLayout(const C2ConstGra
+     std::vector<uint32_t> strides(layout.numPlanes, 0u);
+     switch (layout.type) {
+     case C2PlanarLayout::TYPE_YUV: {
+-        android_ycbcr ycbcr = getGraphicBlockInfo(block);
++        std::optional<android_ycbcr> ycbcr = getGraphicBlockInfo(block);
++        if (!ycbcr) {
++            ALOGE("Failed to lock YCbCr input block");
++            return std::nullopt;
++        }
+         offsets[C2PlanarLayout::PLANE_Y] =
+-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ycbcr.y));
++                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ycbcr->y));
+         offsets[C2PlanarLayout::PLANE_U] =
+-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ycbcr.cb));
++                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ycbcr->cb));
+         offsets[C2PlanarLayout::PLANE_V] =
+-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ycbcr.cr));
+-        strides[C2PlanarLayout::PLANE_Y] = static_cast<uint32_t>(ycbcr.ystride);
+-        strides[C2PlanarLayout::PLANE_U] = static_cast<uint32_t>(ycbcr.cstride);
+-        strides[C2PlanarLayout::PLANE_V] = static_cast<uint32_t>(ycbcr.cstride);
++                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ycbcr->cr));
++        strides[C2PlanarLayout::PLANE_Y] = static_cast<uint32_t>(ycbcr->ystride);
++        strides[C2PlanarLayout::PLANE_U] = static_cast<uint32_t>(ycbcr->cstride);
++        strides[C2PlanarLayout::PLANE_V] = static_cast<uint32_t>(ycbcr->cstride);
+ 
+         bool crcb = false;
+         if (offsets[C2PlanarLayout::PLANE_U] > offsets[C2PlanarLayout::PLANE_V]) {
+@@ -89,7 +98,7 @@ std::optional<std::vector<VideoFramePlane>> getVideoFrameLayout(const C2ConstGra
+         }
+ 
+         bool semiplanar = false;
+-        if (ycbcr.chroma_step >
++        if (ycbcr->chroma_step >
+             offsets[C2PlanarLayout::PLANE_V] - offsets[C2PlanarLayout::PLANE_U]) {
+             semiplanar = true;
+         }
+@@ -421,8 +430,45 @@ void V4L2EncodeComponent::queueTask(std::unique_ptr<C2Work> work) {
+     ALOG_ASSERT(mEncoderTaskRunner->RunsTasksInCurrentSequence());
+     ALOG_ASSERT(mEncoderState != EncoderState::UNINITIALIZED);
+ 
+-    // If we're in the error state we can immediately return, freeing all buffers in the work item.
++    // queue_nb() may have accepted this work before an earlier asynchronous
++    // encode task reported a fatal error. Do not silently destroy an already
++    // accepted C2Work: the framework needs a completion to release its slot.
+     if (mEncoderState == EncoderState::ERROR) {
++        work->result = C2_CORRUPTED;
++        work->input.buffers.clear();
++        work->workletsProcessed = static_cast<uint32_t>(work->worklets.size());
++        if (mListener) {
++            std::list<std::unique_ptr<C2Work>> failedWorks;
++            failedWorks.emplace_back(std::move(work));
++            mListener->onWorkDone_nb(shared_from_this(), std::move(failedWorks));
++        } else {
++            ALOGE("Cannot return accepted work in ERROR: listener is not set");
++        }
++        return;
++    }
++
++    // scheduleNextEncodeTask() can only process one worklet and, when a
++    // graphic input is present, exactly one graphic block. Validate BEFORE
++    // accepting the work into the input queue: otherwise malformed work
++    // reaches front() or an ALOG_ASSERT and terminates the C2 service.
++    const bool invalidWork =
++            work->worklets.size() != 1u || work->input.buffers.size() > 1u ||
++            (!work->input.buffers.empty() &&
++             (!work->input.buffers.front() ||
++              work->input.buffers.front()->data().graphicBlocks().size() != 1u));
++    if (invalidWork) {
++        ALOGE("Invalid encoder work: worklets=%zu input buffers=%zu",
++              work->worklets.size(), work->input.buffers.size());
++        work->result = C2_CORRUPTED;
++        work->input.buffers.clear();
++        work->workletsProcessed = static_cast<uint32_t>(work->worklets.size());
++        if (mListener) {
++            std::list<std::unique_ptr<C2Work>> failedWorks;
++            failedWorks.emplace_back(std::move(work));
++            mListener->onWorkDone_nb(shared_from_this(), std::move(failedWorks));
++        } else {
++            ALOGE("Cannot return invalid accepted encoder work: listener is not set");
++        }
+         return;
+     }
+ 
+@@ -732,12 +778,29 @@ bool V4L2EncodeComponent::configureInputFormat(media::VideoPixelFormat inputForm
+         memset(&crop, 0, sizeof(v4l2_crop));
+         crop.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+         crop.c = rect;
+-        if (mDevice->Ioctl(VIDIOC_S_CROP, &crop) != 0 ||
+-            mDevice->Ioctl(VIDIOC_G_CROP, &crop) != 0) {
+-            ALOGE("Failed to crop to specified visible rectangle");
+-            return false;
++        const bool cropIoctlOk =
++                mDevice->Ioctl(VIDIOC_S_CROP, &crop) == 0 &&
++                mDevice->Ioctl(VIDIOC_G_CROP, &crop) == 0;
++        if (!cropIoctlOk) {
++            // H27Q7_FULL_FRAME_NO_CROP_IOCTL:
++            // Samsung MFC v5 does not expose encoder selection/crop ioctls.
++            // This is safe only when S_FMT already negotiated the exact full
++            // visible frame, so no hardware crop is actually required.
++            const bool exactFullFrame =
++                    rect.left == 0 && rect.top == 0 &&
++                    rect.width == static_cast<int>(format->fmt.pix_mp.width) &&
++                    rect.height == static_cast<int>(format->fmt.pix_mp.height);
++            if (!exactFullFrame) {
++                ALOGE("Failed to crop to specified visible rectangle");
++                return false;
++            }
++            ALOGW("H27Q7_FULL_FRAME_NO_CROP_IOCTL size=%dx%d - continuing",
++                  rect.width, rect.height);
++            visibleRectangle = media::Rect(rect.left, rect.top, rect.width, rect.height);
++        } else {
++            visibleRectangle =
++                    media::Rect(crop.c.left, crop.c.top, crop.c.width, crop.c.height);
+         }
+-        visibleRectangle = media::Rect(crop.c.left, crop.c.top, crop.c.width, crop.c.height);
+     }
+ 
+     ALOGV("Input format set to %s (size: %s, adjusted size: %dx%d, coded size: %s)",
+@@ -785,12 +848,39 @@ bool V4L2EncodeComponent::configureDevice(media::VideoCodecProfile outputProfile
+         // assume the operation was successful for now.
+     }
+ 
+-    // Additional optional controls:
+-    // - Enable macroblock-level bitrate control.
+-    // - Set GOP length to 0 to disable periodic key frames.
++    // G886: mirror SystemUI G885's real, rectangular AVC dimensions.
++    // The G878 experimental 800x800 canvas has been withdrawn. On the
++    // SM-T311 panel (800x1280), the verified decoder-compatible long-edge
++    // limit 1024 yields 640x1024 portrait / 1024x640 landscape. The old
++    // G883 filter only selected the rejected square, leaving both real
++    // orientations with GOP_SIZE=0 and a single initial IDR. A bounded GOP
++    // greatly reduces work needed for seeking a long local MP4.
++    // Camera recordings and other resolutions/devices retain old behavior.
++    char device[PROPERTY_VALUE_MAX] = {};
++    property_get("ro.product.device", device, "");
++    const bool isT311RectangularRecorder = strcmp(device, "lt013g") == 0 &&
++            ((mVisibleSize.width() == 640 && mVisibleSize.height() == 1024) ||
++             (mVisibleSize.width() == 1024 && mVisibleSize.height() == 640)) &&
++            outputProfile >= media::H264PROFILE_MIN &&
++            outputProfile <= media::H264PROFILE_MAX;
++    // Do not couple independent optional controls in a single ioctl: if the
++    // older MFC rejects MB_RC_ENABLE, the following GOP setting must not be
++    // discarded with it.
+     mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
+-                         {media::V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE, 1),
+-                          media::V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0)});
++                         {media::V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE, 1)});
++    if (isT311RectangularRecorder) {
++        const uint32_t gopSize = std::max(1u, std::min(mKeyFramePeriod, 30u));
++        if (mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                                {media::V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_GOP_SIZE, gopSize)})) {
++            ALOGI("SM-T311 rectangular H264: Exynos MFC periodic IDR GOP=%u frames", gopSize);
++        } else {
++            ALOGW("SM-T311 rectangular H264: MFC rejected GOP=%u, legacy sync request remains",
++                  gopSize);
++        }
++    } else {
++        mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                             {media::V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0)});
++    }
+ 
+     // All controls below are H.264-specific, so we can return here if the profile is not H.264.
+     if (outputProfile < media::H264PROFILE_MIN || outputProfile > media::H264PROFILE_MAX) {
+@@ -813,33 +903,75 @@ bool V4L2EncodeComponent::configureDevice(media::VideoCodecProfile outputProfile
+         ALOGW("Device doesn't support prepending SPS and PPS to IDR");
+     }
+ 
+-    std::vector<media::V4L2ExtCtrl> h264Ctrls;
+-
+     // No B-frames, for lowest decoding latency.
+-    h264Ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_B_FRAMES, 0);
+-    // Quantization parameter maximum value (for variable bitrate control).
+-    h264Ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_H264_MAX_QP, 51);
++    if (!mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                              {{V4L2_CID_MPEG_VIDEO_B_FRAMES, 0}})) {
++        ALOGW("Failed disabling B-frames");
++    }
+ 
++    // Quantization parameter maximum value (for variable bitrate control).
++    if (!mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                              {{V4L2_CID_MPEG_VIDEO_H264_MAX_QP, 51}})) {
++        ALOGW("Failed setting maximum H.264 QP");
++    }
++
++    // G974: physical USER screenrecord (640x1024 AVC Main) produced a
++    // decoder-visible CABAC/entropy macroblock error near second 7. The
++    // previously accepted G967/G968/G969 strict clips were ALL Baseline.
++    // Exynos4 MFCv5 implements Main syntax but is not yet physically
++    // qualified with this surface pipeline. Fail to the proven Baseline
++    // hardware profile for exactly the SM-T311 rectangular screen profile;
++    // no other resolutions, camera modes or non-SM-T311 products change.
++    // SPS (not requested C2 profile) remains authoritative for a decoder.
++    media::VideoCodecProfile hardwareProfile = outputProfile;
++    if (isT311RectangularRecorder &&
++        hardwareProfile != media::H264PROFILE_BASELINE) {
++        ALOGW("G974_MFCV5_SCREEN_MAIN_REJECT requested=%d -> hardware Baseline",
++              static_cast<int>(hardwareProfile));
++        hardwareProfile = media::H264PROFILE_BASELINE;
++    }
+     // Set H.264 profile.
+-    int32_t profile = media::V4L2Device::VideoCodecProfileToV4L2H264Profile(outputProfile);
++    int32_t profile = media::V4L2Device::VideoCodecProfileToV4L2H264Profile(hardwareProfile);
+     if (profile < 0) {
+         ALOGE("Trying to set invalid H.264 profile");
+         return false;
+     }
+-    h264Ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_H264_PROFILE, profile);
++    if (!mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                              {{V4L2_CID_MPEG_VIDEO_H264_PROFILE, profile}})) {
++        ALOGE("Failed setting H.264 profile %d", profile);
++        return false;
++    }
+ 
+     // Set H.264 output level. Use Level 4.0 as fallback default.
+     // TODO(dstaessens): Investigate code added by hiroh@ recently to select level in Chrome VEA.
+-    uint8_t h264Level = outputH264Level.value_or(media::H264SPS::kLevelIDC4p0);
+-    h264Ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_H264_LEVEL,
+-                           media::V4L2Device::H264LevelIdcToV4L2H264Level(h264Level));
++    uint8_t requestedLevel = outputH264Level.value_or(media::H264SPS::kLevelIDC4p0);
++    // Exynos 4212 / MFCv5 exposes at most H.264 Level 4.0. Android's
++    // default C2 request is 4.1, which the driver rejects with -EINVAL.
++    // For SM-T311 640x1024@30, Level 4.0 exceeds required MaxFS/MaxMBPS.
++    // Never silently use the invalid driver default Level 1.0.
++    uint8_t h264Level = requestedLevel;
++    if (h264Level > media::H264SPS::kLevelIDC4p0) {
++        ALOGW("SM-T311 MFCv5 H.264 level %u exceeds maximum supported 40; using 40",
++              requestedLevel);
++        h264Level = media::H264SPS::kLevelIDC4p0;
++    }
++    int32_t v4l2Level = media::V4L2Device::H264LevelIdcToV4L2H264Level(h264Level);
++    if (v4l2Level < 0) {
++        ALOGE("Failed mapping requested H.264 level %u", h264Level);
++        return false;
++    }
++    if (!mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                              {{V4L2_CID_MPEG_VIDEO_H264_LEVEL, v4l2Level}})) {
++        ALOGE("Failed setting H.264 level %u (V4L2 %d)", h264Level, v4l2Level);
++        return false;
++    }
++    ALOGI("H.264 encoder profile=%d level_idc=%u", profile, h264Level);
+ 
+     // Ask not to put SPS and PPS into separate bitstream buffers.
+-    h264Ctrls.emplace_back(V4L2_CID_MPEG_VIDEO_HEADER_MODE,
+-                           V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME);
+-
+     // Ignore return value as these controls are optional.
+-    mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG, std::move(h264Ctrls));
++    mDevice->SetExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                          {{V4L2_CID_MPEG_VIDEO_HEADER_MODE,
++                            V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME}});
+ 
+     return true;
+ }
+@@ -991,7 +1123,7 @@ void V4L2EncodeComponent::scheduleNextEncodeTask() {
+         drainTask(C2Component::DRAIN_COMPONENT_WITH_EOS);
+     }
+ 
+-    if (mEncoderState == EncoderState::DRAINING) {
++    if (mEncoderState == EncoderState::DRAINING || mEncoderState == EncoderState::ERROR) {
+         return;
+     } else if (mInputWorkQueue.empty()) {
+         setEncoderState(EncoderState::WAITING_FOR_INPUT);
+@@ -1011,7 +1143,7 @@ bool V4L2EncodeComponent::encode(C2ConstGraphicBlock block, uint64_t index, int6
+     // Update dynamic encoding parameters (bitrate, framerate, key frame) if requested.
+     if (!updateEncodingParameters()) return false;
+ 
+-    mKeyFrameCounter = (mKeyFrameCounter + 1) % mKeyFramePeriod;
++    mKeyFrameCounter = mKeyFramePeriod ? (mKeyFrameCounter + 1) % mKeyFramePeriod : 1;
+ 
+     // If required convert the data to the V4L2 device's configured input pixel format. We
+     // allocate the same amount of buffers on the device input queue and the format convertor,
+@@ -1072,8 +1204,13 @@ bool V4L2EncodeComponent::encode(C2ConstGraphicBlock block, uint64_t index, int6
+             reportError(C2_CORRUPTED);
+             return false;
+         }
+-        // Start polling on the V4L2 device.
+-        startDevicePoll();
++        // G1251: startDevicePoll() reports C2_CORRUPTED and transitions the
++        // encoder to ERROR on failure. Stop here: filling VIDEO_CAPTURE after
++        // that point would queue DMABUFs into a device without a poll thread.
++        if (!startDevicePoll()) {
++            ALOGE("G1251_START_POLL_FAILED_ABORT_ENCODE");
++            return false;
++        }
+     }
+ 
+     // Queue all buffers on the output queue. These buffers will be used to store the encoded
+@@ -1102,7 +1239,10 @@ void V4L2EncodeComponent::drain() {
+     cmd.cmd = V4L2_ENC_CMD_STOP;
+     if (mDevice->Ioctl(VIDIOC_ENCODER_CMD, &cmd) != 0) {
+         ALOGE("Failed to stop encoder");
+-        onDrainDone(false);
++        // G1261: onDrainDone() asserts that DRAINING has already begun.
++        // STOP failed before that transition, so report the device failure
++        // directly instead of invoking a callback with an invalid state.
++        reportError(C2_CORRUPTED);
+         return;
+     }
+     ALOGV("%s(): Sent STOP command to encoder", __func__);
+@@ -1115,27 +1255,40 @@ void V4L2EncodeComponent::flush() {
+     ALOG_ASSERT(mEncoderTaskRunner->RunsTasksInCurrentSequence());
+ 
+     // Stop the device poll thread.
+-    stopDevicePoll();
++    if (!stopDevicePoll()) {
++        return;
++    }
+ 
+     // Stop streaming on the V4L2 device, which stops all currently queued work and releases all
+     // buffers currently in use by the device.
+     // TODO(b/160540027): Calling streamoff currently results in a bug.
++    bool queuesStopped = true;
+     for (auto& queue : {mInputQueue, mOutputQueue}) {
+-        if (queue && queue->IsStreaming() && !queue->Streamoff()) {
++        if (queue && (queue->IsStreaming() || queue->QueuedBuffersCount() > 0) &&
++            !queue->Streamoff()) {
+             ALOGE("Failed to stop streaming on the device queue");
+             reportError(C2_CORRUPTED);
++            queuesStopped = false;
+         }
+     }
+ 
+-    // Return all buffers to the input format convertor and clear all references to graphic blocks
+-    // in the input queue. We don't need to clear the output map as those buffers will still be
+-    // used.
++    // A failed STREAMOFF cannot guarantee that the kernel has relinquished the
++    // imported input DMABUFs. Keep both input and CAPTURE block references
++    // alive on the fatal path instead of returning still-active DMA memory to
++    // the client or the format converter.
++    if (!queuesStopped) {
++        return;
++    }
++
++    // Both V4L2 queues have stopped. It is now safe to release all imported
++    // input blocks and CAPTURE blocks before reporting aborted work.
+     for (auto& it : mInputBuffersMap) {
+         if (mInputFormatConverter && it.second) {
+             mInputFormatConverter->returnBlock(it.first);
+         }
+         it.second = nullptr;
+     }
++    for (auto& block : mOutputBuffersMap) block.reset();
+ 
+     // Report all queued work items as aborted.
+     std::list<std::unique_ptr<C2Work>> abortedWorkItems;
+@@ -1156,6 +1309,14 @@ void V4L2EncodeComponent::flush() {
+     if (!abortedWorkItems.empty())
+         mListener->onWorkDone_nb(shared_from_this(), std::move(abortedWorkItems));
+ 
++    if (mEncoderState != EncoderState::ERROR) {
++        mCSDSubmitted = false;
++        mKeyFrameCounter = 0;
++        if (mEncoderState != EncoderState::WAITING_FOR_INPUT) {
++            setEncoderState(EncoderState::WAITING_FOR_INPUT);
++        }
++    }
++
+     // Streaming and polling on the V4L2 device input and output queues will be resumed once new
+     // encode work is queued.
+ }
+@@ -1227,7 +1388,8 @@ void V4L2EncodeComponent::onInputBufferDone(uint64_t index) {
+     }
+ }
+ 
+-void V4L2EncodeComponent::onOutputBufferDone(uint32_t payloadSize, bool keyFrame, int64_t timestamp,
++void V4L2EncodeComponent::onOutputBufferDone(size_t dataOffset, uint32_t payloadSize,
++                                             bool keyFrame, int64_t timestamp,
+                                              std::shared_ptr<C2LinearBlock> outputBlock) {
+     ALOGV("%s(): output buffer done (timestamp: %" PRId64 ", size: %u, key frame: %d)", __func__,
+           timestamp, payloadSize, keyFrame);
+@@ -1238,7 +1400,49 @@ void V4L2EncodeComponent::onOutputBufferDone(uint32_t payloadSize, bool keyFrame
+     }
+ 
+     C2ConstLinearBlock constBlock =
+-            outputBlock->share(outputBlock->offset(), payloadSize, C2Fence());
++            outputBlock->share(outputBlock->offset() + dataOffset, payloadSize, C2Fence());
++
++    // G967 BOUNDED DIAGNOSTIC - explicit DMA-BUF CPU-read sync after MFC
++    // DQBUF. C2AllocatorIon::map() performs mmap(), not DMA_BUF_IOCTL_SYNC.
++    // The simple G966 mmap-only diagnostic did not fix compressed corruption.
++    // No altered encoder settings or extra copies; verify strict H264 externally.
++    if (payloadSize != 0) {
++        const C2Handle* handle = outputBlock->handle();
++        if (!handle || handle->numFds < 1 || handle->data[0] < 0) {
++            ALOGE("G967_NO_C2_DMABUF_HANDLE");
++            reportError(C2_CORRUPTED);
++            return;
++        }
++        const int dmabufFd = handle->data[0];
++        struct dma_buf_sync sync = {};
++        sync.flags = DMA_BUF_SYNC_READ | DMA_BUF_SYNC_START;
++        if (ioctl(dmabufFd, DMA_BUF_IOCTL_SYNC, &sync) != 0) {
++            ALOGE("G967_DMABUF_SYNC_START_FAIL errno=%d", errno);
++            reportError(C2_CORRUPTED);
++            return;
++        }
++        bool mapOk = false;
++        {
++            C2ReadView cpuView = constBlock.map().get();
++            mapOk = cpuView.error() == C2_OK &&
++                    cpuView.capacity() >= payloadSize;
++            if (mapOk) {
++                volatile uint8_t firstEncodedByte = cpuView.data()[0];
++                (void)firstEncodedByte;
++            }
++        }
++        sync.flags = DMA_BUF_SYNC_READ | DMA_BUF_SYNC_END;
++        if (ioctl(dmabufFd, DMA_BUF_IOCTL_SYNC, &sync) != 0) {
++            ALOGE("G967_DMABUF_SYNC_END_FAIL errno=%d", errno);
++            reportError(C2_CORRUPTED);
++            return;
++        }
++        if (!mapOk) {
++            ALOGE("G967_CPU_READ_MAP_FAIL bytes=%u", payloadSize);
++            reportError(C2_CORRUPTED);
++            return;
++        }
++    }
+ 
+     // If no CSD (content-specific-data, e.g. SPS for H.264) has been submitted yet, we expect this
+     // output block to contain CSD. We only submit the CSD once, even if it's attached to each key
+@@ -1247,6 +1451,10 @@ void V4L2EncodeComponent::onOutputBufferDone(uint32_t payloadSize, bool keyFrame
+         ALOGV("No CSD submitted yet, extracting CSD");
+         std::unique_ptr<C2StreamInitDataInfo::output> csd;
+         C2ReadView view = constBlock.map().get();
++        if (view.error() != C2_OK) {
++            reportError(view.error());
++            return;
++        }
+         extractCSDInfo(&csd, view.data(), view.capacity());
+         if (!csd) {
+             ALOGE("Failed to extract CSD");
+@@ -1254,11 +1462,35 @@ void V4L2EncodeComponent::onOutputBufferDone(uint32_t payloadSize, bool keyFrame
+             return;
+         }
+ 
++        media::H264Parser parser;
++        parser.SetStream(view.data(), view.capacity());
++        media::H264NALU nalu;
++        media::H264Parser::Result parseResult;
++        bool hasPicture = false;
++        while ((parseResult = parser.AdvanceToNextNALU(&nalu)) == media::H264Parser::kOk) {
++            if ((nalu.nal_unit_type >= 1 && nalu.nal_unit_type <= 5) ||
++                (nalu.nal_unit_type >= 19 && nalu.nal_unit_type <= 21)) {
++                hasPicture = true;
++            }
++        }
++        if (parseResult != media::H264Parser::kEOStream || mOutputWorkQueue.empty()) {
++            ALOGE("Invalid initial H.264 output: size=%u timestamp=%" PRId64, payloadSize,
++                  timestamp);
++            reportError(C2_CORRUPTED);
++            return;
++        }
++
+         // Attach the CSD to the first item in our output work queue.
+         LOG_ASSERT(!mOutputWorkQueue.empty());
+         C2Work* work = mOutputWorkQueue.front().get();
+         work->worklets.front()->output.configUpdate.push_back(std::move(csd));
+         mCSDSubmitted = true;
++        ALOGI("Q18_CSD bytes=%u timestamp=%" PRId64 " frame=%" PRIu64
++              " work_timestamp=%" PRIu64 " header_only=%d buffers=%zu", payloadSize,
++              timestamp, work->input.ordinal.frameIndex.peeku(),
++              work->input.ordinal.timestamp.peeku(), !hasPicture,
++              work->worklets.front()->output.buffers.size());
++        if (!hasPicture) return;
+     }
+ 
+     // Get the work item associated with the timestamp.
+@@ -1273,12 +1505,23 @@ void V4L2EncodeComponent::onOutputBufferDone(uint32_t payloadSize, bool keyFrame
+         return;
+     }
+ 
++    if (!work->worklets.front()->output.buffers.empty()) {
++        ALOGE("Duplicate H.264 output: frame=%" PRIu64 " timestamp=%" PRId64
++              " bytes=%u buffers=%zu", work->input.ordinal.frameIndex.peeku(), timestamp,
++              payloadSize, work->worklets.front()->output.buffers.size());
++        reportError(C2_CORRUPTED);
++        return;
++    }
++
+     std::shared_ptr<C2Buffer> buffer = C2Buffer::CreateLinearBuffer(std::move(constBlock));
+     if (keyFrame) {
+         buffer->setInfo(
+                 std::make_shared<C2StreamPictureTypeMaskInfo::output>(0u, C2Config::SYNC_FRAME));
+     }
+     work->worklets.front()->output.buffers.emplace_back(buffer);
++    ALOGV("Q18_FRAME frame=%" PRIu64 " timestamp=%" PRId64 " bytes=%u key=%d buffers=%zu",
++          work->input.ordinal.frameIndex.peeku(), timestamp, payloadSize, keyFrame,
++          work->worklets.front()->output.buffers.size());
+ 
+     // We can report the work item as completed if its associated input buffer has also been
+     // released. As output buffers are not necessarily returned in order we might be able to return
+@@ -1314,7 +1557,8 @@ C2Work* V4L2EncodeComponent::getWorkByTimestamp(int64_t timestamp) {
+     // items that are marked as EOS, as their timestamp might clash with other work items.
+     auto it = std::find_if(mOutputWorkQueue.begin(), mOutputWorkQueue.end(),
+                            [timestamp](const std::unique_ptr<C2Work>& w) {
+-                               return !(w->input.flags & C2FrameData::FLAG_END_OF_STREAM) &&
++                               return (!(w->input.flags & C2FrameData::FLAG_END_OF_STREAM) ||
++                                       !w->input.buffers.empty()) &&
+                                       w->input.ordinal.timestamp.peeku() ==
+                                               static_cast<uint64_t>(timestamp);
+                            });
+@@ -1415,6 +1659,14 @@ void V4L2EncodeComponent::serviceDeviceTask(bool /*event*/) {
+         if (!dequeueInputBuffer()) break;
+     }
+ 
++    // G1251: dequeueInputBuffer() transitions to ERROR on an invalid DQBUF
++    // slot, a duplicate completion or failed V4L2 ioctl. Do not submit any
++    // more output to Codec2 on the same poll callback after that error.
++    if (mEncoderState == EncoderState::ERROR) {
++        ALOGE("G1251_INPUT_DQBUF_ERROR_ABORT_CAPTURE_SERVICE");
++        return;
++    }
++
+     // Dequeue completed output (VIDEO_CAPTURE) buffers, and recycle to the free list.
+     while (mOutputQueue->QueuedBuffersCount() > 0) {
+         if (!dequeueOutputBuffer()) break;
+@@ -1445,6 +1697,14 @@ bool V4L2EncodeComponent::enqueueInputBuffer(std::unique_ptr<InputFrame> frame,
+             {.tv_sec = static_cast<time_t>(timestamp / ::base::Time::kMicrosecondsPerSecond),
+              .tv_usec = static_cast<time_t>(timestamp % ::base::Time::kMicrosecondsPerSecond)});
+     size_t bufferId = buffer->BufferId();
++    // G1196: V4L2 BufferId is supplied by the driver/queue. Do not allow
++    // an invalid ID or an already-owned slot to index the C2 input vector.
++    if (bufferId >= mInputBuffersMap.size() || mInputBuffersMap[bufferId].second) {
++        ALOGE("G1196_INVALID_INPUT_QBUF_SLOT id=%zu slots=%zu", bufferId,
++              mInputBuffersMap.size());
++        reportError(C2_CORRUPTED);
++        return false;
++    }
+ 
+     for (size_t i = 0; i < planes.size(); ++i) {
+         // Single-buffer input format may have multiple color planes, so bytesUsed of the single
+@@ -1457,17 +1717,29 @@ bool V4L2EncodeComponent::enqueueInputBuffer(std::unique_ptr<InputFrame> frame,
+                     media::VideoFrame::PlaneSize(format, i, mInputLayout->coded_size()).GetArea());
+         }
+ 
+-        // TODO(crbug.com/901264): The way to pass an offset within a DMA-buf is not defined
+-        // in V4L2 specification, so we abuse data_offset for now. Fix it when we have the
+-        // right interface, including any necessary validation and potential alignment.
+-        buffer->SetPlaneDataOffset(i, planes[i].mOffset);
+-        bytesUsed += planes[i].mOffset;
+-        // Workaround: filling length should not be needed. This is a bug of videobuf2 library.
+-        buffer->SetPlaneSize(i, mInputLayout->planes()[i].size + planes[i].mOffset);
+-        buffer->SetPlaneBytesUsed(i, bytesUsed);
++        // All V4L2 plane metadata fields are 32-bit. Reject ranges that would
++        // wrap when the C2 graphic-block offset is added to the coded plane size.
++        const uint64_t planeOffset = planes[i].mOffset;
++        const uint64_t planeLength = mInputLayout->planes()[i].size;
++        const uint64_t v4l2Limit = std::numeric_limits<uint32_t>::max();
++        if (planeLength == 0 || planeLength > v4l2Limit ||
++            planeOffset > v4l2Limit - planeLength ||
++            bytesUsed > planeLength) {
++            ALOGE("Invalid input DMABUF plane %zu: offset=%" PRIu64
++                  " length=%" PRIu64 " bytes=%zu", i, planeOffset, planeLength, bytesUsed);
++            return false;
++        }
++        // V4L2 stores bytesused including data_offset; the subsequent kernel
++        // importer must still verify the advertised length against the DMABUF.
++        buffer->SetPlaneDataOffset(i, static_cast<size_t>(planeOffset));
++        buffer->SetPlaneSize(i, static_cast<size_t>(planeLength + planeOffset));
++        buffer->SetPlaneBytesUsed(i, static_cast<size_t>(planeOffset + bytesUsed));
+     }
+ 
+-    std::move(*buffer).QueueDMABuf(frame->getFDs());
++    if (!std::move(*buffer).QueueDMABuf(frame->getFDs())) {
++        ALOGE("Failed to queue input DMABUF (frame=%" PRIu64 ")", index);
++        return false;
++    }
+ 
+     ALOGV("Queued buffer in input queue (index: %" PRId64 ", timestamp: %" PRId64
+           ", bufferId: %zu)",
+@@ -1498,6 +1770,14 @@ bool V4L2EncodeComponent::enqueueOutputBuffer() {
+     }
+ 
+     size_t bufferId = buffer->BufferId();
++    // G1196: capture slot ownership cannot be inferred from the kernel's
++    // reported index; reject invalid/re-entrant IDs before queueing DMABUF.
++    if (bufferId >= mOutputBuffersMap.size() || mOutputBuffersMap[bufferId]) {
++        ALOGE("G1196_INVALID_CAPTURE_QBUF_SLOT id=%zu slots=%zu", bufferId,
++              mOutputBuffersMap.size());
++        reportError(C2_CORRUPTED);
++        return false;
++    }
+ 
+     std::vector<int> fds;
+     fds.push_back(outputBlock->handle()->data[0]);
+@@ -1531,17 +1811,26 @@ bool V4L2EncodeComponent::dequeueInputBuffer() {
+     }
+ 
+     const media::V4L2ReadableBufferRef buffer = std::move(result.second);
+-    uint64_t index = mInputBuffersMap[buffer->BufferId()].first;
++    const size_t bufferId = buffer->BufferId();
++    // G1196: malformed DQBUF must never read outside the input vector,
++    // nor complete a stale work item with an already-released input frame.
++    if (bufferId >= mInputBuffersMap.size() || !mInputBuffersMap[bufferId].second) {
++        ALOGE("G1196_INVALID_INPUT_DQBUF_SLOT id=%zu slots=%zu", bufferId,
++              mInputBuffersMap.size());
++        reportError(C2_CORRUPTED);
++        return false;
++    }
++    uint64_t index = mInputBuffersMap[bufferId].first;
+     int64_t timestamp = buffer->GetTimeStamp().tv_usec +
+                         buffer->GetTimeStamp().tv_sec * ::base::Time::kMicrosecondsPerSecond;
+     ALOGV("Dequeued buffer from input queue (index: %" PRId64 ", timestamp: %" PRId64
+           ", bufferId: %zu)",
+           index, timestamp, buffer->BufferId());
+ 
+-    mInputBuffersMap[buffer->BufferId()].second = nullptr;
++    mInputBuffersMap[bufferId].second = nullptr;
+     onInputBufferDone(index);
+ 
+-    return true;
++    return mEncoderState != EncoderState::ERROR;
+ }
+ 
+ bool V4L2EncodeComponent::dequeueOutputBuffer() {
+@@ -1562,30 +1851,77 @@ bool V4L2EncodeComponent::dequeueOutputBuffer() {
+     }
+ 
+     media::V4L2ReadableBufferRef buffer = std::move(result.second);
+-    size_t encodedDataSize = buffer->GetPlaneBytesUsed(0) - buffer->GetPlaneDataOffset(0);
++    // G1196: only a valid, still-owned CAPTURE slot can be delivered to
++    // Codec2. Check before using BufferId for mOutputBuffersMap indexing.
++    const size_t bufferId = buffer->BufferId();
++    if (bufferId >= mOutputBuffersMap.size() || !mOutputBuffersMap[bufferId]) {
++        ALOGE("G1196_INVALID_CAPTURE_DQBUF_SLOT id=%zu slots=%zu", bufferId,
++              mOutputBuffersMap.size());
++        reportError(C2_CORRUPTED);
++        return false;
++    }
++    if (buffer->IsError()) {
++        ALOGE("MFC returned V4L2_BUF_FLAG_ERROR on encoded output");
++        reportError(C2_CORRUPTED);
++        return false;
++    }
++    // G918: reject malformed V4L2 output plane ranges before unchecked
++    // size_t subtraction (underflow) or exposing an out-of-range Codec2
++    // block. G916 physical 30s test observed offset=0, <=2MiB bounds.
++    // This is a constant-time safety guard, not an H264 corruption fix.
++    const size_t outputBytesUsed = buffer->GetPlaneBytesUsed(0);
++    const size_t outputDataOffset = buffer->GetPlaneDataOffset(0);
++    if (outputBytesUsed < outputDataOffset || outputBytesUsed > mOutputBufferSize) {
++        ALOGE("G916_INVALID_MFC_CAPTURE_RANGE bytesused=%zu offset=%zu max=%zu",
++              outputBytesUsed, outputDataOffset, mOutputBufferSize);
++        reportError(C2_CORRUPTED);
++        return false;
++    }
++    size_t encodedDataSize = outputBytesUsed - outputDataOffset;
+     ::base::TimeDelta timestamp = ::base::TimeDelta::FromMicroseconds(
+             buffer->GetTimeStamp().tv_usec +
+             buffer->GetTimeStamp().tv_sec * ::base::Time::kMicrosecondsPerSecond);
++    if (timestamp.InMicroseconds() < 0) {
++        ALOGE("Invalid negative MFC CAPTURE timestamp: %" PRId64,
++              timestamp.InMicroseconds());
++        reportError(C2_CORRUPTED);
++        return false;
++    }
+ 
+     ALOGV("Dequeued buffer from output queue (timestamp: %" PRId64
+           ", bufferId: %zu, data size: %zu, EOS: %d)",
+           timestamp.InMicroseconds(), buffer->BufferId(), encodedDataSize, buffer->IsLast());
+ 
+-    if (!mOutputBuffersMap[buffer->BufferId()]) {
+-        ALOGE("Failed to find output block associated with output buffer");
++    std::shared_ptr<C2LinearBlock> block = std::move(mOutputBuffersMap[bufferId]);
++    if (!block || outputDataOffset > block->size() ||
++        encodedDataSize > block->size() - outputDataOffset) {
++        ALOGE("G930_INVALID_CODEC2_OUTPUT_RANGE offset=%zu payload=%zu block=%zu",
++              outputDataOffset, encodedDataSize, block ? block->size() : 0u);
+         reportError(C2_CORRUPTED);
+         return false;
+     }
+-
+-    std::shared_ptr<C2LinearBlock> block = std::move(mOutputBuffersMap[buffer->BufferId()]);
+     if (encodedDataSize > 0) {
+-        onOutputBufferDone(encodedDataSize, buffer->IsKeyframe(), timestamp.InMicroseconds(),
+-                           std::move(block));
++        onOutputBufferDone(outputDataOffset, encodedDataSize, buffer->IsKeyframe(),
++                           timestamp.InMicroseconds(), std::move(block));
++        // G1211: onOutputBufferDone may call reportError (invalid SPS/PPS,
++        // corrupt H264, DMA-BUF sync, lost frame timestamp or duplicate C2
++        // output). Do not continue DRAINING or recycle a capture buffer
++        // after the component has already transitioned to ERROR.
++        if (mEncoderState == EncoderState::ERROR) {
++            ALOGE("G1211_CAPTURE_HANDLER_REPORTED_ERROR");
++            return false;
++        }
+     }
+ 
+     // If the buffer is marked as last and we were flushing the encoder, flushing is now done.
+     if ((mEncoderState == EncoderState::DRAINING) && buffer->IsLast()) {
+         onDrainDone(true);
++        // G1211: an invalid EOS work item fails onDrainDone(); never restart
++        // a broken MFC session after a reported C2 component error.
++        if (mEncoderState == EncoderState::ERROR) {
++            ALOGE("G1211_CAPTURE_DRAIN_REPORTED_ERROR");
++            return false;
++        }
+ 
+         // Start the encoder again.
+         struct v4l2_encoder_cmd cmd;
+@@ -1600,7 +1936,13 @@ bool V4L2EncodeComponent::dequeueOutputBuffer() {
+ 
+     // Queue a new output buffer to replace the one we dequeued.
+     buffer = nullptr;
+-    enqueueOutputBuffer();
++    // G1211: a failed QueueDMABuf/fetchOutputBlock/invalid slot must be
++    // propagated to serviceDeviceTask. Previously this result was ignored,
++    // allowing apparent successful progress while the CAPTURE ring shrank.
++    if (!enqueueOutputBuffer()) {
++        ALOGE("G1211_CAPTURE_REQUEUE_FAILED");
++        return false;
++    }
+ 
+     return true;
+ }
+@@ -1719,6 +2061,7 @@ void V4L2EncodeComponent::setEncoderState(EncoderState state) {
+     case EncoderState::WAITING_FOR_INPUT:
+         ALOG_ASSERT(mEncoderState == EncoderState::UNINITIALIZED ||
+                     mEncoderState == EncoderState::ENCODING ||
++                    mEncoderState == EncoderState::WAITING_FOR_INPUT_BUFFERS ||
+                     mEncoderState == EncoderState::DRAINING);
+         break;
+     case EncoderState::WAITING_FOR_INPUT_BUFFERS:
+diff --git a/components/include/v4l2_codec2/components/BitstreamBuffer.h b/components/include/v4l2_codec2/components/BitstreamBuffer.h
+index ec8a91751ec6e0682328e67b840e46f691ecb39e..96c2ec2e27c7057310f2e4c452bd3a4f2beb1527 100644
+--- a/components/include/v4l2_codec2/components/BitstreamBuffer.h
++++ b/components/include/v4l2_codec2/components/BitstreamBuffer.h
+@@ -15,14 +15,16 @@ namespace android {
+ // Note: The BitstreamBuffer does not take ownership of the data. The file descriptor is not
+ //       duplicated and the caller is responsible for keeping the data alive.
+ struct BitstreamBuffer {
+-    BitstreamBuffer(const int32_t id, int dmabuf_fd, const size_t offset, const size_t size)
+-          : id(id), dmabuf_fd(dmabuf_fd), offset(offset), size(size) {}
++    BitstreamBuffer(const int32_t id, int dmabuf_fd, const size_t offset, const size_t size,
++                    const bool isCodecConfig = false)
++          : id(id), dmabuf_fd(dmabuf_fd), offset(offset), size(size), isCodecConfig(isCodecConfig) {}
+     ~BitstreamBuffer() = default;
+ 
+     const int32_t id;
+     int dmabuf_fd;
+     const size_t offset;
+     const size_t size;
++    const bool isCodecConfig;
+ };
+ 
+ }  // namespace android
+diff --git a/components/include/v4l2_codec2/components/V4L2Decoder.h b/components/include/v4l2_codec2/components/V4L2Decoder.h
+index bdddc7f6bd93f42a37097757acd248c00dfaceab..2cf29029368f46edc18908e9bba6260572965c27 100644
+--- a/components/include/v4l2_codec2/components/V4L2Decoder.h
++++ b/components/include/v4l2_codec2/components/V4L2Decoder.h
+@@ -7,10 +7,14 @@
+ 
+ #include <stdint.h>
+ 
++#include <map>
+ #include <memory>
+ #include <optional>
++#include <queue>
++#include <vector>
+ 
+ #include <base/callback.h>
++#include <base/files/scoped_file.h>
+ #include <base/memory/weak_ptr.h>
+ 
+ #include <rect.h>
+@@ -59,11 +63,22 @@ private:
+     bool start(const VideoCodec& codec, const size_t inputBufferSize, GetPoolCB getPoolCb,
+                OutputCB outputCb, ErrorCB errorCb);
+     bool setupInputFormat(const uint32_t inputPixelFormat, const size_t inputBufferSize);
++    bool copyBitstreamBuffer(const BitstreamBuffer& buffer, uint8_t* dst, size_t dstSize,
++                             size_t dstOffset);
+     void pumpDecodeRequest();
+ 
+     void serviceDeviceTask(bool event);
+     bool dequeueResolutionChangeEvent();
++    bool applyPendingResolutionChange();
+     bool changeResolution();
++    bool queueAllOutputBuffers();
++    bool exportOutputBuffers(size_t count, size_t numPlanes);
++    bool setupFimc();
++    void resetFimc();
++    bool convertWithFimc(size_t bufferId, VideoFrame* frame);
++    void recycleOutputBuffer(size_t bufferId);
++    void maybeCompleteDrain();
++    void completeDrain();
+ 
+     void tryFetchVideoFrame();
+     void onVideoFrameReady(std::optional<VideoFramePool::FrameWithBlockId> frameWithBlockId);
+@@ -84,6 +99,7 @@ private:
+ 
+     std::queue<DecodeRequest> mDecodeRequests;
+     std::map<int32_t, DecodeCB> mPendingDecodeCbs;
++    std::vector<uint8_t> mCodecConfig;
+ 
+     GetPoolCB mGetPoolCb;
+     OutputCB mOutputCb;
+@@ -92,13 +108,25 @@ private:
+ 
+     media::Size mCodedSize;
+     media::Rect mVisibleRect;
++    size_t mInputBufferSize = 0;
+ 
+-    std::map<size_t, std::unique_ptr<VideoFrame>> mFrameAtDevice;
++    struct PendingOutputFrame {
++        media::V4L2ReadableBufferRef buffer;
++        int32_t bitstreamId = -1;
++        bool isLast = false;
++    };
+ 
+-    // Block IDs can be arbitrarily large, but we only have a limited number of
+-    // buffers. This maintains an association between a block ID and a specific
+-    // V4L2 buffer index.
+-    std::map<size_t, size_t> mBlockIdToV4L2Id;
++    std::queue<PendingOutputFrame> mPendingOutputFrames;
++    bool mFrameRequestPending = false;
++    bool mResolutionChangePending = false;
++    bool mDrainLastSeen = false;
++    size_t mFimcFrameCount = 0;
++    std::vector<std::vector<base::ScopedFD>> mOutputDmabufs;
++    std::vector<std::vector<size_t>> mOutputPlaneSizes;
++    base::ScopedFD mFimcFd;
++    struct v4l2_format mFimcOutputFormat = {};
++    struct v4l2_format mFimcCaptureFormat = {};
++    bool mFimcStreaming = false;
+ 
+     State mState = State::Idle;
+ 
+diff --git a/components/include/v4l2_codec2/components/V4L2EncodeComponent.h b/components/include/v4l2_codec2/components/V4L2EncodeComponent.h
+index 4a61e05b954820965742093d0d4bf17bdcd862b0..b9840594167547e312a0350e33bcde70fcd3f813 100644
+--- a/components/include/v4l2_codec2/components/V4L2EncodeComponent.h
++++ b/components/include/v4l2_codec2/components/V4L2EncodeComponent.h
+@@ -145,8 +145,8 @@ private:
+     // Called on the encoder thread when the encoder is done using an input buffer.
+     void onInputBufferDone(uint64_t index);
+     // Called on the encoder thread when an output buffer is ready.
+-    void onOutputBufferDone(uint32_t payloadSize, bool keyFrame, int64_t timestamp,
+-                            std::shared_ptr<C2LinearBlock> outputBlock);
++    void onOutputBufferDone(size_t dataOffset, uint32_t payloadSize, bool keyFrame,
++                            int64_t timestamp, std::shared_ptr<C2LinearBlock> outputBlock);
+ 
+     // Helper function to find a work item in the output work queue by index.
+     C2Work* getWorkByIndex(uint64_t index);
+diff --git a/service/Android.bp b/service/Android.bp
+index 3fcc66c01409492463a88b2145a562d67f65a82f..f5cfbe351f841ea40206da2e831b36a7153daff1 100644
+--- a/service/Android.bp
++++ b/service/Android.bp
+@@ -15,7 +15,9 @@ cc_binary {
+     init_rc: ["android.hardware.media.c2@1.0-service-v4l2.rc"],
+ 
+     shared_libs: [
++        "libui",
+         "libv4l2_codec2_store",
++        "libv4l2_codec2_components",
+         "libavservices_minijail_vendor",
+         "libchrome",
+         "libcutils",
+diff --git a/service/android.hardware.media.c2@1.0-service-v4l2.rc b/service/android.hardware.media.c2@1.0-service-v4l2.rc
+index bec460403a7f91ead3da7f5a66e9441daaf76a53..3db17da805e7595eb9a15d87be20a13d539cc724 100644
+--- a/service/android.hardware.media.c2@1.0-service-v4l2.rc
++++ b/service/android.hardware.media.c2@1.0-service-v4l2.rc
+@@ -1,7 +1,10 @@
++on post-fs-data
++    restorecon /vendor/bin/hw/android.hardware.media.c2@1.0-service-v4l2
++
+ service android-hardware-media-c2-v4l2-hal-1-0 /vendor/bin/hw/android.hardware.media.c2@1.0-service-v4l2
+     class hal
+     user media
+-    group mediadrm drmrpc
++    group mediadrm drmrpc media
+     ioprio rt 4
+     writepid /dev/cpuset/foreground/tasks
+     setenv MESA_GLSL_CACHE_DISABLE 1
+diff --git a/service/service.cpp b/service/service.cpp
+index ba787591ce8393327114d8047279277aa4dd82d2..316a25871dc7a7ebaec5938b4308687ad61dd325 100644
+--- a/service/service.cpp
++++ b/service/service.cpp
+@@ -13,6 +13,18 @@
+ #include <minijail.h>
+ 
+ #include <v4l2_codec2/store/V4L2ComponentStore.h>
++#include <ui/GraphicBufferAllocator.h>
++#include <ui/GraphicBufferMapper.h>
++
++// H26H_FORCE_COMPONENT_DT_NEEDED
++class C2ComponentFactory;
++extern "C" ::C2ComponentFactory* CreateCodec2Factory(const char*);
++__attribute__((used)) static auto H26HForceComponentLink = &CreateCodec2Factory;
++
++// H27_FORCE_COMPONENT_DT_NEEDED
++class C2ComponentFactory;
++extern "C" ::C2ComponentFactory* CreateCodec2Factory(const char*);
++__attribute__((used)) static auto H27ForceComponentLink = &CreateCodec2Factory;
+ 
+ // Default policy for codec2.0 service.
+ static constexpr char kBaseSeccompPolicyPath[] =
+@@ -23,6 +35,13 @@ static constexpr char kExtSeccompPolicyPath[] =
+         "/vendor/etc/seccomp_policy/codec2.vendor.ext.policy";
+ 
+ int main(int /* argc */, char** /* argv */) {
++    // SM-T311: one-time Gralloc2 service discovery prewarm.
++    // Prevent first hardware AVC start from losing the CCodec start timeout
++    // to lazy GraphicBufferMapper/GraphicBufferAllocator initialization.
++    (void)android::GraphicBufferMapper::get();
++    (void)android::GraphicBufferAllocator::get();
++    ALOGI("SMT311_Q35D_CODEC_GRALLOC_PREWARM=PASS");
++
+     ALOGD("Service starting...");
+ 
+     signal(SIGPIPE, SIG_IGN);
+@@ -42,8 +61,14 @@ int main(int /* argc */, char** /* argv */) {
+         using namespace ::android::hardware::media::c2::V1_0;
+ 
+         ALOGD("Instantiating Codec2's V4L2 IComponentStore service...");
++        // H26H_V4L2_STORE_NULL_GUARD
++        auto v4l2Store = android::V4L2ComponentStore::Create();
++        if (v4l2Store == nullptr) {
++            ALOGE("Cannot create V4L2 C2ComponentStore; see V4L2ComponentStore dlerror above.");
++            return 2;
++        }
+         android::sp<IComponentStore> store(
+-                new utils::ComponentStore(android::V4L2ComponentStore::Create()));
++                new utils::ComponentStore(v4l2Store));
+         if (store == nullptr) {
+             ALOGE("Cannot create Codec2's V4L2 IComponentStore service.");
+         } else if (store->registerAsService("default") != android::OK) {
+diff --git a/store/V4L2ComponentStore.cpp b/store/V4L2ComponentStore.cpp
+index 8942866ca33a5ab0cbfb2eb17b78ecf3bb5246cf..31d1a7742331dd4601fed545725883b6cc33bf09 100644
+--- a/store/V4L2ComponentStore.cpp
++++ b/store/V4L2ComponentStore.cpp
+@@ -41,7 +41,7 @@ std::shared_ptr<C2ComponentStore> V4L2ComponentStore::Create() {
+ 
+     void* libHandle = dlopen(kLibPath, RTLD_NOW | RTLD_NODELETE);
+     if (!libHandle) {
+-        ALOGE("Failed to load library: %s", kLibPath);
++        ALOGE("Failed to load library: %s: %s", kLibPath, dlerror());
+         return nullptr;
+     }
+ 
+@@ -86,7 +86,16 @@ c2_status_t V4L2ComponentStore::createComponent(C2String name,
+                                                 std::shared_ptr<C2Component>* const component) {
+     ALOGV("%s(%s)", __func__, name.c_str());
+ 
+-    auto factory = GetFactory(name);
++        // H27_H264_ONLY_CREATE_COMPONENT
++    if (!V4L2ComponentName::isValid(name.c_str()) ||
++        (name != V4L2ComponentName::kH264Encoder &&
++         name != V4L2ComponentName::kH264Decoder)) {
++        component->reset();
++        ALOGI("H27_C2_NOT_FOUND component=%s", name.c_str());
++        return C2_NOT_FOUND;
++    }
++
++auto factory = GetFactory(name);
+     if (factory == nullptr) return C2_CORRUPTED;
+ 
+     component->reset();
+@@ -97,7 +106,16 @@ c2_status_t V4L2ComponentStore::createInterface(
+         C2String name, std::shared_ptr<C2ComponentInterface>* const interface) {
+     ALOGV("%s(%s)", __func__, name.c_str());
+ 
+-    auto factory = GetFactory(name);
++        // H27_H264_ONLY_CREATE_INTERFACE
++    if (!V4L2ComponentName::isValid(name.c_str()) ||
++        (name != V4L2ComponentName::kH264Encoder &&
++         name != V4L2ComponentName::kH264Decoder)) {
++        interface->reset();
++        ALOGI("H27_C2_NOT_FOUND component=%s", name.c_str());
++        return C2_NOT_FOUND;
++    }
++
++auto factory = GetFactory(name);
+     if (factory == nullptr) return C2_CORRUPTED;
+ 
+     interface->reset();
+@@ -105,16 +123,10 @@ c2_status_t V4L2ComponentStore::createInterface(
+ }
+ 
+ std::vector<std::shared_ptr<const C2Component::Traits>> V4L2ComponentStore::listComponents() {
+-    ALOGV("%s()", __func__);
+-
++    // H27_HONEST_MFC_V5_COMPONENT_LIST
+     std::vector<std::shared_ptr<const C2Component::Traits>> ret;
+     ret.push_back(GetTraits(V4L2ComponentName::kH264Encoder));
+     ret.push_back(GetTraits(V4L2ComponentName::kH264Decoder));
+-    ret.push_back(GetTraits(V4L2ComponentName::kH264SecureDecoder));
+-    ret.push_back(GetTraits(V4L2ComponentName::kVP8Decoder));
+-    ret.push_back(GetTraits(V4L2ComponentName::kVP8SecureDecoder));
+-    ret.push_back(GetTraits(V4L2ComponentName::kVP9Decoder));
+-    ret.push_back(GetTraits(V4L2ComponentName::kVP9SecureDecoder));
+     return ret;
+ }
+ 
+diff --git a/tests/test_g1196_mfc_buffer_ownership.py b/tests/test_g1196_mfc_buffer_ownership.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..66ea4a7128317e6eceea6d149dff44737134b749
+--- /dev/null
++++ b/tests/test_g1196_mfc_buffer_ownership.py
+@@ -0,0 +1,132 @@
++#!/usr/bin/env python3
++"""G1196: test actual source-extracted encoder slot guards against invalid IDs.
++
++Runs only host-generated tiny C++ contracts; it DOES NOT call camera,
++microphone, recorder, kernel MFC, or modify the physical tablet.
++"""
++import os
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++SOURCE = Path(__file__).resolve().parents[1] / "components/V4L2EncodeComponent.cpp"
++FUNCTIONS = [
++    ("enqueueInputBuffer", "mInputBuffersMap", "mInputBuffersMap[bufferId].second", True),
++    ("enqueueOutputBuffer", "mOutputBuffersMap", "mOutputBuffersMap[bufferId]", True),
++    ("dequeueInputBuffer", "mInputBuffersMap", "mInputBuffersMap[bufferId].second", False),
++    ("dequeueOutputBuffer", "mOutputBuffersMap", "mOutputBuffersMap[bufferId]", False),
++]
++
++
++def extract_guards(source):
++    guards = []
++    for name, vector, owner, busy_fails in FUNCTIONS:
++        start = re.search(r"bool V4L2EncodeComponent::" + name + r"\(", source)
++        if start is None:
++            raise AssertionError("missing real C2 function: " + name)
++        body = source[start.end():]
++        nextfn = body.find("\nbool V4L2EncodeComponent::")
++        if nextfn >= 0:
++            body = body[:nextfn]
++        want = (f"bufferId >= {vector}.size() || " +
++                ("" if busy_fails else "!") + owner)
++        if body.count(want) != 1:
++            raise AssertionError("missing single bound/owner invariant " + name)
++        idx = body.index(want)
++        if body.rfind("const size_t bufferId = buffer->BufferId();", 0, idx) == -1 and (
++                body.rfind("size_t bufferId = buffer->BufferId();", 0, idx) == -1):
++            raise AssertionError("BufferId not declared before guard: " + name)
++        follow = body[idx:idx + 280]
++        if "reportError(C2_CORRUPTED)" not in follow or "return false;" not in follow:
++            raise AssertionError("missing fail-closed C2 corrupted branch " + name)
++        first_use = body.index(owner)
++        if first_use < idx and body[first_use:first_use + len(owner)] == owner:
++            # owner appears at the beginning of guard itself: that's expected.
++            raise AssertionError("slot access before guard: " + name)
++        guards.append(want)
++    return guards
++
++
++def compile_and_test(expressions, mutation=False):
++    # Expression text comes from the actual C2 source under test, not
++    # separately authored helper code: runtime assertions exercise exactly
++    # the source's short-circuit bound and owner checks.
++    methods = []
++    for i, exp in enumerate(expressions):
++        methods.append(f"""
++bool guard{i}(size_t bufferId, const std::vector<std::pair<long long,
++                std::unique_ptr<int>>>& mInputBuffersMap,
++                 const std::vector<std::shared_ptr<int>>& mOutputBuffersMap) {{
++    return {exp};
++}}
++""")
++    cpp = """
++#include <cstddef>
++#include <memory>
++#include <vector>
++#include <cassert>
++#include <cstdio>
++""" + "\n".join(methods) + """
++int main() {
++    std::vector<std::pair<long long, std::unique_ptr<int>>> mInputBuffersMap(3);
++    std::vector<std::shared_ptr<int>> mOutputBuffersMap(3);
++    for (size_t id : {size_t(3), size_t(999999), size_t(-1)}) {
++        assert(guard0(id, mInputBuffersMap, mOutputBuffersMap));
++        assert(guard1(id, mInputBuffersMap, mOutputBuffersMap));
++        assert(guard2(id, mInputBuffersMap, mOutputBuffersMap));
++        assert(guard3(id, mInputBuffersMap, mOutputBuffersMap));
++    }
++    assert(!guard0(0, mInputBuffersMap, mOutputBuffersMap));
++    assert(!guard1(0, mInputBuffersMap, mOutputBuffersMap));
++    assert(guard2(0, mInputBuffersMap, mOutputBuffersMap));
++    assert(guard3(0, mInputBuffersMap, mOutputBuffersMap));
++    mInputBuffersMap[0].second = std::make_unique<int>(1);
++    mOutputBuffersMap[0] = std::make_shared<int>(1);
++    assert(guard0(0, mInputBuffersMap, mOutputBuffersMap));
++    assert(guard1(0, mInputBuffersMap, mOutputBuffersMap));
++    assert(!guard2(0, mInputBuffersMap, mOutputBuffersMap));
++    assert(!guard3(0, mInputBuffersMap, mOutputBuffersMap));
++    assert(!guard0(1, mInputBuffersMap, mOutputBuffersMap));
++    assert(!guard1(1, mInputBuffersMap, mOutputBuffersMap));
++    assert(guard2(1, mInputBuffersMap, mOutputBuffersMap));
++    assert(guard3(1, mInputBuffersMap, mOutputBuffersMap));
++    std::puts("G1196_REAL_CPP_GUARD_BOUNDS_AND_OWNERSHIP_PASS");
++}
++"""
++    with tempfile.TemporaryDirectory(prefix="g1196-guard-host-") as td:
++        path = Path(td)
++        (path / "guards.cpp").write_text(cpp)
++        result = subprocess.run(
++            ["g++", "-std=c++17", "-D_GLIBCXX_ASSERTIONS", "-Wall",
++             "-Wextra", "-Wno-unused-parameter", "-Werror", "-o", str(path / "test"),
++             str(path / "guards.cpp")],
++            capture_output=True, text=True)
++        if result.returncode:
++            raise AssertionError("real guard unit C++ compilation failed: " + result.stderr[:1200])
++        run = subprocess.run([str(path / "test")], capture_output=True, text=True)
++        if mutation:
++            if run.returncode == 0:
++                raise AssertionError("out-of-bounds mutation incorrectly passed")
++        else:
++            if run.returncode != 0:
++                raise AssertionError("real guard rejected/segfaulted: " + run.stderr[:700])
++            print(run.stdout.strip())
++
++
++def main():
++    source = SOURCE.read_text()
++    guards = extract_guards(source)
++    compile_and_test(guards)
++    changed = list(guards)
++    changed[0] = changed[0].replace(" >= ", " > ", 1)
++    compile_and_test(changed, mutation=True)
++    changed = list(guards)
++    changed[3] = changed[3].replace(" >= ", " > ", 1)
++    compile_and_test(changed, mutation=True)
++    print("PASS G1196_FOUR_REAL_ENCODER_GUARDS_AND_TWO_FAILCLOSED_INDEX_MUTANTS")
++    print("G1196_HOST_ONLY_NO_H264_FUNCTIONAL_P128_CURE_CLAIM")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/test_g1211_capture_completion_error_propagation.py b/tests/test_g1211_capture_completion_error_propagation.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c83914aea04a7f6f6ab61860e8644ff8441b4e72
+--- /dev/null
++++ b/tests/test_g1211_capture_completion_error_propagation.py
+@@ -0,0 +1,149 @@
++#!/usr/bin/env python3
++"""G1211 actual-source capture completion/requeue validation, host-only.
++
++Extract exact snippets from production encoder function and test by C++ host
++compiler as control flow. No MFC, Android app, audio, camera or recording.
++"""
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++SOURCE = Path(__file__).resolve().parents[1] / "components/V4L2EncodeComponent.cpp"
++
++CALLBACK_GUARD = """if (mEncoderState == EncoderState::ERROR) {
++            ALOGE("G1211_CAPTURE_HANDLER_REPORTED_ERROR");
++            return false;
++        }"""
++DRAIN_GUARD = """if (mEncoderState == EncoderState::ERROR) {
++            ALOGE("G1211_CAPTURE_DRAIN_REPORTED_ERROR");
++            return false;
++        }"""
++REQUEUE_GUARD = """if (!enqueueOutputBuffer()) {
++        ALOGE("G1211_CAPTURE_REQUEUE_FAILED");
++        return false;
++    }"""
++
++
++def extract(body: str) -> str:
++    a = body.index("bool V4L2EncodeComponent::dequeueOutputBuffer()")
++    b = body.index("\nbool V4L2EncodeComponent::createInputBuffers()", a)
++    return body[a:b]
++
++
++def verify(body: str):
++    part = extract(body)
++    for name, marker in (("callback", CALLBACK_GUARD), ("drain", DRAIN_GUARD),
++                         ("requeue", REQUEUE_GUARD)):
++        if part.count(marker) != 1:
++            raise AssertionError(f"G1211 missing or duplicated {name} guard")
++    callback = part.find("onOutputBufferDone(")
++    callback_guard = part.find(CALLBACK_GUARD)
++    drain = part.find("onDrainDone(true)")
++    drain_guard = part.find(DRAIN_GUARD)
++    restart = part.find("cmd.cmd = V4L2_ENC_CMD_START;")
++    requeue = part.find(REQUEUE_GUARD)
++    exit_ok = part.rfind("return true;")
++    if not (0 < callback < callback_guard < drain < drain_guard < restart < requeue < exit_ok):
++        raise AssertionError("G1211 invalid capture completion error ordering")
++    if part.count("enqueueOutputBuffer()") != 1:
++        raise AssertionError("G1211 unguarded secondary capture requeue call")
++    # Requeue happens only after last buffer reference is surrendered.
++    if part.find("buffer = nullptr;") > requeue:
++        raise AssertionError("G1211 capture reference was not released before requeue")
++    return CALLBACK_GUARD, DRAIN_GUARD, REQUEUE_GUARD
++
++
++def live_control_flow(guards):
++    callback_guard, drain_guard, requeue_guard = guards
++    # These three if/return blocks are pasted exactly from the actual C++
++    # production body: no copy of conditional expressions is rewritten here.
++    cpp = r"""
++#include <cassert>
++#include <cstdio>
++enum class EncoderState { ENCODING, DRAINING, ERROR };
++static EncoderState mEncoderState;
++static bool gCallbackFails;
++static bool gDrainFails;
++static bool gRequeueSucceeds;
++static int gRestarted;
++static int gQueued;
++#define ALOGE(...) do {} while (false)
++static bool enqueueOutputBuffer() { ++gQueued; return gRequeueSucceeds; }
++static void onOutputBufferDone() {
++    if (gCallbackFails) mEncoderState = EncoderState::ERROR;
++}
++static void onDrainDone(bool) {
++    if (gDrainFails) mEncoderState = EncoderState::ERROR;
++}
++static bool finish(bool hasPayload, bool finalBuffer) {
++    if (hasPayload) {
++        onOutputBufferDone();
++""" + callback_guard + r"""
++    }
++    if ((mEncoderState == EncoderState::DRAINING) && finalBuffer) {
++        onDrainDone(true);
++""" + drain_guard + r"""
++        ++gRestarted;
++    }
++""" + requeue_guard + r"""
++    return true;
++}
++int main() {
++    mEncoderState=EncoderState::ENCODING;
++    gCallbackFails=false;gDrainFails=false;gRequeueSucceeds=true;
++    gRestarted=0;gQueued=0;
++    assert(finish(true,false) && gRestarted==0 && gQueued==1);
++
++    mEncoderState=EncoderState::ENCODING;
++    gCallbackFails=true;gDrainFails=false;gRequeueSucceeds=true;
++    gRestarted=0;gQueued=0;
++    assert(!finish(true,false) && mEncoderState==EncoderState::ERROR
++           && gRestarted==0 && gQueued==0);
++
++    mEncoderState=EncoderState::DRAINING;
++    gCallbackFails=false;gDrainFails=true;gRequeueSucceeds=true;
++    gRestarted=0;gQueued=0;
++    assert(!finish(false,true) && mEncoderState==EncoderState::ERROR
++           && gRestarted==0 && gQueued==0);
++
++    mEncoderState=EncoderState::ENCODING;
++    gCallbackFails=false;gDrainFails=false;gRequeueSucceeds=false;
++    gRestarted=0;gQueued=0;
++    assert(!finish(true,false) && gQueued==1 && gRestarted==0);
++
++    mEncoderState=EncoderState::DRAINING;
++    gCallbackFails=false;gDrainFails=false;gRequeueSucceeds=true;
++    gRestarted=0;gQueued=0;
++    assert(finish(true,true) && gRestarted==1 && gQueued==1);
++    std::puts("PASS G1211_REAL_CAPTURE_GUARDS_HOST_CPP_NORMAL_CALLBACK_ERROR_DRAIN_ERROR_REQUEUE_ERROR");
++}
++"""
++    with tempfile.TemporaryDirectory(prefix="g1211-capture-") as td:
++        src = Path(td) / "guard_test.cpp"
++        binary = Path(td) / "guard_test"
++        src.write_text(cpp)
++        subprocess.run(["g++", "-std=c++17", "-O1", "-Wall", "-Wextra",
++                        "-Werror", "-D_GLIBCXX_ASSERTIONS", "-fsanitize=undefined",
++                        "-fno-sanitize-recover=all", str(src), "-o", str(binary)],
++                       check=True)
++        subprocess.run([str(binary)], check=True)
++
++
++def main():
++    body = SOURCE.read_text()
++    guards = verify(body)
++    live_control_flow(guards)
++    for original in guards:
++        bad = body.replace(original, "/* G1211 INTENTIONALLY REMOVED */", 1)
++        try:
++            verify(bad)
++        except AssertionError:
++            pass
++        else:
++            raise AssertionError("G1211 mutation incorrectly accepted: " + original)
++    print("PASS G1211_THREE_EXACT_SOURCE_GUARDS_AND_3_FAILCLOSED_MUTANTS")
++    print("G1211_NO_MEDIA_DEVICE_ACCESS_AND_NO_H264_CORRUPTION_CURE_CLAIM")
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/test_g1251_poll_and_input_error_propagation.py b/tests/test_g1251_poll_and_input_error_propagation.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..55291dc07412bff56f556e4bf3d38fe8c505a01b
+--- /dev/null
++++ b/tests/test_g1251_poll_and_input_error_propagation.py
+@@ -0,0 +1,148 @@
++#!/usr/bin/env python3
++"""G1251 source-extracted fatal poll and input DQBUF propagation tests.
++
++Only compile tiny control-flow skeletons on Debian. Do not run Android media,
++camera, microphone, sound, H264 capture, or alter device configuration.
++"""
++from pathlib import Path
++import subprocess
++import tempfile
++
++CODE = Path(__file__).resolve().parents[1] / "components/V4L2EncodeComponent.cpp"
++POLL = """if (!startDevicePoll()) {
++            ALOGE("G1251_START_POLL_FAILED_ABORT_ENCODE");
++            return false;
++        }"""
++INPUT = """if (mEncoderState == EncoderState::ERROR) {
++        ALOGE("G1251_INPUT_DQBUF_ERROR_ABORT_CAPTURE_SERVICE");
++        return;
++    }"""
++
++def gate(source):
++    a = source.index("bool V4L2EncodeComponent::encode(")
++    b = source.index("void V4L2EncodeComponent::drain()", a)
++    encode = source[a:b]
++    a = source.index("void V4L2EncodeComponent::serviceDeviceTask(")
++    b = source.index("bool V4L2EncodeComponent::enqueueInputBuffer(", a)
++    service = source[a:b]
++    if encode.count(POLL) != 1 or service.count(INPUT) != 1:
++        raise AssertionError("G1251 missing/duplicated exact production guards")
++    if not (encode.index("mOutputQueue->Streamon()") <
++            encode.index(POLL) <
++            encode.index("while (mOutputQueue->FreeBuffersCount()")):
++        raise AssertionError("poll failure must abort BEFORE CAPTURE QBUF")
++    if not (service.index("while (mInputQueue->QueuedBuffersCount()") <
++            service.index(INPUT) <
++            service.index("while (mOutputQueue->QueuedBuffersCount()")):
++        raise AssertionError("input error must abort BEFORE CAPTURE DQBUF")
++    if "reportError(C2_CORRUPTED);" not in source[
++            source.index("bool V4L2EncodeComponent::startDevicePoll()"):
++            source.index("bool V4L2EncodeComponent::stopDevicePoll()")]:
++        raise AssertionError("poll failure would not notify Codec2")
++    if "reportError(C2_CORRUPTED);" not in source[
++            source.index("bool V4L2EncodeComponent::dequeueInputBuffer()"):
++            source.index("bool V4L2EncodeComponent::dequeueOutputBuffer()")]:
++        raise AssertionError("DQBUF failure would not notify Codec2")
++    return POLL, INPUT
++
++def native(guards):
++    poll, inp = guards
++    code = r"""
++#include <cassert>
++#include <cstdio>
++#define ALOGE(...) do {} while (false)
++enum class EncoderState { ENCODING, ERROR };
++static EncoderState mEncoderState;
++static int pollCalls, queueOutput, inputCalls, outputCalls;
++static bool pollOK, inputOK, inputPending, outputPending;
++static bool startDevicePoll() {
++    ++pollCalls;
++    if (!pollOK) { mEncoderState=EncoderState::ERROR; return false; }
++    return true;
++}
++static bool enqueueOutputBuffer() { ++queueOutput; return true; }
++static bool dequeueInputBuffer() {
++    ++inputCalls;
++    if (!inputOK) {
++        mEncoderState=EncoderState::ERROR;
++        return false;
++    }
++    return true;
++}
++static bool dequeueOutputBuffer() { ++outputCalls;return true; }
++static bool startAndQueue() {
++""" + poll + r"""
++    while (queueOutput < 1) if (!enqueueOutputBuffer()) return false;
++    return true;
++}
++static void serviceDeviceTask() {
++    if (mEncoderState == EncoderState::ERROR) return;
++    while (inputPending) {
++        inputPending = false;
++        if (!dequeueInputBuffer()) break;
++    }
++""" + inp + r"""
++    while (outputPending) {
++        outputPending = false;
++        if (!dequeueOutputBuffer()) break;
++    }
++}
++static void reset() {
++    mEncoderState=EncoderState::ENCODING;
++    pollCalls=queueOutput=inputCalls=outputCalls=0;
++    pollOK=inputOK=true;
++    inputPending=outputPending=false;
++}
++int main() {
++    reset(); assert(startAndQueue());
++    assert(pollCalls==1 && queueOutput==1);
++
++    reset(); pollOK=false;
++    assert(!startAndQueue());
++    assert(mEncoderState==EncoderState::ERROR && pollCalls==1 && queueOutput==0);
++
++    reset(); inputPending=outputPending=true; inputOK=false;
++    serviceDeviceTask();
++    assert(mEncoderState==EncoderState::ERROR && inputCalls==1 && outputCalls==0);
++
++    reset(); inputPending=outputPending=true;
++    serviceDeviceTask();
++    assert(inputCalls==1 && outputCalls==1 && mEncoderState==EncoderState::ENCODING);
++
++    reset(); inputPending=false;outputPending=true;
++    serviceDeviceTask();
++    assert(inputCalls==0 && outputCalls==1);
++
++    reset(); mEncoderState=EncoderState::ERROR;
++    inputPending=outputPending=true;
++    serviceDeviceTask();
++    assert(inputCalls==0 && outputCalls==0);
++
++    std::puts("PASS G1251_EXTRACTED_NATIVE_CPP_SIX_NORMAL_AND_ERROR_PATHS_UBSAN");
++}
++"""
++    with tempfile.TemporaryDirectory(prefix="g1251-test-") as temp:
++        path=Path(temp)/"g1251.cpp";bin=Path(temp)/"g1251"
++        path.write_text(code)
++        subprocess.run(["g++","-std=c++17","-O1","-Wall","-Wextra","-Werror",
++                        "-D_GLIBCXX_ASSERTIONS","-fsanitize=undefined",
++                        "-fno-sanitize-recover=all",str(path),"-o",str(bin)],check=True)
++        subprocess.run([str(bin)],check=True)
++
++def main():
++    text=CODE.read_text()
++    guards=gate(text)
++    native(guards)
++    variants=[
++      text.replace(POLL, "startDevicePoll();",1),
++      text.replace(INPUT, "",1),
++      text.replace(POLL,POLL.replace("return false;","return true;"),1),
++      text.replace(INPUT,INPUT.replace("return;","break;"),1),
++    ]
++    for i,bad in enumerate(variants):
++        try:gate(bad)
++        except (AssertionError, ValueError):continue
++        raise AssertionError(f"G1251 mutation {i} unexpectedly passed")
++    print("PASS G1251_SOURCE_GUARD_ORDER_FOUR_FATAL_MUTANTS_REJECTED")
++    print("G1251_HOST_ONLY_NO_VIDEO_AUDIO_MIC_CAMERA_MODEM_GPS_OR_FLASH")
++if __name__=="__main__":main()
+diff --git a/tests/test_g1261_mfc_stop_failure_state.py b/tests/test_g1261_mfc_stop_failure_state.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..9a4c15b420eb27d74574c096bb159bc783b95f78
+--- /dev/null
++++ b/tests/test_g1261_mfc_stop_failure_state.py
+@@ -0,0 +1,141 @@
++#!/usr/bin/env python3
++"""G1261 validate real Codec2 STOP ioctl failure before DRAINING transition.
++
++Host-only: extract exact failure branch from compiled production source, run
++native C++17 UBSan failure/success states, reject unsafe mutations. No media.
++"""
++from pathlib import Path
++import subprocess
++import tempfile
++
++SRC=Path(__file__).resolve().parents[1]/"components/V4L2EncodeComponent.cpp"
++GUARD="""if (mDevice->Ioctl(VIDIOC_ENCODER_CMD, &cmd) != 0) {
++        ALOGE("Failed to stop encoder");
++        // G1261: onDrainDone() asserts that DRAINING has already begun.
++        // STOP failed before that transition, so report the device failure
++        // directly instead of invoking a callback with an invalid state.
++        reportError(C2_CORRUPTED);
++        return;
++    }"""
++def check(src):
++    a=src.index("void V4L2EncodeComponent::drain()")
++    b=src.index("void V4L2EncodeComponent::flush()",a)
++    drain=src[a:b]
++    if drain.count(GUARD)!=1:
++        raise AssertionError("exact fatal STOP error branch absent or duplicated")
++    if not (drain.index("if (mEncoderState == EncoderState::DRAINING") <
++            drain.index(GUARD) <
++            drain.index("setEncoderState(EncoderState::DRAINING);")):
++        raise AssertionError("STOP rejection must be checked before state transition")
++    if "onDrainDone(false)" in drain:
++        raise AssertionError("illegal onDrainDone callback before DRAINING")
++    a=src.index("void V4L2EncodeComponent::onDrainDone(bool done)")
++    b=src.index("void V4L2EncodeComponent::flushTask(",a)
++    assert "ALOG_ASSERT(mEncoderState == EncoderState::DRAINING || mEncoderState == EncoderState::ERROR);" in src[a:b]
++    a=src.index("void V4L2EncodeComponent::reportError(")
++    b=src.index("void V4L2EncodeComponent::setComponentState(",a)
++    if "setEncoderState(EncoderState::ERROR)" not in src[a:b]:
++        raise AssertionError("no component error transition")
++    return GUARD
++
++def run_native(guard):
++    code=r"""
++#include <cassert>
++#include <cstdio>
++enum class EncoderState { ENCODING, WAITING_FOR_INPUT, DRAINING, ERROR };
++static EncoderState mEncoderState;
++static int ioctlCalls, errorCount, drainCallbacks, successfulDrainTransitions;
++static bool stopOK;
++static const int VIDIOC_ENCODER_CMD=100;
++static const int V4L2_ENC_CMD_STOP=1;
++static const int C2_CORRUPTED=66;
++struct EncoderCmd { int cmd; };
++struct FakeDevice {
++    int Ioctl(int, EncoderCmd *c) {
++        assert(c && c->cmd==V4L2_ENC_CMD_STOP);
++        ++ioctlCalls;
++        return stopOK ? 0 : -1;
++    }
++} dev, *mDevice=&dev;
++#define ALOGE(...) do {} while(false)
++static void reportError(int e) {
++    assert(e==C2_CORRUPTED);
++    ++errorCount;
++    mEncoderState=EncoderState::ERROR;
++}
++[[maybe_unused]] static void onDrainDone(bool) {
++    ++drainCallbacks;
++    assert(mEncoderState==EncoderState::DRAINING ||
++           mEncoderState==EncoderState::ERROR);
++}
++static void setEncoderState(EncoderState s) {
++    assert(s==EncoderState::DRAINING);
++    ++successfulDrainTransitions; mEncoderState=s;
++}
++static void drain() {
++    if (mEncoderState==EncoderState::DRAINING ||
++        mEncoderState==EncoderState::ERROR) return;
++    EncoderCmd cmd{V4L2_ENC_CMD_STOP};
++""" + guard + r"""
++    setEncoderState(EncoderState::DRAINING);
++}
++static void reset(EncoderState initial, bool ok) {
++    mEncoderState=initial;
++    stopOK=ok;
++    ioctlCalls=errorCount=drainCallbacks=successfulDrainTransitions=0;
++}
++int main() {
++    reset(EncoderState::ENCODING,false);
++    drain();
++    assert(mEncoderState==EncoderState::ERROR &&
++           errorCount==1 && drainCallbacks==0 &&
++           ioctlCalls==1 && successfulDrainTransitions==0);
++
++    reset(EncoderState::WAITING_FOR_INPUT,false);
++    drain();
++    assert(mEncoderState==EncoderState::ERROR &&
++           errorCount==1 && drainCallbacks==0 &&
++           ioctlCalls==1 && successfulDrainTransitions==0);
++
++    reset(EncoderState::ENCODING,true);
++    drain();
++    assert(mEncoderState==EncoderState::DRAINING &&
++           errorCount==0 && drainCallbacks==0 &&
++           ioctlCalls==1 && successfulDrainTransitions==1);
++
++    reset(EncoderState::DRAINING,false);
++    drain();
++    assert(mEncoderState==EncoderState::DRAINING &&
++           errorCount==0 && ioctlCalls==0);
++
++    reset(EncoderState::ERROR,false);
++    drain();
++    assert(mEncoderState==EncoderState::ERROR &&
++           errorCount==0 && ioctlCalls==0);
++
++    std::puts("PASS G1261_REAL_STOP_BRANCH_NATIVE_CPP_5_STATES_UBSAN");
++}
++"""
++    with tempfile.TemporaryDirectory(prefix="g1261-") as td:
++        source=Path(td)/"stop.cpp";binary=Path(td)/"stop"
++        source.write_text(code)
++        subprocess.run(["g++","-std=c++17","-O1","-Wall","-Wextra",
++                        "-Werror","-D_GLIBCXX_ASSERTIONS","-fsanitize=undefined",
++                        "-fno-sanitize-recover=all",str(source),"-o",str(binary)],check=True)
++        subprocess.run([str(binary)],check=True)
++def main():
++    s=SRC.read_text()
++    run_native(check(s))
++    for bad in [
++        s.replace(GUARD,GUARD.replace("reportError(C2_CORRUPTED);","onDrainDone(false);"),1),
++        s.replace(GUARD,GUARD.replace("return;",""),1),
++        s.replace(GUARD,GUARD.replace("reportError(C2_CORRUPTED);","setEncoderState(EncoderState::DRAINING);"),1),
++        s.replace(GUARD,GUARD.replace("!= 0","== 0"),1),
++        s.replace(GUARD,GUARD.replace("reportError(C2_CORRUPTED);",""),1),
++    ]:
++        try:check(bad)
++        except (AssertionError,ValueError):continue
++        raise AssertionError("unsafe STOP error handling accepted")
++    print("PASS G1261_REAL_STOP_BRANCH_FIVE_NEGATIVE_MUTATIONS_REFUSED")
++    print("G1261_HOST_ONLY_NO_AUDIO_VIDEO_CAMERA_MIC_GPS_MODEM_OR_FLASH")
++if __name__=="__main__":main()
+diff --git a/tests/test_g1270_stop_failure_schedule_error.py b/tests/test_g1270_stop_failure_schedule_error.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c57b623702537d1913f1a3950cad69c5f9d163ad
+--- /dev/null
++++ b/tests/test_g1270_stop_failure_schedule_error.py
+@@ -0,0 +1,20 @@
++#!/usr/bin/env python3
++from pathlib import Path
++
++source = (Path(__file__).resolve().parents[1] / "components/V4L2EncodeComponent.cpp").read_text()
++schedule = source.split("void V4L2EncodeComponent::scheduleNextEncodeTask()", 1)[1].split(
++    "bool V4L2EncodeComponent::encode(", 1)[0]
++drain = source.split("void V4L2EncodeComponent::drain()", 1)[1].split(
++    "void V4L2EncodeComponent::flush()", 1)[0]
++stop = drain.split("if (mDevice->Ioctl(VIDIOC_ENCODER_CMD, &cmd) != 0)", 1)[1].split(
++    "setEncoderState(EncoderState::DRAINING);", 1)[0]
++assert "reportError(C2_CORRUPTED);" in stop
++assert "onDrainDone(false);" not in stop
++eos = schedule.index("drainTask(C2Component::DRAIN_COMPONENT_WITH_EOS);")
++guard = schedule.index("if (mEncoderState == EncoderState::DRAINING || mEncoderState == EncoderState::ERROR)")
++waiting = schedule.index("setEncoderState(EncoderState::WAITING_FOR_INPUT)")
++post = schedule.index("PostTask(", guard)
++assert eos < guard < waiting < post
++assert schedule.count("mEncoderState == EncoderState::ERROR") == 3
++assert "if (mEncoderState == EncoderState::ERROR)" in schedule[:eos]
++print("G1270_STOP_FAILURE_ERROR_STATE_SCHEDULE_SOURCE_PASS")
+diff --git a/tests/test_g1290_flush_restart_ownership.py b/tests/test_g1290_flush_restart_ownership.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..8f0530303fa20d82a6a4edfd29d749ef635deac0
+--- /dev/null
++++ b/tests/test_g1290_flush_restart_ownership.py
+@@ -0,0 +1,16 @@
++#!/usr/bin/env python3
++from pathlib import Path
++
++src = (Path(__file__).resolve().parents[1] / "components/V4L2EncodeComponent.cpp").read_text()
++flush = src.split("void V4L2EncodeComponent::flush() {", 1)[1].split("std::shared_ptr<C2LinearBlock> V4L2EncodeComponent::fetchOutputBlock()", 1)[0]
++state = src.split("void V4L2EncodeComponent::setEncoderState(EncoderState state) {", 1)[1]
++assert "queue->IsStreaming() || queue->QueuedBuffersCount() > 0" in flush
++assert flush.index("queue->Streamoff()") < flush.index("for (auto& block : mOutputBuffersMap) block.reset();")
++assert "if (queuesStopped)" in flush
++assert "mCSDSubmitted = false;" in flush
++assert "mKeyFrameCounter = 0;" in flush
++assert "if (mEncoderState != EncoderState::ERROR)" in flush
++assert "if (mEncoderState != EncoderState::WAITING_FOR_INPUT)" in flush
++assert "setEncoderState(EncoderState::WAITING_FOR_INPUT);" in flush
++assert "mEncoderState == EncoderState::WAITING_FOR_INPUT_BUFFERS" in state.split("case EncoderState::WAITING_FOR_INPUT:", 1)[1].split("break;", 1)[0]
++print("G1290_FLUSH_OWNERSHIP_RESET_SOURCE_PASS")
+diff --git a/tests/test_g1310_flush_poll_stop_guard.py b/tests/test_g1310_flush_poll_stop_guard.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6475ab7983f8d7952da50307bf5f4a077c5d7c92
+--- /dev/null
++++ b/tests/test_g1310_flush_poll_stop_guard.py
+@@ -0,0 +1,13 @@
++#!/usr/bin/env python3
++from pathlib import Path
++source=(Path(__file__).resolve().parents[1]/"components/V4L2EncodeComponent.cpp").read_text()
++flush=source.split("void V4L2EncodeComponent::flush()",1)[1].split(
++    "std::shared_ptr<C2LinearBlock> V4L2EncodeComponent::fetchOutputBlock()",1)[0]
++stop=source.split("bool V4L2EncodeComponent::stopDevicePoll()",1)[1].split(
++    "void V4L2EncodeComponent::onPollError()",1)[0]
++assert "if (!stopDevicePoll())" in flush and "return;" in flush
++assert flush.index("if (!stopDevicePoll())") < flush.index("queue->Streamoff()")
++assert flush.index("if (!stopDevicePoll())") < flush.index("for (auto& block : mOutputBuffersMap)")
++assert "reportError(C2_CORRUPTED);" in stop
++assert "return false;" in stop
++print("G1310_POLL_STOP_FAILURE_NO_BUFFER_RELEASE_SOURCE_PASS")
+diff --git a/tests/test_g1320_capture_negative_timestamp.py b/tests/test_g1320_capture_negative_timestamp.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..13979257b978e2c171031eb1b85ae4678f4fc462
+--- /dev/null
++++ b/tests/test_g1320_capture_negative_timestamp.py
+@@ -0,0 +1,15 @@
++#!/usr/bin/env python3
++from pathlib import Path
++s=(Path(__file__).resolve().parents[1]/"components/V4L2EncodeComponent.cpp").read_text()
++dq=s.split("bool V4L2EncodeComponent::dequeueOutputBuffer()",1)[1].split(
++    "bool V4L2EncodeComponent::createInputBuffers()",1)[0]
++done=s.split("void V4L2EncodeComponent::onOutputBufferDone(",1)[1].split(
++    "C2Work* V4L2EncodeComponent::getWorkByIndex(",1)[0]
++guard='if (timestamp.InMicroseconds() < 0) {'
++assert guard in dq
++assert dq.index(guard)<dq.index("onOutputBufferDone(")
++block=dq.split(guard,1)[1].split("}",1)[0]
++assert "reportError(C2_CORRUPTED);" in block and "return false;" in block
++assert "getWorkByTimestamp(timestamp);" in done
++assert "ALOG_ASSERT(timestamp >= 0);" in s
++print("G1320_CAPTURE_NEGATIVE_TIMESTAMP_FAIL_CLOSED_SOURCE_PASS")
+diff --git a/tests/test_g1330_flush_streamoff_dma_lifetime.py b/tests/test_g1330_flush_streamoff_dma_lifetime.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..50194aad6e9919072f7369a676886a0fe1d29fc1
+--- /dev/null
++++ b/tests/test_g1330_flush_streamoff_dma_lifetime.py
+@@ -0,0 +1,16 @@
++#!/usr/bin/env python3
++from pathlib import Path
++
++text = (Path(__file__).resolve().parents[1] / "components/V4L2EncodeComponent.cpp").read_text()
++flush = text.split("void V4L2EncodeComponent::flush() {", 1)[1].split(
++    "std::shared_ptr<C2LinearBlock> V4L2EncodeComponent::fetchOutputBlock()", 1)[0]
++assert "if (!stopDevicePoll())" in flush
++assert "bool queuesStopped = true;" in flush
++assert "if (!queuesStopped) {\n        return;\n    }" in flush
++assert flush.index("queue->Streamoff()") < flush.index("if (!queuesStopped)")
++assert flush.index("if (!queuesStopped)") < flush.index("mInputFormatConverter->returnBlock(it.first)")
++assert flush.index("if (!queuesStopped)") < flush.index("it.second = nullptr;")
++assert flush.index("if (!queuesStopped)") < flush.index("for (auto& block : mOutputBuffersMap) block.reset();")
++assert flush.index("if (!queuesStopped)") < flush.index("work->input.buffers.clear();")
++assert "reportError(C2_CORRUPTED);" in flush
++print("G1330_STREAMOFF_FAILURE_PRESERVES_INPUT_AND_CAPTURE_DMA_REFERENCES_PASS")
+diff --git a/tests/test_g1350_accepted_work_fatal_error_completion.py b/tests/test_g1350_accepted_work_fatal_error_completion.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..86261a3449e31183210d68e6af5f75c3f7a91d28
+--- /dev/null
++++ b/tests/test_g1350_accepted_work_fatal_error_completion.py
+@@ -0,0 +1,17 @@
++#!/usr/bin/env python3
++from pathlib import Path
++
++src=(Path(__file__).resolve().parents[1] / "components/V4L2EncodeComponent.cpp").read_text()
++q=src.split("void V4L2EncodeComponent::queueTask(",1)[1].split(
++    "// TODO(dstaessens): Investigate improving drain logic",1)[0]
++err=q.split("if (mEncoderState == EncoderState::ERROR) {",1)[1].split(
++    "mInputWorkQueue.push(std::move(work));",1)[0]
++assert "work->result = C2_CORRUPTED;" in err
++assert "work->input.buffers.clear();" in err
++assert "work->workletsProcessed = static_cast<uint32_t>(work->worklets.size());" in err
++assert "std::list<std::unique_ptr<C2Work>> failedWorks;" in err
++assert "failedWorks.emplace_back(std::move(work));" in err
++assert "mListener->onWorkDone_nb(shared_from_this(), std::move(failedWorks));" in err
++assert err.index("work->result = C2_CORRUPTED;") < err.index("return;")
++assert q.index("if (mEncoderState == EncoderState::ERROR)") < q.index("mInputWorkQueue.push(std::move(work));")
++print("G1350_ASYNC_ACCEPTED_WORK_ERROR_COMPLETION_SOURCE_PASS")
+diff --git a/tests/test_g1370_encoder_accepted_input_shape.py b/tests/test_g1370_encoder_accepted_input_shape.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..479e0d58b4cf919bcd9f74202fbb0d8f5481f4d2
+--- /dev/null
++++ b/tests/test_g1370_encoder_accepted_input_shape.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python3
++from pathlib import Path
++source = (Path(__file__).resolve().parents[1] / "components/V4L2EncodeComponent.cpp").read_text()
++task = source.split("void V4L2EncodeComponent::queueTask(", 1)[1].split(
++    "void V4L2EncodeComponent::drainTask(", 1)[0]
++schedule = source.split("void V4L2EncodeComponent::scheduleNextEncodeTask()", 1)[1].split(
++    "bool V4L2EncodeComponent::encode(", 1)[0]
++assert "work->worklets.size() != 1u" in task
++assert "work->input.buffers.size() > 1u" in task
++assert "!work->input.buffers.front()" in task
++assert "work->input.buffers.front()->data().graphicBlocks().size() != 1u" in task
++assert task.index("const bool invalidWork") < task.index("mInputWorkQueue.push(std::move(work));")
++error = task.split("if (invalidWork) {", 1)[1].split("mInputWorkQueue.push(std::move(work));", 1)[0]
++for term in ("work->result = C2_CORRUPTED;", "work->input.buffers.clear();",
++             "onWorkDone_nb(shared_from_this(), std::move(failedWorks));", "return;"):
++    assert term in error
++assert "work->worklets.front()->output.flags" in schedule
++assert "data().graphicBlocks().front()" in schedule
++print("G1370_ENCODER_MALFORMED_INPUT_COMPLETION_SOURCE_PASS")

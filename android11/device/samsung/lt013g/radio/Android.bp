@@ -1,0 +1,125 @@
+cc_prebuilt_binary {
+    name: "t311-cbd",
+    srcs: ["prebuilt/t311-cbd"],
+    vendor: true,
+    stem: "t311-cbd",
+    strip: { none: true },
+    check_elf_files: false,
+}
+
+// G350: compile the stock-private RIL with a two-byte mutex-attribute
+// initialization correction. Original OEM bytes are never committed.
+genrule {
+    name: "t311-libsec-ril-g350-private",
+    srcs: ["prebuilt/libsec-ril.so"],
+    tool_files: ["patch_stock_elapsed_g494.py", "patch_stock_elapsed_g490.py", "patch_stock_mutex_g350.py"],
+    out: ["libsec-ril.so"],
+    cmd: "python3 $(location patch_stock_elapsed_g494.py) $(in) $(out)",
+}
+
+// v205: use the source-built Samsung libril as the single provider.
+cc_prebuilt_library_shared {
+    name: "t311-libsec-ril",
+    srcs: [":t311-libsec-ril-g350-private"], vendor: true, stem: "libsec-ril.so",
+    relative_install_path: "t311-ril", strip: { none: true }, check_elf_files: false,
+}
+cc_prebuilt_library_shared {
+    name: "t311-libsecnativefeature",
+    srcs: ["prebuilt/libsecnativefeature.so"], vendor: true, stem: "libsecnativefeature.so",
+    strip: { none: true }, check_elf_files: false,
+}
+cc_prebuilt_library_shared {
+    name: "t311-libstlport",
+    srcs: ["prebuilt/libstlport.so"], vendor: true, stem: "libstlport.so",
+    strip: { none: true }, check_elf_files: false,
+}
+cc_prebuilt_library_shared {
+    name: "t311-libcutils-compat",
+    srcs: ["prebuilt/libt311_cutils_compat.so"], vendor: true, stem: "libt311_cutils_compat.so",
+    strip: { none: true }, check_elf_files: false,
+}
+cc_library_shared {
+    name: "t311-libalarm-compat",
+    srcs: ["t311_alarm_compat.c"], vendor: true, stem: "libt311_alarm_compat",
+    relative_install_path: "t311-ril",
+}
+
+
+cc_binary {
+    name: "t311-recovery-noop",
+    srcs: ["t311_recovery_noop.c"],
+    vendor: true,
+    stem: "t311-recovery-noop",
+}
+
+sh_binary { name: "t311-camera-fw-setup", src: "t311-camera-fw-setup.sh", vendor: true, }
+
+prebuilt_etc {
+    name: "t311-platform-init",
+    src: "zz.t311-platform.rc",
+    vendor: true,
+    sub_dir: "init",
+    filename: "zz.t311-platform.rc",
+}
+
+// V191_AUDIO_RIL_BRIDGE_BEGIN
+cc_binary {
+    name: "t311-audio-ril",
+    srcs: ["t311_audio_ril.c"],
+    vendor: true,
+    stem: "t311-audio-ril",
+    shared_libs: ["liblog"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+// V191_AUDIO_RIL_BRIDGE_END
+
+// One-shot cold-boot XMM6262 recovery guard; no SIM or NV access.
+sh_binary { name: "t311-modem-watchdog", src: "t311-modem-watchdog.sh", vendor: true, }
+
+cc_binary {
+    name: "t311-radio-hal-probe",
+    srcs: ["t311_radio_hal_probe.cpp"],
+    vendor: true,
+    shared_libs: ["android.hardware.radio@1.0", "libhidlbase", "libutils"],
+}
+
+// Read-only ifaddrs inventory; blocks recovery if any rmnet has IP data.
+cc_binary {
+    name: "t311-mobile-session-probe",
+    srcs: ["t311_mobile_session_probe.c"],
+    vendor: true,
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+cc_test {
+    name: "t311-audio-ril-io-test",
+    srcs: ["tests/t311_audio_ril_io_host_test.c"],
+    vendor: true,
+    gtest: false,
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+cc_test {
+    name: "t311-mobile-session-probe-test",
+    srcs: ["tests/t311_mobile_session_probe_host_test.c"],
+    vendor: true,
+    gtest: false,
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+// Exact-CBD process signaling via kernel pidfd: never fall back to kill(pid).
+cc_binary {
+    name: "t311-cbd-pidfd-signal",
+    srcs: ["t311_cbd_pidfd_signal.c"],
+    vendor: true,
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+// Same production pidfd source; self-test may signal ONLY its own forked child.
+cc_test {
+    name: "t311-cbd-pidfd-native-test",
+    srcs: ["tests/t311_cbd_pidfd_native_test.c"],
+    vendor: true,
+    gtest: false,
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}

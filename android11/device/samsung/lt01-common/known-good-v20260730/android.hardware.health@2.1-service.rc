@@ -1,0 +1,7 @@
+service health-hal-2-1 /vendor/bin/hw/android.hardware.health@2.1-service
+    class hal charger
+    user system
+    group system
+    seclabel u:r:hal_health_default:s0
+    capabilities WAKE_ALARM
+    file /dev/kmsg w

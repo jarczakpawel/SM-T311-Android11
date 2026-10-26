@@ -1,0 +1,3 @@
+type hal_audio_default_tmpfs, file_type, mlstrustedobject;
+tmpfs_domain(hal_audio_default)
+allow audioserver hal_audio_default_tmpfs:file { getattr map read write };

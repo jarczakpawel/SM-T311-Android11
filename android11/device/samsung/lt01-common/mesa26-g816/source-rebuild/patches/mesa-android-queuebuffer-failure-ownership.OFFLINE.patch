@@ -1,0 +1,69 @@
+--- a/src/egl/drivers/dri2/platform_android.c
++++ b/src/egl/drivers/dri2/platform_android.c
+@@ -195,9 +195,24 @@
+     * after passing it to queueBuffer.
+     */
+    int fence_fd = dri2_surf->out_fence_fd;
+    dri2_surf->out_fence_fd = -1;
+-   ANativeWindow_queueBuffer(dri2_surf->window, dri2_surf->buffer, fence_fd);
++   /* The Android native window takes ownership of fence_fd even when it
++    * reports an error. Never close or reuse fence_fd after this call.
++    * A failed queue may leave the buffer slot owned by this producer;
++    * explicitly cancel it with no fence before forgetting the pointer. */
++   const int queue_status = ANativeWindow_queueBuffer(
++      dri2_surf->window, dri2_surf->buffer, fence_fd);
++   if (queue_status != 0) {
++      _eglLog(_EGL_WARNING, "ANativeWindow_queueBuffer failed: %d",
++              queue_status);
++      const int cancel_status = ANativeWindow_cancelBuffer(
++         dri2_surf->window, dri2_surf->buffer, -1);
++      if (cancel_status != 0)
++         _eglLog(_EGL_WARNING, "ANativeWindow_cancelBuffer after queue failure: %d",
++                 cancel_status);
++      dri2_surf->base.Lost = EGL_TRUE;
++   }
+ 
+    dri2_surf->buffer = NULL;
+    dri2_surf->back = NULL;
+ 
+@@ -205,9 +220,9 @@
+       dri2_destroy_image(dri2_surf->dri_image_back);
+       dri2_surf->dri_image_back = NULL;
+    }
+ 
+-   return EGL_TRUE;
++   return queue_status == 0 ? EGL_TRUE : EGL_FALSE;
+ }
+ 
+ static void
+ droid_window_cancel_buffer(struct dri2_egl_surface *dri2_surf)
+@@ -644,19 +659,25 @@
+                                              __DRI2_NOTHROTTLE_SWAPBUFFER);
+ 
+    if (dri2_dpy->pure_swrast) {
+       driSwapBuffers(dri2_surf->dri_drawable);
+-      if (dri2_surf->buffer)
+-         droid_window_enqueue_buffer(disp, dri2_surf);
++      if (dri2_surf->buffer &&
++          !droid_window_enqueue_buffer(disp, dri2_surf)) {
++         _eglError(EGL_BAD_SURFACE, "droid_swap_buffers: queueBuffer failed");
++         return EGL_FALSE;
++      }
+    } else {
+       /* dri2_surf->buffer can be null even when no error has occurred. For
+        * example, if the user has called no GL rendering commands since the
+        * previous eglSwapBuffers, then the driver may have not triggered
+        * a callback to ANativeWindow_dequeueBuffer, in which case
+        * dri2_surf->buffer remains null.
+        */
+-      if (dri2_surf->buffer)
+-         droid_window_enqueue_buffer(disp, dri2_surf);
++      if (dri2_surf->buffer &&
++          !droid_window_enqueue_buffer(disp, dri2_surf)) {
++         _eglError(EGL_BAD_SURFACE, "droid_swap_buffers: queueBuffer failed");
++         return EGL_FALSE;
++      }
+ 
+       dri_invalidate_drawable(dri2_surf->dri_drawable);
+    }
+ 

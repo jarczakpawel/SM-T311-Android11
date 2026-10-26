@@ -1,0 +1,6 @@
+cc_binary {
+    name: "t311-memfd-label-probe",
+    vendor: true,
+    srcs: ["memfd-label-probe.cpp"],
+    shared_libs: ["libselinux"],
+}

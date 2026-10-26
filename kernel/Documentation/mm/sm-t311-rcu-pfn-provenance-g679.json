@@ -1,0 +1,86 @@
+{
+  "stage": "G679",
+  "type": "source-anchored PFN reuse/provenance obligations",
+  "source_checks": {
+    "no_ref_reader_disabled_by_default": true,
+    "reader_under_rcu_and_pagefault_disabled": true,
+    "reader_does_not_hold_reference": true,
+    "lookup_raw_pointer_then_flag_then_slot": true,
+    "reader_only_order0_normal": true,
+    "reader_data_copy_in_rcu_window": true,
+    "no_runtime_generation_oracle": true,
+    "mark_hot_requires_ext4_normal_order0": true,
+    "mark_hot_sets_flag_under_reference": true,
+    "single_inode_exit_keeps_flag_in_experiment": true,
+    "batch_inode_exit_keeps_flag_in_experiment": true,
+    "tagged_last_put_defers_free": true,
+    "poison_exception_no_normal_recycle": true,
+    "poison_release_waits_gp": true,
+    "memory_failure_waits_rcu": true,
+    "migrate_slot_lock_and_freeze_order": true,
+    "migrate_does_not_transfer_tag": true,
+    "replace_xarray_before_old_put": true,
+    "add_new_mapping_index_before_publish": true,
+    "large_split_transfers_pg_rcu_free": true,
+    "reader_never_accepts_large_split": true,
+    "flag_bit_definition": true,
+    "gp_callback_queues_only_after_grace": true,
+    "debugfs_activation_guard_not_global_proof": true
+  },
+  "source_checks_passed": 24,
+  "actual_changed_source_controls_rejected": {
+    "remove_reader_rcu_lock": [
+      "reader_under_rcu_and_pagefault_disabled"
+    ],
+    "remove_reader_mapping_check": [
+      "lookup_raw_pointer_then_flag_then_slot"
+    ],
+    "remove_single_inode_tag_preservation": [
+      "single_inode_exit_keeps_flag_in_experiment"
+    ],
+    "remove_batch_inode_tag_preservation": [
+      "batch_inode_exit_keeps_flag_in_experiment"
+    ],
+    "remove_allocator_defer": [
+      "tagged_last_put_defers_free"
+    ],
+    "remove_hwpoison_grace": [
+      "poison_release_waits_gp"
+    ],
+    "remove_migration_freeze": [
+      "migrate_slot_lock_and_freeze_order"
+    ],
+    "remove_large_split_tag_copy": [
+      "large_split_transfers_pg_rcu_free"
+    ],
+    "remove_xarray_replace_publication": [
+      "replace_xarray_before_old_put"
+    ]
+  },
+  "evidence_scope": "source of this kernel HEAD; no runtime kernel execution or PFN trace",
+  "key_conclusions": [
+    "The old unmarked page A MAY be reclaimed and reused within the reader RCU critical section: no grace is promised for A.",
+    "The reader relies on the tag sampled after obtaining raw numeric pointer; it does not compare an allocation generation.",
+    "If a tagged reuser B is observed, B must not be recycled until reader GP: G674 preserves tag at final inode eviction; allocator normally defers B last put.",
+    "The order0 Normal filter makes large-folio split outside the SM-T311 experimental fastpath; migration can replace XArray slot without transferring the flag to new folio.",
+    "Hwpoison has dedicated RCU synchronization and quarantines poisoned pages; this is not an all-writers proof.",
+    "No full formal proof of ARMv7 cache, allocator PFN ABA, ref-free folio contents consistency or all exceptional writers exists."
+  ],
+  "remaining_gaps": [
+    "No general generation token in XArray+folio lookup to distinguish A and C under same numeric PFN pointer.",
+    "No exhaustively validated publication/removal memory ordering for every migration, replace, truncate, ext4 mmap or hwpoison path.",
+    "No physical ON/ABBA test, and no verified normal-zone reclaim/OOM bound for G674's extended tag lifetime."
+  ],
+  "deployment": {
+    "physical_source_commit": "a2fca4558",
+    "physical_boot": "G650",
+    "staged_executable_files": [
+      "mm/filemap.c",
+      "mm/page_alloc.c"
+    ],
+    "rcu_default_on": false,
+    "s1": "ACTIVE",
+    "s2": "BLOCKED",
+    "s3": "BLOCKED"
+  }
+}

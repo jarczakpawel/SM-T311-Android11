@@ -1,0 +1,26 @@
+SM-T311 GPS PROD V1 - stan produkcyjny GNSS (Android 11 / LineageOS 18.1)
+
+Lancuch:
+  Android GnssLocationProvider -> android.hardware.gnss@1.0-service
+  -> /vendor/lib/hw/gps.default.so (gps_proxy.c, HAL Androida 11)
+  -> gniazdo lt013g_gnss_bridge_v290
+  -> izolowany runtime API25 (legacy-rootfs.tar, launcher legacy_launcher.cpp)
+     -> liblt013g-gps-bridge-v290.so (legacy_gps_server.c, LD_PRELOAD w gpsd)
+     -> gps.default.so + gpsd z CM14 (Broadcom T0 2014/Apr/02, BCM4752 na /dev/ttySAC1)
+     -> libsecril-client -> rild "Multiclient" (XMM6262: frequency aiding IPC 11 28 03)
+     -> servicemanager + sensorservice API25 (dane sensorow dla gpsd)
+
+Co jest w tej wersji (z poprawek sprawdzonych w testach v441-v457):
+  - ref-location w ukladzie Samsunga z polem PSC (CM14: AGPS_USE_PSC), CID na offsecie 16, size=16
+  - frequency aiding: prawdziwa ramka IPC41 0x11 0x28 0x03, NOTI tlumaczone na 37 lock afc,
+    pozostale unsol 11009 odrzucane
+  - XTRA/LTO wylaczone na obu granicach (framework i zadanie z gpsd)
+  - korekta daty fixa 2007 -> 2026 tylko na wyjsciu (silnik Broadcom ma blad rolloveru tygodnia GPS)
+  - kolejnosc callbackow SET ID / REFLOC
+  - gps.xml = stockowy profil CM14/T0 (IgnoreJniTime=true, SuplUseApn=false); jedyna zmiana: log do pliku, LOG_INFO
+  - binarki gpsd/HAL dokladnie z dzialajacego CM14 (sha w PROVENANCE.sha256 wewnatrz rootfs)
+
+Czego NIE ma (tylko testowe): seed komorki z dumpsys, shim DNS z plikiem z hosta,
+markery runtime v458-v463, wymuszanie czasu, wymuszanie PSDS.
+
+Warunki dzialania A-GPS (SUPL): wpisany PIN karty SIM (IMSI = SET ID) i dzialajacy DNS w sieci.

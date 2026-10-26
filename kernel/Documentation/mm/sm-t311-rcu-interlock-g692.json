@@ -1,0 +1,142 @@
+{
+  "stage": "G692",
+  "result": "Experimental ARM32 debugfs ON is FAIL-CLOSED -EOPNOTSUPP; OFF preserved; no-ref safety unproven",
+  "source_conditions": {
+    "debugfs_disabled_activation_experiment_scoped": true,
+    "safety_interlock_immediately_precedes_legacy_checks": true,
+    "debugfs_OFF_remains_operable": true,
+    "invalid_debugfs_value_rejected": true,
+    "single_debugfs_enabler": true,
+    "disabled_initial_static_key": true,
+    "G692_abort_errno_is_not_EAGAIN": true,
+    "current_marking_needs_key": true,
+    "experimental_read_lookup_needs_key": true,
+    "real_refcounted_lookup_acquires_reference": true,
+    "refcounted_lookup_retry_on_invalid_generation": true,
+    "refcounted_lookup_has_explicit_source_protocol": true,
+    "xas_reload_exposes_pointer_no_generation": true,
+    "ref_free_candidate_unpinned_before_PG_flag": true,
+    "only_tagged_last_put_deferred": true,
+    "kconfig_experiment_off_by_default": true,
+    "user_iterator_prior_guard_retained": true,
+    "four_G659_earlier_herd_diagnostics_retained": true
+  },
+  "positive_source_gates": 18,
+  "altered_C_source_controls_rejected": {
+    "remove_EOPNOTSUPP_interlock": [
+      "debugfs_disabled_activation_experiment_scoped",
+      "safety_interlock_immediately_precedes_legacy_checks",
+      "G692_abort_errno_is_not_EAGAIN"
+    ],
+    "allow_activation_via_inverted_condition": [
+      "safety_interlock_immediately_precedes_legacy_checks",
+      "G692_abort_errno_is_not_EAGAIN"
+    ],
+    "allow_activation_by_changing_errno": [
+      "debugfs_disabled_activation_experiment_scoped",
+      "safety_interlock_immediately_precedes_legacy_checks",
+      "G692_abort_errno_is_not_EAGAIN"
+    ],
+    "put_guard_after_enable": [
+      "debugfs_disabled_activation_experiment_scoped",
+      "safety_interlock_immediately_precedes_legacy_checks",
+      "G692_abort_errno_is_not_EAGAIN"
+    ],
+    "break_OFF_handler": [
+      "debugfs_OFF_remains_operable"
+    ],
+    "default_key_ON": [
+      "disabled_initial_static_key"
+    ],
+    "remove_EINVAL_for_2": [
+      "safety_interlock_immediately_precedes_legacy_checks",
+      "invalid_debugfs_value_rejected"
+    ],
+    "skip_reference_acquisition": [
+      "real_refcounted_lookup_acquires_reference",
+      "refcounted_lookup_retry_on_invalid_generation"
+    ],
+    "skip_refcounted_XArray_recheck": [
+      "real_refcounted_lookup_acquires_reference"
+    ],
+    "skip_XArray_lookup_flag": [
+      "ref_free_candidate_unpinned_before_PG_flag"
+    ],
+    "remove_tagged_allocator_defer": [
+      "only_tagged_last_put_deferred"
+    ],
+    "remove_upstream_G659_LKMM_provenance": [
+      "four_G659_earlier_herd_diagnostics_retained"
+    ]
+  },
+  "linked_ARMv7_setter_assembly_conditions": {
+    "setter_symbol_linked_experiment": true,
+    "debugfs_setter_nonzero_dispatch": true,
+    "nonzero_returns_EOPNOTSUPP_minus95": true,
+    "invalid_gt1_returns_EINVAL_minus22": true,
+    "zero_path_does_not_immediately_return_EOPNOTSUPP": true,
+    "compiled_arm32_EABI5": true,
+    "release_off_debugfs_is_not_linked": true
+  },
+  "linked_ARMv7_assembly_counterfactuals_detected": {
+    "changed_nonzero_branch_destination_detected": true,
+    "changed_interlock_errno_detected": true
+  },
+  "reference_acquisition_baseline": "filemap_get_entry: RCU xas_load -> folio_try_get -> xas_reload -> folio_put/retry on mismatch, unlike no-ref reader",
+  "linked_host_images": {
+    "experiment_compile_safe_but_ON_refused": {
+      "vmlinux": {
+        "sha256": "6674571cbe202e69692a9b9279e6eb2b629b108d390719fb8296fd2e79f44ed4",
+        "bytes": 25128244
+      },
+      "arch/arm/boot/zImage": {
+        "sha256": "5d72282b95b43ef9309a0d4b1eaf4077f15118daece95882f784f1d0d36a82dd",
+        "bytes": 6384904
+      },
+      "mm/filemap.o": {
+        "sha256": "848e2a06c18620cdcf381ff1f8468a416bb15fc844be245247e0268e03e8a1d9",
+        "bytes": 80592
+      }
+    },
+    "release_OFF": {
+      "vmlinux": {
+        "sha256": "e929387d60fec5233cab1c36ccdb6ad50e2d7699ccc22c7d231f9992e8cc97c8",
+        "bytes": 24734388
+      },
+      "arch/arm/boot/zImage": {
+        "sha256": "1c2dd2e521cbfec48c95c89518487b5cfd1887027e7f9d74146027d777e86c49",
+        "bytes": 6299344
+      },
+      "mm/filemap.o": {
+        "sha256": "3973982c11eb2c4f32e7e5ce700907bf9023f7cc833283a76045903385c0b7a4",
+        "bytes": 76200
+      }
+    }
+  },
+  "repeatable_host_build_provenance": {
+    "two_host_build_scripts_same_fixed_provenance": true,
+    "build_version_identical_release_and_experiment": true,
+    "fixed_UTS_VERSION_in_both_linked_outputs": true,
+    "fixed_kernelrelease_identity": true
+  },
+  "tampered_host_script_provenance_detected": {
+    "tamper_experimental_timestamp_detected": true,
+    "tamper_release_version_detected": true
+  },
+  "double_build_sha256_identities_observed": true,
+  "limits": [
+    "This is preventive control, not a lifetime/ABA fix; no ref-free ON on the device.",
+    "The previously compiled but unreachable pressure/hardware enabling checks remain in test-only C source for later redesigned activation; compiled debugfs setter rejects ON before reaching them.",
+    "The emitted ARM32 code is evaluated statically; no physical debugfs write was attempted.",
+    "No global proof of PFN generation, VIPT HighMem cache, mmap GP or performance.",
+    "The release default RCU-OFF profile is unaffected."
+  ],
+  "rcu_ON_allowed": false,
+  "boot_installed": false,
+  "staged_executable_paths_NOT_INSTALLED": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ]
+}

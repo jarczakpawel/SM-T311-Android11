@@ -1,0 +1,35 @@
+{
+  "device": "SM-T311 ARMv7",
+  "source_runtime_base": "a2fca4558",
+  "passes": 15,
+  "checks": {
+    "ref_free_mark_gate": true,
+    "flag_cleared_before_queuing": true,
+    "tagged_free_does_not_recycle_immediately": true,
+    "marked_folio_pending_queue": true,
+    "pending_starts_grace_work": true,
+    "only_one_batch_in_flight": true,
+    "batch_initialized_before_rcu_work": true,
+    "rcu_work_handler_post_grace": true,
+    "expedited_grace_before_recycling": true,
+    "expedite_path_uses_grace_flush": true,
+    "drain_path_uses_grace_flush": true,
+    "sync_joins_deferred_rcu_work": true,
+    "last_recycler_called_after_grace": true,
+    "deferred_pages_zone_accounting": true,
+    "hwpoison_exception_explicit": true
+  },
+  "negative_controls": {
+    "removed_queue_rcu_work_must_fail": true,
+    "removed_expedited_grace_must_fail": true,
+    "removed_mark_gate_must_fail": true
+  },
+  "rcu_gp_obligation": "All currently identified last-free work and expedite paths retain an RCU GP before recycling tagged folio.",
+  "limitations": [
+    "Source-string check only, not a proof that every freeing caller is covered.",
+    "Assumes kernel queue_rcu_work semantics, matching actual kernel RCU behavior; needs callgraph review.",
+    "Does not prove untagged-to-tagged speculative pointer ABA absent.",
+    "Does not prove ARMv7 HighMem aliasing, RCU ON safety, application performance or energy."
+  ],
+  "s2_gate": "BLOCKED"
+}

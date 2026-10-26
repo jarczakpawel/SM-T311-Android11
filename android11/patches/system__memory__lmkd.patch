@@ -1,0 +1,240 @@
+diff --git a/lmkd.cpp b/lmkd.cpp
+index 3515fdb11aa024b7879c4183505d4e1fba861840..ecb1d175a67df921a4e5eab91e38a975c58dd299 100644
+--- a/lmkd.cpp
++++ b/lmkd.cpp
+@@ -334,21 +334,21 @@ struct zoneinfo_zone {
+ enum zoneinfo_node_field {
+     ZI_NODE_NR_INACTIVE_FILE = 0,
+     ZI_NODE_NR_ACTIVE_FILE,
+-    ZI_NODE_WORKINGSET_REFAULT,
+     ZI_NODE_FIELD_COUNT
+ };
+ 
++// The page-cache refault field was renamed in Linux 5.9. Neither name
++// is needed for watermark calculation. Require only the stable node fields
++// so zoneinfo_parse works against legacy and current ARM32 kernels.
+ static const char* const zoneinfo_node_field_names[ZI_NODE_FIELD_COUNT] = {
+     "nr_inactive_file",
+     "nr_active_file",
+-    "workingset_refault",
+ };
+ 
+ union zoneinfo_node_fields {
+     struct {
+         int64_t nr_inactive_file;
+         int64_t nr_active_file;
+-        int64_t workingset_refault;
+     } field;
+     int64_t arr[ZI_NODE_FIELD_COUNT];
+ };
+@@ -369,7 +369,6 @@ struct zoneinfo {
+     int64_t totalreserve_pages;
+     int64_t total_inactive_file;
+     int64_t total_active_file;
+-    int64_t total_workingset_refault;
+ };
+ 
+ /* Fields to parse in /proc/meminfo */
+@@ -451,17 +450,19 @@ enum vmstat_field {
+     VS_INACTIVE_FILE,
+     VS_ACTIVE_FILE,
+     VS_WORKINGSET_REFAULT,
++    VS_WORKINGSET_REFAULT_FILE,
+     VS_PGSCAN_KSWAPD,
+     VS_PGSCAN_DIRECT,
+     VS_PGSCAN_DIRECT_THROTTLE,
+     VS_FIELD_COUNT
+ };
+ 
+-static const char* const vmstat_field_names[MI_FIELD_COUNT] = {
++static const char* const vmstat_field_names[VS_FIELD_COUNT] = {
+     "nr_free_pages",
+     "nr_inactive_file",
+     "nr_active_file",
+     "workingset_refault",
++    "workingset_refault_file",
+     "pgscan_kswapd",
+     "pgscan_direct",
+     "pgscan_direct_throttle",
+@@ -473,6 +474,7 @@ union vmstat {
+         int64_t nr_inactive_file;
+         int64_t nr_active_file;
+         int64_t workingset_refault;
++        int64_t workingset_refault_file;
+         int64_t pgscan_kswapd;
+         int64_t pgscan_direct;
+         int64_t pgscan_direct_throttle;
+@@ -1719,7 +1721,6 @@ static int zoneinfo_parse(struct zoneinfo *zi) {
+         }
+         zi->total_inactive_file += node->fields.field.nr_inactive_file;
+         zi->total_active_file += node->fields.field.nr_active_file;
+-        zi->total_workingset_refault += node->fields.field.workingset_refault;
+     }
+     return 0;
+ }
+@@ -2320,6 +2321,7 @@ static void mp_event_psi(int data, uint32_t events, struct polling_params *poll_
+     static int64_t init_pgscan_direct;
+     static int64_t swap_low_threshold;
+     static bool killing;
++    static bool initialized;
+     static int thrashing_limit = thrashing_limit_pct;
+     static struct zone_watermarks watermarks;
+     static struct timespec wmark_update_tm;
+@@ -2341,6 +2343,7 @@ static void mp_event_psi(int data, uint32_t events, struct polling_params *poll_
+     bool cut_thrashing_limit = false;
+     int min_score_adj = 0;
+     long since_thrashing_reset_ms;
++    int64_t workingset_refault_file;
+ 
+     if (clock_gettime(CLOCK_MONOTONIC_COARSE, &curr_tm) != 0) {
+         ALOGE("Failed to get current time");
+@@ -2367,18 +2370,36 @@ static void mp_event_psi(int data, uint32_t events, struct polling_params *poll_
+         return;
+     }
+ 
++    // G1422: Linux >=5.9 renamed the file-backed refault counter.
++    // Old Android 11 lmkd silently interpreted it as zero on our Linux 7.3
++    // kernel and skipped the thrashing-sensitive PSI kill branch.
++    // Follow upstream Android 12: accept either /proc/vmstat spelling.
++    workingset_refault_file = vs.field.workingset_refault
++                                      ? vs.field.workingset_refault
++                                      : vs.field.workingset_refault_file;
++
+     if (meminfo_parse(&mi) < 0) {
+         ALOGE("Failed to parse meminfo!");
+         return;
+     }
+ 
+-    /* Reset states after process got killed */
+-    if (killing) {
+-        killing = false;
+-        cycle_after_kill = true;
++    /* G1424: The first nonzero refault sample MUST start at the current
++     * kernel counters, not from zero. Without this, after the Linux 5.9
++     * compatibility fix, the first pressure callback could treat all
++     * refaults accumulated since boot as recent thrashing and could shift
++     * by an unbounded number of stale time windows. This is the upstream
++     * Android 12 initialization guard, essential with modern kernels.
++     */
++    if (!initialized || killing) {
++        if (killing) {
++            killing = false;
++            cycle_after_kill = true;
++        }
++        initialized = true;
+         /* Reset file-backed pagecache size and refault amounts after a kill */
+         base_file_lru = vs.field.nr_inactive_file + vs.field.nr_active_file;
+-        init_ws_refault = vs.field.workingset_refault;
++        init_ws_refault = workingset_refault_file;
++        prev_workingset_refault = workingset_refault_file;
+         thrashing_reset_tm = curr_tm;
+         prev_thrash_growth = 0;
+     }
+@@ -2399,12 +2420,12 @@ static void mp_event_psi(int data, uint32_t events, struct polling_params *poll_
+     } else if (vs.field.pgscan_kswapd > init_pgscan_kswapd) {
+         init_pgscan_kswapd = vs.field.pgscan_kswapd;
+         reclaim = KSWAPD_RECLAIM;
+-    } else if (vs.field.workingset_refault == prev_workingset_refault) {
++    } else if (workingset_refault_file == prev_workingset_refault) {
+         /* Device is not thrashing and not reclaiming, bail out early until we see these stats changing*/
+         goto no_kill;
+     }
+ 
+-    prev_workingset_refault = vs.field.workingset_refault;
++    prev_workingset_refault = workingset_refault_file;
+ 
+      /*
+      * It's possible we fail to find an eligible process to kill (ex. no process is
+@@ -2421,7 +2442,7 @@ static void mp_event_psi(int data, uint32_t events, struct polling_params *poll_
+     if (since_thrashing_reset_ms > THRASHING_RESET_INTERVAL_MS) {
+         long windows_passed;
+         /* Calculate prev_thrash_growth if we crossed THRASHING_RESET_INTERVAL_MS */
+-        prev_thrash_growth = (vs.field.workingset_refault - init_ws_refault) * 100
++        prev_thrash_growth = (workingset_refault_file - init_ws_refault) * 100
+                             / (base_file_lru + 1);
+         windows_passed = (since_thrashing_reset_ms / THRASHING_RESET_INTERVAL_MS);
+         /*
+@@ -2435,12 +2456,12 @@ static void mp_event_psi(int data, uint32_t events, struct polling_params *poll_
+ 
+         /* Record file-backed pagecache size when crossing THRASHING_RESET_INTERVAL_MS */
+         base_file_lru = vs.field.nr_inactive_file + vs.field.nr_active_file;
+-        init_ws_refault = vs.field.workingset_refault;
++        init_ws_refault = workingset_refault_file;
+         thrashing_reset_tm = curr_tm;
+         thrashing_limit = thrashing_limit_pct;
+     } else {
+         /* Calculate what % of the file-backed pagecache refaulted so far */
+-        thrashing = (vs.field.workingset_refault - init_ws_refault) * 100 / (base_file_lru + 1);
++        thrashing = (workingset_refault_file - init_ws_refault) * 100 / (base_file_lru + 1);
+     }
+     /* Add previous cycle's decayed thrashing amount */
+     thrashing += prev_thrash_growth;
+diff --git a/tests/test_g1422_kernel7_workingset_refault_compat.py b/tests/test_g1422_kernel7_workingset_refault_compat.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d77d5f165429ab5d4abd1b1b4ae4269c4f9be3c9
+--- /dev/null
++++ b/tests/test_g1422_kernel7_workingset_refault_compat.py
+@@ -0,0 +1,63 @@
++#!/usr/bin/env python3
++"""G1422 production source regression for Linux >=5.9 / Android11 lmkd.
++
++No device writes or SIGKILLs. Source-shape verification plus fixture
++compatibility for both historic kernel and the real new vmstat/zoneinfo
++format. A native ARM32 lmkd link is additionally required for release.
++"""
++from pathlib import Path
++import re
++
++src=(Path(__file__).resolve().parents[1]/"lmkd.cpp").read_text()
++vm_array=re.search(r"static const char\* const vmstat_field_names\[VS_FIELD_COUNT\] = \{(.*?)\};",src,re.S)
++assert vm_array
++keys=re.findall(r'"([a-z_]+)"',vm_array.group(1))
++assert keys==[
++  "nr_free_pages","nr_inactive_file","nr_active_file",
++  "workingset_refault","workingset_refault_file",
++  "pgscan_kswapd","pgscan_direct","pgscan_direct_throttle"],keys
++zone_array=re.search(r"static const char\* const zoneinfo_node_field_names\[ZI_NODE_FIELD_COUNT\] = \{(.*?)\};",src,re.S)
++assert zone_array
++zones=re.findall(r'"([a-z_]+)"',zone_array.group(1))
++assert zones==["nr_inactive_file","nr_active_file"],zones
++assert "total_workingset_refault" not in src
++assert "static bool initialized;" in src
++assert "if (!initialized || killing)" in src
++assert "initialized = true;" in src
++assert "prev_workingset_refault = workingset_refault_file;" in src
++assert "VS_WORKINGSET_REFAULT_FILE" in src
++assert "int64_t workingset_refault_file;" in src
++func=src.split("static void mp_event_psi(",1)[1].split("static void mp_event_common(",1)[0]
++assert "vs.field.workingset_refault\n" in func
++assert "? vs.field.workingset_refault\n" in func
++assert ": vs.field.workingset_refault_file;" in func
++assert func.count("vs.field.workingset_refault")==3
++for needle in (
++ "init_ws_refault = workingset_refault_file;",
++ "prev_workingset_refault = workingset_refault_file;",
++ "workingset_refault_file == prev_workingset_refault",
++ "thrashing = (workingset_refault_file - init_ws_refault)",
++ "prev_thrash_growth = (workingset_refault_file - init_ws_refault)",
++):
++ assert needle in func,needle
++
++def parse(lines,names):
++ vals={k:0 for k in names}
++ for line in lines.strip().splitlines():
++  name,value=line.split()
++  if name in vals: vals[name]=int(value)
++ return vals
++
++for name,vm,zone in (
++ ("legacy_4_19", "nr_free_pages 10000\nnr_inactive_file 1200\nnr_active_file 100\nworkingset_refault 747\npgscan_direct 0\n", "nr_inactive_file 1200\nnr_active_file 100\nworkingset_refault 747\n"),
++ ("modern_7_3", "nr_free_pages 10000\nnr_inactive_file 157189\nnr_active_file 61\nworkingset_refault_anon 0\nworkingset_refault_file 7552\npgscan_direct 0\n", "nr_inactive_file 157189\nnr_active_file 61\nworkingset_refault_file 7552\n"),
++):
++ v=parse(vm,keys)
++ z=parse(zone,zones)
++ assert len(z)==2 and all(field in z for field in zones)
++ refault=v["workingset_refault"] or v["workingset_refault_file"]
++ assert refault==({"legacy_4_19":747,"modern_7_3":7552}[name])
++ assert refault>0
++ print("G1422_"+name.upper()+"_PARSE_REFCOUNT_PASS",refault)
++
++print("G1422_LMKD_KERNEL7_PLUS_OLD_KERNEL_COMPAT_SOURCE_TEST_PASS")

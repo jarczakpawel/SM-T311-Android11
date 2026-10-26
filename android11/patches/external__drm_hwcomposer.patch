@@ -1,0 +1,2098 @@
+diff --git a/compositor/drmdisplaycomposition.cpp b/compositor/drmdisplaycomposition.cpp
+index b710fe1a66b435db91ec5c4dd3df6582d0171f33..eb7cc20afe041b0ae777633a795b9927cd3440a0 100644
+--- a/compositor/drmdisplaycomposition.cpp
++++ b/compositor/drmdisplaycomposition.cpp
+@@ -106,15 +106,25 @@ int DrmDisplayComposition::Plan(std::vector<DrmPlane *> *primary_planes,
+   for (size_t i = 0; i < layers_.size(); ++i)
+     to_composite.emplace(std::make_pair(i, &layers_[i]));
+ 
++  DrmConnector *connector = drm_->GetConnectorForDisplay(crtc_->display());
++  const DrmMode *mode = connector ? &connector->active_mode() : nullptr;
+   int ret;
+   std::tie(ret,
+            composition_planes_) = planner_->ProvisionPlanes(to_composite, crtc_,
+                                                             primary_planes,
+-                                                            overlay_planes);
++                                                            overlay_planes, mode);
+   if (ret) {
+-    ALOGE("Planner failed provisioning planes ret=%d", ret);
++    if (ret == -ENOSPC)
++      ALOGV("Planner requested CLIENT fallback");
++    else
++      ALOGE("Planner failed provisioning planes ret=%d", ret);
+     return ret;
+   }
++  if (!to_composite.empty()) {
++    ALOGE("Planner left %zu layers without DRM planes; require client composition",
++          to_composite.size());
++    return -ENOSPC;
++  }
+ 
+   // Remove the planes we used from the pool before returning. This ensures they
+   // won't be reused by another display in the composition.
+diff --git a/compositor/drmdisplaycompositor.cpp b/compositor/drmdisplaycompositor.cpp
+index e6f6922d389e6f4976727db84939e1ef457a7301..0f3865cd6de742b2c03d0f34311646e44d6066d6 100644
+--- a/compositor/drmdisplaycompositor.cpp
++++ b/compositor/drmdisplaycompositor.cpp
+@@ -19,6 +19,7 @@
+ 
+ #include "drmdisplaycompositor.h"
+ 
++#include <cerrno>
+ #include <pthread.h>
+ #include <sched.h>
+ #include <stdlib.h>
+@@ -108,9 +109,18 @@ int DrmDisplayCompositor::Init(ResourceManager *resource_manager, int display) {
+   }
+   planner_ = Planner::CreateInstance(drm);
+ 
+-  vsync_worker_.Init(drm, display_);
+-  auto callback = std::make_shared<CompositorVsyncCallback>(this);
+-  vsync_worker_.RegisterCallback(callback);
++  // A flattening worker has no useful work without a DRM writeback output.
++  // Avoid one permanently active 60Hz vblank thread on display-only SoCs.
++  // HWC2's normal SurfaceFlinger VSYNC worker is entirely independent.
++  flattening_available_ =
++      resource_manager_->AvailableWritebackConnector(display_) != nullptr;
++  if (flattening_available_) {
++    ret = vsync_worker_.Init(drm, display_);
++    if (ret)
++      return ret;
++    auto callback = std::make_shared<CompositorVsyncCallback>(this);
++    vsync_worker_.RegisterCallback(callback);
++  }
+ 
+   initialized_ = true;
+   return 0;
+@@ -230,6 +240,43 @@ int DrmDisplayCompositor::SetupWritebackCommit(drmModeAtomicReqPtr pset,
+   return 0;
+ }
+ 
++// Check the COMPLETE plane-to-layer mapping before creating or committing
++// an atomic request. DRM may accept a valid *partial* plane set, leaving
++// overlays invisible on the panel without reporting an atomic IOCTL error.
++static int ValidateFramePlaneBindings(
++    const std::vector<DrmHwcLayer> &layers,
++    const std::vector<DrmCompositionPlane> &planes) {
++  std::vector<uint8_t> assigned(layers.size(), 0);
++  size_t assigned_count = 0;
++  for (const auto &plane : planes) {
++    if (!plane.plane() || !plane.crtc()) {
++      ALOGE("DRM composition has a null plane or CRTC");
++      return -EINVAL;
++    }
++    if (plane.type() == DrmCompositionPlane::Type::kDisable)
++      continue;
++    const auto &sources = plane.source_layers();
++    if (sources.size() != 1 || sources.front() >= layers.size()) {
++      ALOGE("DRM composition has %zu source layers (frame has %zu)",
++            sources.size(), layers.size());
++      return -EINVAL;
++    }
++    const size_t index = sources.front();
++    if (!layers[index].buffer || assigned[index]) {
++      ALOGE("DRM composition references missing or repeated layer %zu", index);
++      return -EINVAL;
++    }
++    assigned[index] = 1;
++    ++assigned_count;
++  }
++  if (assigned_count != layers.size()) {
++    ALOGE("DRM composition maps %zu/%zu layers; refusing partial frame",
++          assigned_count, layers.size());
++    return -ENOSPC;
++  }
++  return 0;
++}
++
+ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+                                       bool test_only,
+                                       DrmConnector *writeback_conn,
+@@ -241,6 +288,10 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+   std::vector<DrmHwcLayer> &layers = display_comp->layers();
+   std::vector<DrmCompositionPlane> &comp_planes = display_comp
+                                                       ->composition_planes();
++  // Never issue DRM_MODE_ATOMIC_TEST_ONLY or a real commit for partial plans.
++  int binding_error = ValidateFramePlaneBindings(layers, comp_planes);
++  if (binding_error)
++    return binding_error;
+   DrmDevice *drm = resource_manager_->GetDrmDevice(display_);
+   uint64_t out_fences[drm->crtcs().size()];
+ 
+@@ -264,12 +315,14 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+   if (writeback_buffer != NULL) {
+     if (writeback_conn == NULL) {
+       ALOGE("Invalid arguments requested writeback without writeback conn");
++      drmModeAtomicFree(pset);
+       return -EINVAL;
+     }
+     ret = SetupWritebackCommit(pset, crtc->id(), writeback_conn,
+                                writeback_buffer);
+     if (ret < 0) {
+       ALOGE("Failed to Setup Writeback Commit ret = %d", ret);
++      drmModeAtomicFree(pset);
+       return ret;
+     }
+   }
+@@ -316,23 +369,26 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+     hwc_frect_t source_crop;
+     uint64_t rotation = 0;
+     uint64_t alpha = 0xFFFF;
+-    uint64_t blend;
++    uint64_t blend = 0;
+ 
+     if (comp_plane.type() != DrmCompositionPlane::Type::kDisable) {
+       if (source_layers.size() > 1) {
+         ALOGE("Can't handle more than one source layer sz=%zu type=%d",
+               source_layers.size(), comp_plane.type());
+-        continue;
++        ret = -EINVAL;
++        break;
+       }
+ 
+       if (source_layers.empty() || source_layers.front() >= layers.size()) {
+-        ALOGE("Source layer index %zu out of bounds %zu type=%d",
+-              source_layers.front(), layers.size(), comp_plane.type());
++        ALOGE("Source layer list invalid: size=%zu frame_layers=%zu type=%d",
++              source_layers.size(), layers.size(), comp_plane.type());
++        ret = -EINVAL;
+         break;
+       }
+       DrmHwcLayer &layer = layers[source_layers.front()];
+       if (!layer.buffer) {
+         ALOGE("Expected a valid framebuffer for pset");
++        ret = -EINVAL;
+         break;
+       }
+       fb_id = layer.buffer->fb_id;
+@@ -357,6 +413,11 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+                 "None");
+             break;
+         }
++        if (ret) {
++          ALOGE("DRM plane %d does not support requested blending mode %d: %d",
++                plane->id(), static_cast<int>(layer.blending), ret);
++          break;
++        }
+       }
+ 
+       if (plane->zpos_property().id() &&
+@@ -393,7 +454,13 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+       if (fence_fd >= 0) {
+         int prop_id = plane->in_fence_fd_property().id();
+         if (prop_id == 0) {
+-          ALOGE("Failed to get IN_FENCE_FD property id");
++          // Never submit a partially synchronized frame: explicit Android
++          // acquire fences must reach KMS before the buffer is scanned out.
++          // This is a normal unsupported-property error, not a successful
++          // property batch with an omitted fence.
++          ALOGE("DRM plane %d cannot accept acquire fence (no IN_FENCE_FD)",
++                plane->id());
++          ret = -EOPNOTSUPP;
+           break;
+         }
+         ret = drmModeAtomicAddProperty(pset, plane->id(), prop_id, fence_fd);
+@@ -486,36 +553,38 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+     }
+   }
+ 
+-  if (!ret) {
+-    uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
+-    if (test_only)
+-      flags |= DRM_MODE_ATOMIC_TEST_ONLY;
++  if (ret) {
++    drmModeAtomicFree(pset);
++    return ret;
++  }
+ 
+-    ret = drmModeAtomicCommit(drm->fd(), pset, flags, drm);
+-    if (ret) {
+-      if (!test_only)
+-        ALOGE("Failed to commit pset ret=%d\n", ret);
+-      drmModeAtomicFree(pset);
+-      return ret;
++  uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
++  if (test_only)
++    flags |= DRM_MODE_ATOMIC_TEST_ONLY;
++
++  ret = drmModeAtomicCommit(drm->fd(), pset, flags, drm);
++  if (ret) {
++    const int saved_errno = errno;
++    if (!test_only) {
++      failed_actual_atomic_commits_.fetch_add(1, std::memory_order_relaxed);
++      ALOGE("Actual DRM atomic FRAME commit failed ret=%d errno=%d display=%d",
++            ret, saved_errno, display_);
+     }
+-  }
+-  if (pset)
+     drmModeAtomicFree(pset);
++    return ret;
++  }
++  drmModeAtomicFree(pset);
+ 
+   if (!test_only && mode_.needs_modeset) {
+-    ret = drm->DestroyPropertyBlob(mode_.old_blob_id);
+-    if (ret) {
++    int cleanup_ret = drm->DestroyPropertyBlob(mode_.old_blob_id);
++    if (cleanup_ret)
+       ALOGE("Failed to destroy old mode property blob %" PRIu32 "/%d",
+-            mode_.old_blob_id, ret);
+-      return ret;
+-    }
++            mode_.old_blob_id, cleanup_ret);
+ 
+     /* TODO: Add dpms to the pset when the kernel supports it */
+-    ret = ApplyDpms(display_comp);
+-    if (ret) {
+-      ALOGE("Failed to apply DPMS after modeset %d\n", ret);
+-      return ret;
+-    }
++    int dpms_ret = ApplyDpms(display_comp);
++    if (dpms_ret)
++      ALOGE("Failed to apply DPMS after modeset %d\n", dpms_ret);
+ 
+     connector->set_active_mode(mode_.mode);
+     mode_.old_blob_id = mode_.blob_id;
+@@ -574,38 +643,43 @@ void DrmDisplayCompositor::ClearDisplay() {
+     return;
+ 
+   active_composition_.reset(NULL);
+-  vsync_worker_.VSyncControl(false);
++  if (flattening_available_)
++    vsync_worker_.VSyncControl(false);
+ }
+ 
+-void DrmDisplayCompositor::ApplyFrame(
++int DrmDisplayCompositor::ApplyFrame(
+     std::unique_ptr<DrmDisplayComposition> composition, int status,
+     bool writeback) {
+   AutoLock lock(&lock_, __func__);
+   if (lock.Lock())
+-    return;
++    return -EIO;
+   int ret = status;
+ 
+   if (!ret) {
+     if (writeback && !CountdownExpired()) {
+       ALOGE("Abort playing back scene");
+-      return;
++      return -EAGAIN;
+     }
+     ret = CommitFrame(composition.get(), false);
+   }
+ 
+   if (ret) {
+     ALOGE("Composite failed for display %d", display_);
++    if (active_composition_)
++      return ret;
+     // Disable the hw used by the last active composition. This allows us to
+     // signal the release fences from that composition to avoid hanging.
+     ClearDisplay();
+-    return;
++    return ret;
+   }
+   ++dump_frames_composited_;
+ 
+   active_composition_.swap(composition);
+ 
+   flatten_countdown_ = FLATTEN_COUNTDOWN_INIT;
+-  vsync_worker_.VSyncControl(!writeback);
++  if (flattening_available_)
++    vsync_worker_.VSyncControl(!writeback);
++  return 0;
+ }
+ 
+ int DrmDisplayCompositor::ApplyComposition(
+@@ -623,7 +697,7 @@ int DrmDisplayCompositor::ApplyComposition(
+         }
+       }
+ 
+-      ApplyFrame(std::move(composition), ret);
++      ret = ApplyFrame(std::move(composition), ret);
+       break;
+     case DRM_COMPOSITION_TYPE_DPMS:
+       active_ = (composition->dpms_mode() == DRM_MODE_DPMS_ON);
+@@ -851,8 +925,7 @@ int DrmDisplayCompositor::FlattenSerial(DrmConnector *writeback_conn) {
+     return ret;
+   }
+ 
+-  ApplyFrame(std::move(writeback_comp), 0, true);
+-  return 0;
++  return ApplyFrame(std::move(writeback_comp), 0, true);
+ }
+ 
+ // Flatten a scene by using a crtc which works concurrent with
+@@ -947,8 +1020,7 @@ int DrmDisplayCompositor::FlattenConcurrent(DrmConnector *writeback_conn) {
+     ALOGE("Failed to add plane composition %d", ret);
+     return ret;
+   }
+-  ApplyFrame(std::move(writeback_comp), 0, true);
+-  return ret;
++  return ApplyFrame(std::move(writeback_comp), 0, true);
+ }
+ 
+ int DrmDisplayCompositor::FlattenActiveComposition() {
+diff --git a/drm/drmmode.cpp b/drm/drmmode.cpp
+index c3ab385ffe6f2b42409d547f723225b1fd7b74e5..d7e160c1b778c413620be940fec17fb53aa50fea 100644
+--- a/drm/drmmode.cpp
++++ b/drm/drmmode.cpp
+@@ -19,6 +19,8 @@
+ 
+ #include <stdint.h>
+ #include <xf86drmMode.h>
++#include <cutils/properties.h>
++#include <cstring>
+ #include <string>
+ 
+ namespace android {
+@@ -122,10 +124,31 @@ uint32_t DrmMode::v_scan() const {
+ }
+ 
+ float DrmMode::v_refresh() const {
+-  // Always recalculate refresh to report correct float rate
++  // Always derive DRM mode identity/selection from the original clock.
+   return clock_ / (float)(v_total_ * h_total_) * 1000.0f;
+ }
+ 
++float DrmMode::hwc_reported_v_refresh() const {
++  // SM-T311: the working FIMD divider produces 58.455Hz on the LCD,
++  // but the kernel's known-good DRM mode retains the nominal 72161kHz
++  // for the hardware CLKVAL_F calculation (roughly 58.000Hz).
++  // Correct ONLY the HWC-reported rate, and the synthetic-VSYNC fallback.
++  // Never modify DRM mode.clock or the actual FIMD/DSI scanout timing.
++  if (clock_ == 72161 && h_display_ == 800 && v_display_ == 1280 &&
++      h_total_ == 960 && v_total_ == 1296) {
++    static const bool is_t311 = [] {
++      char device[PROPERTY_VALUE_MAX];
++      property_get("ro.product.device", device, "");
++      return std::strcmp(device, "lt013g") == 0;
++    }();
++    if (is_t311)
++      return 72727.0f * 1000.0f / (v_total_ * h_total_);
++  }
++
++  // All other devices/modes retain their DRM-provided refresh rate.
++  return v_refresh();
++}
++
+ uint32_t DrmMode::flags() const {
+   return flags_;
+ }
+diff --git a/drm/drmproperty.cpp b/drm/drmproperty.cpp
+index 3aeed1366397add08f549557e674b34c95c80304..f3f8e67d98ee2bb0bb764bf2e33e6e6d457db055 100644
+--- a/drm/drmproperty.cpp
++++ b/drm/drmproperty.cpp
+@@ -122,8 +122,8 @@ std::tuple<int, uint64_t> DrmProperty::range_max() const {
+ }
+ 
+ std::tuple<uint64_t, int> DrmProperty::GetEnumValueWithName(
+-    std::string name) const {
+-  for (auto it : enums_) {
++    const std::string &name) const {
++  for (const auto &it : enums_) {
+     if (it.name_.compare(name) == 0) {
+       return std::make_tuple(it.value_, 0);
+     }
+diff --git a/drm/vsyncworker.cpp b/drm/vsyncworker.cpp
+index 08ab30181b1a7d9d2693e716d4d95de3454d0b52..2975cc2044cf80bb05716e08112998f6161fc5c3 100644
+--- a/drm/vsyncworker.cpp
++++ b/drm/vsyncworker.cpp
+@@ -57,6 +57,12 @@ void VSyncWorker::RegisterCallback(std::shared_ptr<VsyncCallback> callback) {
+ 
+ void VSyncWorker::VSyncControl(bool enabled) {
+   Lock();
++  // Applying each new frame must not restart an already-active VSYNC worker
++  // or invalidate its phase. Only actual enable/disable transitions signal.
++  if (enabled_ == enabled) {
++    Unlock();
++    return;
++  }
+   enabled_ = enabled;
+   last_timestamp_ = -1;
+   Unlock();
+@@ -93,11 +99,11 @@ int VSyncWorker::SyntheticWaitVBlank(int64_t *timestamp) {
+ 
+   float refresh = 60.0f;  // Default to 60Hz refresh rate
+   DrmConnector *conn = drm_->GetConnectorForDisplay(display_);
+-  if (conn && conn->active_mode().v_refresh() != 0.0f)
+-    refresh = conn->active_mode().v_refresh();
++  if (conn && conn->active_mode().hwc_reported_v_refresh() != 0.0f)
++    refresh = conn->active_mode().hwc_reported_v_refresh();
+   else
+     ALOGW("Vsync worker active with conn=%p refresh=%f\n", conn,
+-          conn ? conn->active_mode().v_refresh() : 0.0f);
++          conn ? conn->active_mode().hwc_reported_v_refresh() : 0.0f);
+ 
+   int64_t phased_timestamp = GetPhasedVSync(kOneSecondNs / refresh,
+                                             vsync.tv_sec * kOneSecondNs +
+diff --git a/drmhwctwo.cpp b/drmhwctwo.cpp
+index ab39144d0202193390a8a5f50ca0fe76d974663b..80ae3a5e4608fe95ca26359a984626b8b2ac09af 100644
+--- a/drmhwctwo.cpp
++++ b/drmhwctwo.cpp
+@@ -18,15 +18,20 @@
+ #define LOG_TAG "hwc-drm-two"
+ 
+ #include "drmhwctwo.h"
++#include <iterator>
+ #include "drmdisplaycomposition.h"
+ #include "drmhwcomposer.h"
+ #include "platform.h"
+ #include "vsyncworker.h"
+ 
++#include <algorithm>
++#include <cerrno>
+ #include <inttypes.h>
+ #include <string>
+ 
++#include <drm/drm_fourcc.h>
+ #include <cutils/properties.h>
++#include <hardware/gralloc.h>
+ #include <hardware/hardware.h>
+ #include <hardware/hwcomposer2.h>
+ #include <log/log.h>
+@@ -136,12 +141,20 @@ std::string DrmHwcTwo::HwcDisplay::DumpDelta(
+ 
+   return (std::stringstream()
+           << " Total frames count: " << delta.total_frames_ << "\n"
+-          << " Failed to test commit frames: " << delta.failed_kms_validate_
++          << " ValidateDisplay unexpected composition failures: "
++          << delta.failed_kms_validate_ << "\n"
++          << " ValidateDisplay normal plane-exhaustion CLIENT fallback: "
++          << delta.validate_plane_client_fallback_ << "\n"
++          << " ValidateDisplay test deferred (client target absent): "
++          << delta.validate_deferred_client_target_ << "\n"
++          << " PresentDisplay composition errors (NOT atomic-only): "
++          << delta.failed_kms_present_ << "\n"
++          << "  - ImportBuffer failures: " << delta.present_import_errors_ << "\n"
++          << "  - SetLayers failures: " << delta.present_setlayers_errors_ << "\n"
++          << "  - Planner failures: " << delta.present_plan_errors_ << "\n"
++          << "  - Submit/test failures: " << delta.present_apply_errors_ << "\n"
++          << "  - Empty compositions (handled as success): " << delta.present_empty_
+           << "\n"
+-          << " Failed to commit frames: " << delta.failed_kms_present_ << "\n"
+-          << ((delta.failed_kms_present_ > 0)
+-                  ? " !!! Internal failure, FIX it please\n"
+-                  : "")
+           << " Pixel operations (free units)"
+           << " : [TOTAL: " << delta.total_pixops_
+           << " / GPU: " << delta.gpu_pixops_ << "]\n"
+@@ -155,7 +168,15 @@ std::string DrmHwcTwo::HwcDisplay::Dump() {
+               << "Statistics since system boot:\n"
+               << DumpDelta(total_stats_) << "\n\n"
+               << "Statistics since last dumpsys request:\n"
+-              << DumpDelta(total_stats_.minus(prev_stats_)) << "\n\n")
++              << DumpDelta(total_stats_.minus(prev_stats_)) << "\n"
++              << " Actual DRM atomic frame ioctl failures (compositor): "
++              << compositor_.ActualFrameAtomicCommitErrors() << "\n"
++              << " Reuse of successful ValidateDisplay DRM TEST enabled: "
++              << atomic_reuse_enabled_ << "\n"
++              << " SM-T311 one-atomic-Present mode: "
++              << single_atomic_present_enabled_ << "\n"
++              << " Repeated PresentDisplay DRM TEST ioctls skipped: "
++              << skipped_precommit_tests_ << "\n\n")
+                  .str();
+ 
+   memcpy(&prev_stats_, &total_stats_, sizeof(Stats));
+@@ -231,6 +252,12 @@ DrmHwcTwo::HwcDisplay::HwcDisplay(ResourceManager *resource_manager,
+       type_(type),
+       color_transform_hint_(HAL_COLOR_TRANSFORM_IDENTITY) {
+   supported(__func__);
++  char option[PROPERTY_VALUE_MAX];
++  property_get("persist.vendor.t311.hwc_atomic_reuse", option, "0");
++  atomic_reuse_enabled_ = strcmp(option, "1") == 0;
++  char fast_present[PROPERTY_VALUE_MAX];
++  property_get("persist.vendor.t311.hwc_single_atomic", fast_present, "0");
++  single_atomic_present_enabled_ = strcmp(fast_present, "1") == 0;
+ 
+   // clang-format off
+   color_transform_matrix_ = {1.0, 0.0, 0.0, 0.0,
+@@ -241,6 +268,7 @@ DrmHwcTwo::HwcDisplay::HwcDisplay(ResourceManager *resource_manager,
+ }
+ 
+ void DrmHwcTwo::HwcDisplay::ClearDisplay() {
++  InvalidateValidatedAtomicTest();
+   compositor_.ClearDisplay();
+ }
+ 
+@@ -319,6 +347,7 @@ HWC2::Error DrmHwcTwo::HwcDisplay::AcceptDisplayChanges() {
+ 
+ HWC2::Error DrmHwcTwo::HwcDisplay::CreateLayer(hwc2_layer_t *layer) {
+   supported(__func__);
++  InvalidateValidatedAtomicTest();
+   layers_.emplace(static_cast<hwc2_layer_t>(layer_idx_), HwcLayer());
+   *layer = static_cast<hwc2_layer_t>(layer_idx_);
+   ++layer_idx_;
+@@ -327,6 +356,7 @@ HWC2::Error DrmHwcTwo::HwcDisplay::CreateLayer(hwc2_layer_t *layer) {
+ 
+ HWC2::Error DrmHwcTwo::HwcDisplay::DestroyLayer(hwc2_layer_t layer) {
+   supported(__func__);
++  InvalidateValidatedAtomicTest();
+   if (!get_layer(layer))
+     return HWC2::Error::BadLayer;
+ 
+@@ -423,7 +453,7 @@ HWC2::Error DrmHwcTwo::HwcDisplay::GetDisplayAttribute(hwc2_config_t config,
+       break;
+     case HWC2::Attribute::VsyncPeriod:
+       // in nanoseconds
+-      *value = 1000 * 1000 * 1000 / mode->v_refresh();
++      *value = 1000 * 1000 * 1000 / mode->hwc_reported_v_refresh();
+       break;
+     case HWC2::Attribute::DpiX:
+       // Dots per 1000 inches
+@@ -583,21 +613,26 @@ HWC2::Error DrmHwcTwo::HwcDisplay::GetReleaseFences(uint32_t *num_elements,
+                                                     hwc2_layer_t *layers,
+                                                     int32_t *fences) {
+   supported(__func__);
+-  uint32_t num_layers = 0;
+-
+-  for (std::pair<const hwc2_layer_t, DrmHwcTwo::HwcLayer> &l : layers_) {
+-    ++num_layers;
+-    if (layers == NULL || fences == NULL) {
+-      continue;
+-    } else if (num_layers > *num_elements) {
+-      ALOGW("Overflow num_elements %d/%d", num_layers, *num_elements);
+-      return HWC2::Error::None;
+-    }
++  const uint32_t required = static_cast<uint32_t>(layers_.size());
++  // Querying the size must never consume the fences. Likewise, if the
++  // caller's array was sized for an earlier scene, do not transfer only
++  // the first few layer fences and lose synchronization for the rest.
++  if (layers == nullptr || fences == nullptr) {
++    *num_elements = required;
++    return HWC2::Error::None;
++  }
++  if (*num_elements < required) {
++    ALOGW("Insufficient release fence slots %u/%u", *num_elements, required);
++    *num_elements = required;
++    return HWC2::Error::NoResources;
++  }
+ 
+-    layers[num_layers - 1] = l.first;
+-    fences[num_layers - 1] = l.second.take_release_fence();
++  uint32_t i = 0;
++  for (auto &l : layers_) {
++    layers[i] = l.first;
++    fences[i++] = l.second.take_release_fence();
+   }
+-  *num_elements = num_layers;
++  *num_elements = required;
+   return HWC2::Error::None;
+ }
+ 
+@@ -620,45 +655,97 @@ bool DrmHwcTwo::HwcDisplay::HardwareSupportsLayerType(
+          comp_type == HWC2::Composition::Cursor;
+ }
+ 
+-HWC2::Error DrmHwcTwo::HwcDisplay::CreateComposition(bool test) {
++HWC2::Error DrmHwcTwo::HwcDisplay::CreateComposition(
++    bool test, bool skip_precommit_test) {
+   std::vector<DrmCompositionDisplayLayersMap> layers_map;
+   layers_map.emplace_back();
+   DrmCompositionDisplayLayersMap &map = layers_map.back();
+ 
+   map.display = static_cast<int>(handle_);
+-  map.geometry_changed = true;  // TODO: Fix this
++  map.geometry_changed = !skip_precommit_test;  // TODO: Fix this
+ 
+   // order the layers by z-order
+   bool use_client_layer = false;
+   uint32_t client_z_order = UINT32_MAX;
++  // Android z-order is not guaranteed to be dense or unique. Normalize it
++  // to stable, unique layer indices before creating DRM planes. A map keyed
++  // by the raw z-order silently discards duplicate layers.
++  std::vector<std::pair<uint32_t, DrmHwcTwo::HwcLayer *>> ordered_layers;
++  ordered_layers.reserve(layers_.size());
++  for (auto &entry : layers_)
++    ordered_layers.emplace_back(entry.second.z_order(), &entry.second);
++  std::stable_sort(ordered_layers.begin(), ordered_layers.end(),
++                   [](const auto &a, const auto &b) {
++                     return a.first < b.first;
++                   });
++
+   std::map<uint32_t, DrmHwcTwo::HwcLayer *> z_map;
+-  for (std::pair<const hwc2_layer_t, DrmHwcTwo::HwcLayer> &l : layers_) {
+-    switch (l.second.validated_type()) {
++  uint32_t order = 0;
++  for (const auto &entry : ordered_layers) {
++    switch (entry.second->validated_type()) {
+       case HWC2::Composition::Device:
+-        z_map.emplace(std::make_pair(l.second.z_order(), &l.second));
++        z_map.emplace(order, entry.second);
+         break;
+       case HWC2::Composition::Client:
+-        // Place it at the z_order of the lowest client layer
++        // The client target replaces its contiguous CLIENT stack at the
++        // lowest stable rank, preserving the ordering of equal z-orders.
+         use_client_layer = true;
+-        client_z_order = std::min(client_z_order, l.second.z_order());
++        client_z_order = std::min(client_z_order, order);
+         break;
+       default:
+-        continue;
++        break;
+     }
++    ++order;
+   }
+   if (use_client_layer)
+-    z_map.emplace(std::make_pair(client_z_order, &client_layer_));
++    z_map.emplace(client_z_order, &client_layer_);
++
++  // FIMD WIN2 is opaque by construction. If the GPU target is the
++  // *bottommost* plane, no other physical layer exists underneath it:
++  // opaque primary scanout is correct even when one DEVICE overlay remains
++  // above it on WIN3. This also covers the traditional full-CLIENT scene.
++  // Only a client target ABOVE a DEVICE plane needs PREMULT on WIN3.
++  static const bool t311_opaque_primary = [] {
++    char device[PROPERTY_VALUE_MAX];
++    property_get("ro.product.device", device, "");
++    return strcmp(device, "lt013g") == 0;
++  }();
++  if (t311_opaque_primary && use_client_layer) {
++    const bool client_is_bottommost =
++        z_map.begin()->second == &client_layer_;
++    client_layer_.SetLayerBlendMode(static_cast<int32_t>(
++        client_is_bottommost ? HWC2::BlendMode::None :
++                               HWC2::BlendMode::Premultiplied));
++  }
+ 
+-  if (z_map.empty())
++  if (z_map.empty()) {
++    if (!test)
++      ++total_stats_.present_empty_;
+     return HWC2::Error::BadLayer;
++  }
+ 
+   // now that they're ordered by z, add them to the composition
++  const bool retain_handle =
++      resource_manager_->AvailableWritebackConnector(handle_) != nullptr;
+   for (std::pair<const uint32_t, DrmHwcTwo::HwcLayer *> &l : z_map) {
+     DrmHwcLayer layer;
+-    l.second->PopulateDrmLayer(&layer);
+-    int ret = layer.ImportBuffer(importer_.get());
++    layer.is_client_target = (l.second == &client_layer_);
++    int ret = l.second->PopulateDrmLayer(&layer, test);
++    if (ret) {
++      ALOGE("Failed to preserve layer acquire fence z=%u test=%d ret=%d",
++            l.first, static_cast<int>(test), ret);
++      return HWC2::Error::NoResources;
++    }
++    ret = layer.ImportBuffer(importer_.get(), retain_handle);
+     if (ret) {
+-      ALOGE("Failed to import layer, ret=%d", ret);
++      // A missing client target is legal before SurfaceFlinger's first
++      // SetClientTarget call. Distinguish it from an invalid real DMA-BUF.
++      ALOGE("Failed to import layer, z=%u test=%d ret=%d client=%d null=%d",
++            l.first, static_cast<int>(test), ret,
++            static_cast<int>(l.second == &client_layer_),
++            static_cast<int>(l.second->buffer() == nullptr));
++      if (!test)
++        ++total_stats_.present_import_errors_;
+       return HWC2::Error::NoResources;
+     }
+     map.layers.emplace_back(std::move(layer));
+@@ -669,9 +756,12 @@ HWC2::Error DrmHwcTwo::HwcDisplay::CreateComposition(bool test) {
+   composition->Init(drm_, crtc_, importer_.get(), planner_.get(), frame_no_);
+ 
+   // TODO: Don't always assume geometry changed
+-  int ret = composition->SetLayers(map.layers.data(), map.layers.size(), true);
++  int ret = composition->SetLayers(map.layers.data(), map.layers.size(),
++                                   !skip_precommit_test);
+   if (ret) {
+     ALOGE("Failed to set layers in the composition ret=%d", ret);
++    if (!test)
++      ++total_stats_.present_setlayers_errors_;
+     return HWC2::Error::BadLayer;
+   }
+ 
+@@ -679,7 +769,17 @@ HWC2::Error DrmHwcTwo::HwcDisplay::CreateComposition(bool test) {
+   std::vector<DrmPlane *> overlay_planes(overlay_planes_);
+   ret = composition->Plan(&primary_planes, &overlay_planes);
+   if (ret) {
++    if (ret == -ENOSPC && test) {
++      // Insufficient physical planes is an EXPECTED HWC2 validation result.
++      // Signal the caller to promote layers to CLIENT composition, without
++      // classifying this as a KMS/DRM failure. This marker is strictly
++      // internal to CreateComposition(true) -> ValidateDisplay().
++      ALOGV("DRM planes exhausted in validation; CLIENT fallback");
++      return HWC2::Error::Unsupported;
++    }
+     ALOGE("Failed to plan the composition ret=%d", ret);
++    if (!test)
++      ++total_stats_.present_plan_errors_;
+     return HWC2::Error::BadConfig;
+   }
+ 
+@@ -700,8 +800,10 @@ HWC2::Error DrmHwcTwo::HwcDisplay::CreateComposition(bool test) {
+     AddFenceToPresentFence(compositor_.TakeOutFence());
+   }
+   if (ret) {
+-    if (!test)
++    if (!test) {
++      ++total_stats_.present_apply_errors_;
+       ALOGE("Failed to apply the frame composition ret=%d", ret);
++    }
+     return HWC2::Error::BadParameter;
+   }
+   return HWC2::Error::None;
+@@ -713,17 +815,86 @@ HWC2::Error DrmHwcTwo::HwcDisplay::PresentDisplay(int32_t *present_fence) {
+ 
+   ++total_stats_.total_frames_;
+ 
+-  ret = CreateComposition(false);
+-  if (ret != HWC2::Error::None)
++  // The GPU client target can be replaced between ValidateDisplay and
++  // PresentDisplay. An opaque RGBX replacement on win3 would cover the
++  // wallpaper on win2. Fail closed BEFORE any DRM atomic request is built.
++  // Do not clear validated_mixed_primary_ on failure: a repeated Present
++  // with another unsafe buffer must not bypass this check.
++  if (validated_mixed_primary_ && !ClientTargetHasPixelAlpha()) {
++    ALOGE("SM-T311: mixed frame client target lost pixel alpha before Present");
++    validated_atomic_test_pending_ = false;
+     ++total_stats_.failed_kms_present_;
++    *present_fence = -1;
++    return HWC2::Error::NoResources;
++  }
+ 
+-  if (ret == HWC2::Error::BadLayer) {
+-    // Can we really have no client or device layers?
++  // A destroyed/restarting SystemUI can briefly leave a valid empty scene.
++  // CreateComposition() records that case separately as present_empty_, and
++  // BadLayer from SetLayers must not be silently treated as an empty frame.
++  const uint32_t empty_before = total_stats_.present_empty_;
++  // The real atomic KMS commit already validates every current FB, plane
++  // and geometry change. ValidateDisplay has performed the HWC2 planning
++  // test, so a second TEST_ONLY ioctl immediately before this commit adds
++  // CPU/DRM latency without changing the frame. Keep a runtime opt-in
++  // for the fixed-FIMD board; a failed actual commit disables this mode.
++  const bool skip_precommit_test =
++      (atomic_reuse_enabled_ && validated_atomic_test_pending_) ||
++      single_atomic_present_enabled_;
++  validated_atomic_test_pending_ = false;
++  ret = CreateComposition(false, skip_precommit_test);
++  if (skip_precommit_test && ret == HWC2::Error::None)
++    ++skipped_precommit_tests_;
++  if (skip_precommit_test && ret != HWC2::Error::None) {
++    atomic_reuse_enabled_ = false;
++    single_atomic_present_enabled_ = false;
++  }
++  if (total_stats_.present_empty_ != empty_before) {
+     *present_fence = -1;
+     return HWC2::Error::None;
+   }
+-  if (ret != HWC2::Error::None)
++  if (ret != HWC2::Error::None) {
++    ++total_stats_.failed_kms_present_;
++    *present_fence = -1;
+     return ret;
++  }
++
++  // Guarded G203: HWC2 release fences refer to buffers from the PRIOR
++  // successfully presented frame, not the newly submitted buffers.
++  // This remains BLOCKING DRM atomic: missing dup/out-fence is safe because
++  // the old scanout has already retired before CommitFrame returns.
++  // Never enable DRM_MODE_ATOMIC_NONBLOCK via this property.
++  char sync_release_option[PROPERTY_VALUE_MAX];
++  property_get("vendor.t311.hwc_sync_release", sync_release_option, "0");
++  const bool emit_synchronous_release =
++      strcmp(sync_release_option, "1") == 0;
++  const int committed_fence = present_fence_.get();
++  std::set<hwc2_layer_t> new_device_layers;
++  for (auto &entry : layers_) {
++    HwcLayer &layer = entry.second;
++    const bool device =
++        layer.sf_type() == HWC2::Composition::Device ||
++        layer.sf_type() == HWC2::Composition::Cursor;
++    if (device)
++      new_device_layers.insert(entry.first);
++
++    int old_buffer_release_fd = -1;
++    if (emit_synchronous_release && committed_fence >= 0 && device &&
++        layer.has_new_buffer_for_frame() &&
++        previous_device_layers_.count(entry.first)) {
++      old_buffer_release_fd = dup(committed_fence);
++      if (old_buffer_release_fd < 0) {
++        ALOGW("G203: cannot duplicate already-committed release fence "
++              "layer=%" PRIu64 " errno=%d",
++              static_cast<uint64_t>(entry.first), errno);
++      }
++    }
++    // Set() closes any unconsumed prior fd, and this call only occurs
++    // after successful hardware present. No post-commit failure is reported
++    // to SurfaceFlinger, since old buffers are safe in BLOCKING mode.
++    layer.set_committed_release_fence(old_buffer_release_fd);
++    layer.mark_buffer_presented();
++  }
++  previous_device_layers_ = std::move(new_device_layers);
+ 
+   *present_fence = present_fence_.Release();
+ 
+@@ -733,6 +904,7 @@ HWC2::Error DrmHwcTwo::HwcDisplay::PresentDisplay(int32_t *present_fence) {
+ 
+ HWC2::Error DrmHwcTwo::HwcDisplay::SetActiveConfig(hwc2_config_t config) {
+   supported(__func__);
++  InvalidateValidatedAtomicTest();
+   auto mode = std::find_if(connector_->modes().begin(),
+                            connector_->modes().end(),
+                            [config](DrmMode const &m) {
+@@ -767,6 +939,13 @@ HWC2::Error DrmHwcTwo::HwcDisplay::SetActiveConfig(hwc2_config_t config) {
+                              .bottom = mode->v_display() + 0.0f};
+   client_layer_.SetLayerSourceCrop(source_crop);
+ 
++  // SurfaceFlinger's client target can contain transparent pixels when
++  // DEVICE planes remain below it. Scan out the GPU target as premultiplied
++  // alpha on an overlay window; the SM-T311 primary FIMD win2 still forces
++  // opaque scanout for a fully CLIENT-composited frame.
++  client_layer_.SetLayerBlendMode(
++      static_cast<int32_t>(HWC2::BlendMode::Premultiplied));
++
+   return HWC2::Error::None;
+ }
+ 
+@@ -775,9 +954,11 @@ HWC2::Error DrmHwcTwo::HwcDisplay::SetClientTarget(buffer_handle_t target,
+                                                    int32_t dataspace,
+                                                    hwc_region_t /*damage*/) {
+   supported(__func__);
++  InvalidateValidatedAtomicTest();
+   UniqueFd uf(acquire_fence);
+ 
+-  client_layer_.set_buffer(target);
++  if (!client_layer_.set_buffer(target))
++    return HWC2::Error::NoResources;
+   client_layer_.set_acquire_fence(uf.get());
+   client_layer_.SetLayerDataspace(dataspace);
+   return HWC2::Error::None;
+@@ -785,6 +966,7 @@ HWC2::Error DrmHwcTwo::HwcDisplay::SetClientTarget(buffer_handle_t target,
+ 
+ HWC2::Error DrmHwcTwo::HwcDisplay::SetColorMode(int32_t mode) {
+   supported(__func__);
++  InvalidateValidatedAtomicTest();
+ 
+   if (mode != HAL_COLOR_MODE_NATIVE)
+     return HWC2::Error::BadParameter;
+@@ -796,6 +978,7 @@ HWC2::Error DrmHwcTwo::HwcDisplay::SetColorMode(int32_t mode) {
+ HWC2::Error DrmHwcTwo::HwcDisplay::SetColorTransform(const float *matrix,
+                                                      int32_t hint) {
+   supported(__func__);
++  InvalidateValidatedAtomicTest();
+   if (hint < HAL_COLOR_TRANSFORM_IDENTITY ||
+       hint > HAL_COLOR_TRANSFORM_CORRECT_TRITANOPIA)
+     return HWC2::Error::BadParameter;
+@@ -813,12 +996,14 @@ HWC2::Error DrmHwcTwo::HwcDisplay::SetColorTransform(const float *matrix,
+ HWC2::Error DrmHwcTwo::HwcDisplay::SetOutputBuffer(buffer_handle_t buffer,
+                                                    int32_t release_fence) {
+   supported(__func__);
++  InvalidateValidatedAtomicTest();
+   // TODO: Need virtual display support
+   return unsupported(__func__, buffer, release_fence);
+ }
+ 
+ HWC2::Error DrmHwcTwo::HwcDisplay::SetPowerMode(int32_t mode_in) {
+   supported(__func__);
++  InvalidateValidatedAtomicTest();
+   uint64_t dpms_value = 0;
+   auto mode = static_cast<HWC2::PowerMode>(mode_in);
+   switch (mode) {
+@@ -878,11 +1063,41 @@ void DrmHwcTwo::HwcDisplay::MarkValidated(
+   }
+ }
+ 
++bool DrmHwcTwo::HwcDisplay::ClientTargetHasPixelAlpha() {
++  const auto handle = client_layer_.buffer();
++  if (!handle)
++    return false;
++  hwc_drm_bo_t bo = {};
++  if (importer_->ConvertBoInfo(handle, &bo))
++    return false;
++  // A transparent GPU client target placed over the primary FIMD window
++  // must span the entire scanout. Minigbm reports pitches in BYTES and
++  // pixel_stride in PIXELS; both can exceed the visible width due to DMA
++  // alignment, but neither may be shorter than a visible RGBA row.
++  const hwc_rect_t frame = client_layer_.display_frame();
++  const int width = frame.right - frame.left;
++  const int height = frame.bottom - frame.top;
++  if (frame.left != 0 || frame.top != 0 || width <= 0 || height <= 0)
++    return false;
++  const uint64_t row_bytes = static_cast<uint64_t>(width) * 4;
++  return !(bo.usage & GRALLOC_USAGE_PROTECTED) &&
++         (bo.format == DRM_FORMAT_ARGB8888 ||
++          bo.format == DRM_FORMAT_ABGR8888) &&
++         bo.width == static_cast<uint32_t>(width) &&
++         bo.height == static_cast<uint32_t>(height) &&
++         bo.pixel_stride >= static_cast<uint32_t>(width) &&
++         bo.pitches[0] >= row_bytes &&
++         bo.pitches[0] >= static_cast<uint64_t>(bo.pixel_stride) * 4 &&
++         bo.pitches[0] % 4 == 0;
++}
++
+ HWC2::Error DrmHwcTwo::HwcDisplay::ValidateDisplay(uint32_t *num_types,
+                                                    uint32_t *num_requests) {
+   supported(__func__);
++  validated_mixed_primary_ = false;
+   *num_types = 0;
+   *num_requests = 0;
++  validated_atomic_test_pending_ = false;
+   size_t avail_planes = primary_planes_.size() + overlay_planes_.size();
+ 
+   /*
+@@ -892,16 +1107,40 @@ HWC2::Error DrmHwcTwo::HwcDisplay::ValidateDisplay(uint32_t *num_types,
+   if (avail_planes < layers_.size())
+     avail_planes--;
+ 
++  // Treat original z-order as a SORT KEY, not an array index. Equal
++  // z-orders must retain every HWC2 layer, in stable layer-handle order.
++  // Dense rank indices also make CalcPixOps and MarkValidated accurate.
++  std::vector<std::pair<uint32_t, DrmHwcTwo::HwcLayer *>> ordered_layers;
++  ordered_layers.reserve(layers_.size());
++  for (auto &entry : layers_)
++    ordered_layers.emplace_back(entry.second.z_order(), &entry.second);
++  std::stable_sort(ordered_layers.begin(), ordered_layers.end(),
++                   [](const auto &a, const auto &b) {
++                     return a.first < b.first;
++                   });
+   std::map<uint32_t, DrmHwcTwo::HwcLayer *> z_map;
+-  for (std::pair<const hwc2_layer_t, DrmHwcTwo::HwcLayer> &l : layers_)
+-    z_map.emplace(std::make_pair(l.second.z_order(), &l.second));
++  uint32_t order = 0;
++  for (const auto &entry : ordered_layers)
++    z_map.emplace(order++, entry.second);
+ 
+   uint32_t total_pixops = CalcPixOps(z_map, 0, z_map.size()), gpu_pixops = 0;
+ 
++  static const bool exynos4 = [] {
++    char board[PROPERTY_VALUE_MAX];
++    property_get("ro.board.platform", board, "");
++    return strcmp(board, "exynos4") == 0;
++  }();
+   int client_start = -1, client_size = 0;
++  bool proposed_mixed_primary = false;
+ 
+   for (std::pair<const uint32_t, DrmHwcTwo::HwcLayer *> &l : z_map) {
+-    if (!HardwareSupportsLayerType(l.second->sf_type()) ||
++    const hwc_rect_t frame = l.second->display_frame();
++    const hwc_frect_t crop = l.second->source_crop();
++    const bool requires_scaling = exynos4 &&
++        (crop.right - crop.left != frame.right - frame.left ||
++         crop.bottom - crop.top != frame.bottom - frame.top);
++    if (requires_scaling ||
++        !HardwareSupportsLayerType(l.second->sf_type()) ||
+         !importer_->CanImportBuffer(l.second->buffer()) ||
+         color_transform_hint_ != HAL_COLOR_TRANSFORM_IDENTITY) {
+       if (client_start < 0)
+@@ -910,6 +1149,10 @@ HWC2::Error DrmHwcTwo::HwcDisplay::ValidateDisplay(uint32_t *num_types,
+     }
+   }
+ 
++  if (exynos4 && client_start == 0 && client_size > 0 &&
++      client_size < static_cast<int>(z_map.size()) - 1)
++    client_size = z_map.size() - 1;
++
+   int extra_client = (z_map.size() - client_size) - avail_planes;
+   if (extra_client > 0) {
+     int start = 0, steps;
+@@ -936,16 +1179,166 @@ HWC2::Error DrmHwcTwo::HwcDisplay::ValidateDisplay(uint32_t *num_types,
+     }
+   }
+ 
++  // SM-T311's FIMD PRIMARY window is fixed at z=2. The original planner
++  // provisions PRIMARY first and can use only window 3 above it. Three
++  // entirely DEVICE layers therefore cannot fit without client composition.
++  // Do not preempt the normal hardware path for protected/unknown buffers:
++  // secure video must never be redirected to an unprotected GPU target.
++  static const bool t311_fixed_fimd = [] {
++    char device[PROPERTY_VALUE_MAX];
++    property_get("ro.product.device", device, "");
++    return strcmp(device, "lt013g") == 0;
++  }();
++  bool t311_three_device_underlay = false;
++  if (t311_fixed_fimd && client_size == 0 && z_map.size() == 3 &&
++      z_map.size() == layers_.size()) {
++    char enabled[PROPERTY_VALUE_MAX] = {};
++    property_get("persist.vendor.t311.hwc_win1_3plane", enabled, "0");
++    if (strcmp(enabled, "1") == 0) {
++      const DrmMode &mode = connector_->active_mode();
++      const hwc_rect_t screen = {0, 0, static_cast<int32_t>(mode.h_display()),
++                                 static_cast<int32_t>(mode.v_display())};
++      auto first = z_map.begin();
++      auto middle = std::next(first);
++      auto top = std::next(middle);
++      bool safe_buffers = true;
++      for (const auto &entry : z_map) {
++        hwc_drm_bo_t bo = {};
++        if (!entry.second->buffer() ||
++            importer_->ConvertBoInfo(entry.second->buffer(), &bo) ||
++            (bo.usage & GRALLOC_USAGE_PROTECTED)) {
++          safe_buffers = false;
++          break;
++        }
++      }
++      t311_three_device_underlay = safe_buffers &&
++          first->second->is_fullscreen_opaque_primary(screen) &&
++          middle->second->t311_safe_partial_opaque_middle(screen) &&
++          top->second->t311_safe_top_overlay(screen);
++    }
++  }
++  if (t311_fixed_fimd && !t311_three_device_underlay &&
++      client_size == 0 && z_map.size() > 2 &&
++      z_map.size() == layers_.size() && z_map.begin()->first == 0 &&
++      z_map.rbegin()->first == z_map.size() - 1) {
++    bool safe_for_client = true;
++    for (const auto &entry : z_map) {
++      hwc_drm_bo_t bo = {};
++      if (!entry.second->buffer() ||
++          importer_->ConvertBoInfo(entry.second->buffer(), &bo) ||
++          (bo.usage & GRALLOC_USAGE_PROTECTED)) {
++        safe_for_client = false;
++        break;
++      }
++    }
++    if (safe_for_client) {
++      // Opt-in only. This is NOT a generally safe plane reordering mode:
++      // win2 stays the first DEVICE layer and the GPU target uses win3.
++      // Default to the already-working full-CLIENT fallback until hardware
++      // alpha and wallpaper have been explicitly checked on the LCD.
++      static const bool allow_mixed_primary = [] {
++        char property[PROPERTY_VALUE_MAX];
++        property_get("persist.vendor.t311.hwc_mixed_primary", property, "0");
++        return strcmp(property, "1") == 0;
++      }();
++      // With three layers, compose the bottom two to one fully opaque GPU
++      // framebuffer on WIN2, and scan out the TOP layer via WIN3. This uses
++      // the real physical alpha-capable overlay instead of spending GPU
++      // pixel operations on another full-screen quad. No layer is dropped.
++      // The full-screen opaque base makes the lower client group complete.
++      // Keep this experimental hardware path behind the existing opt-in
++      // until WIN3 blending is actually verified on glass. Otherwise the
++      // stable full-CLIENT fallback is preserved byte for byte in behavior.
++      const bool base_is_opaque = allow_mixed_primary &&
++          z_map.size() <= 4 &&
++          z_map.begin()->second->is_fullscreen_opaque_primary(
++              client_layer_.display_frame());
++      if (base_is_opaque && z_map.size() == 3) {
++        client_start = 0;
++        client_size = 2;
++      } else if (base_is_opaque && ClientTargetHasPixelAlpha()) {
++        // The older hybrid mode keeps an opaque DEVICE base below a
++        // transparent GPU target, requiring PREMULT scanout on WIN3.
++        client_start = 1;
++        client_size = z_map.size() - 1;
++        proposed_mixed_primary = true;
++      } else {
++        client_start = 0;
++        client_size = z_map.size();
++      }
++    }
++  }
++
++  if (client_size > 0)
++    gpu_pixops = CalcPixOps(z_map, client_start, client_size);
++
+   MarkValidated(z_map, client_start, client_size);
+ 
+-  if (CreateComposition(true) != HWC2::Error::None) {
+-    ++total_stats_.failed_kms_validate_;
+-    gpu_pixops = total_pixops;
+-    client_size = z_map.size();
+-    MarkValidated(z_map, 0, client_size);
++  // A protected gralloc layer MUST stay in hardware. The early FIMD CLIENT
++  // optimization is guarded above, but the normal planner can independently
++  // select CLIENT. Refuse unsafe/unknown buffer metadata rather than exposing
++  // protected content via the unprotected SurfaceFlinger client target.
++  auto has_unsafe_client = [&]() {
++    for (const auto &entry : z_map) {
++      if (entry.second->validated_type() != HWC2::Composition::Client)
++        continue;
++      const auto handle = entry.second->buffer();
++      if (!handle) {
++        if (entry.second->sf_type() != HWC2::Composition::SolidColor)
++          return true;
++        continue;
++      }
++      hwc_drm_bo_t bo = {};
++      if (importer_->ConvertBoInfo(handle, &bo) ||
++          (bo.usage & GRALLOC_USAGE_PROTECTED))
++        return true;
++    }
++    return false;
++  };
++  if (has_unsafe_client()) {
++    MarkValidated(z_map, 0, 0);
++    return HWC2::Error::NoResources;
+   }
+ 
+-  *num_types = client_size;
++  // SurfaceFlinger is allowed to validate before its first SetClientTarget.
++  // Do not import a null client target or mistake that for a failed DRM test.
++  // The real buffer will be checked when it is available for presentation.
++  const bool defer_client_test =
++      client_size > 0 && client_layer_.buffer() == nullptr;
++  if (defer_client_test) {
++    ++total_stats_.validate_deferred_client_target_;
++  } else if (!z_map.empty()) {
++    const auto validation_result = CreateComposition(true);
++    if (validation_result != HWC2::Error::None) {
++      proposed_mixed_primary = false;
++      if (validation_result == HWC2::Error::Unsupported)
++        ++total_stats_.validate_plane_client_fallback_;
++      else
++        ++total_stats_.failed_kms_validate_;
++      gpu_pixops = total_pixops;
++      client_size = z_map.size();
++      MarkValidated(z_map, 0, client_size);
++      if (has_unsafe_client()) {
++        MarkValidated(z_map, 0, 0);
++        return HWC2::Error::NoResources;
++      }
++    } else if (client_size == 0) {
++      validated_atomic_test_pending_ = true;
++    }
++  }
++
++  // Arm the Present-time DMA-BUF guard only if the mixed hardware plan
++  // survived DRM TEST and all secure-client checks. A rejected or fallback
++  // validation must never carry a stale mixed-plan flag into the next frame.
++  validated_mixed_primary_ = proposed_mixed_primary;
++
++  // The HWC2 output is the number of composition TYPE CHANGES requested
++  // of SurfaceFlinger, not the total count of CLIENT layers. Some layers
++  // may already be CLIENT, or may be changing back to DEVICE.
++  for (const auto &entry : layers_) {
++    if (entry.second.type_changed())
++      ++*num_types;
++  }
+ 
+   total_stats_.gpu_pixops_ += gpu_pixops;
+   total_stats_.total_pixops_ += total_pixops;
+@@ -977,8 +1370,10 @@ HWC2::Error DrmHwcTwo::HwcLayer::SetLayerBuffer(buffer_handle_t buffer,
+       sf_type_ == HWC2::Composition::SolidColor)
+     return HWC2::Error::None;
+ 
+-  set_buffer(buffer);
++  if (!set_buffer(buffer))
++    return HWC2::Error::NoResources;
+   set_acquire_fence(uf.get());
++  buffer_pending_ = true;
+   return HWC2::Error::None;
+ }
+ 
+@@ -1051,7 +1446,8 @@ HWC2::Error DrmHwcTwo::HwcLayer::SetLayerZOrder(uint32_t order) {
+   return HWC2::Error::None;
+ }
+ 
+-void DrmHwcTwo::HwcLayer::PopulateDrmLayer(DrmHwcLayer *layer) {
++int DrmHwcTwo::HwcLayer::PopulateDrmLayer(DrmHwcLayer *layer,
++                                          bool validation_only) {
+   supported(__func__);
+   switch (blending_) {
+     case HWC2::BlendMode::None:
+@@ -1072,12 +1468,28 @@ void DrmHwcTwo::HwcLayer::PopulateDrmLayer(DrmHwcLayer *layer) {
+   OutputFd release_fence = release_fence_output();
+ 
+   layer->sf_handle = buffer_;
+-  layer->acquire_fence = acquire_fence_.Release();
++  // ValidateDisplay submits DRM_MODE_ATOMIC_TEST_ONLY before HWC2 Present.
++  // Test composition owns its own temporary fd; the original acquire fence
++  // MUST survive so the real KMS commit synchronizes the producer's DMA.
++  // A previous Release() here silently discarded the synchronization fence
++  // when the short-lived test composition was destroyed.
++  if (validation_only) {
++    const int original = acquire_fence_.get();
++    if (original >= 0) {
++      const int temporary = dup(original);
++      if (temporary < 0)
++        return -errno;
++      layer->acquire_fence.Set(temporary);
++    }
++  } else {
++    layer->acquire_fence.Set(acquire_fence_.Release());
++  }
+   layer->release_fence = std::move(release_fence);
+   layer->SetDisplayFrame(display_frame_);
+   layer->alpha = static_cast<uint16_t>(65535.0f * alpha_ + 0.5f);
+   layer->SetSourceCrop(source_crop_);
+   layer->SetTransform(static_cast<int32_t>(transform_));
++  return 0;
+ }
+ 
+ void DrmHwcTwo::HandleDisplayHotplug(hwc2_display_t displayid, int state) {
+diff --git a/include/drmdisplaycompositor.h b/include/drmdisplaycompositor.h
+index 477f226f464592d63e58467daf0eb2256b292fb7..f03935c3980dd2b43de5d6b645bc05af69822e23 100644
+--- a/include/drmdisplaycompositor.h
++++ b/include/drmdisplaycompositor.h
+@@ -23,6 +23,7 @@
+ #include "resourcemanager.h"
+ #include "vsyncworker.h"
+ 
++#include <atomic>
+ #include <pthread.h>
+ #include <memory>
+ #include <sstream>
+@@ -56,6 +57,9 @@ class DrmDisplayCompositor {
+   void Dump(std::ostringstream *out) const;
+   void Vsync(int display, int64_t timestamp);
+   void ClearDisplay();
++  uint32_t ActualFrameAtomicCommitErrors() const {
++    return failed_actual_atomic_commits_.load(std::memory_order_relaxed);
++  }
+   int TakeOutFence() {
+     if (!active_composition_)
+       return -1;
+@@ -88,7 +92,7 @@ class DrmDisplayCompositor {
+   int ApplyDpms(DrmDisplayComposition *display_comp);
+   int DisablePlanes(DrmDisplayComposition *display_comp);
+ 
+-  void ApplyFrame(std::unique_ptr<DrmDisplayComposition> composition,
++  int ApplyFrame(std::unique_ptr<DrmDisplayComposition> composition,
+                   int status, bool writeback = false);
+   int FlattenActiveComposition();
+   int FlattenSerial(DrmConnector *writeback_conn);
+@@ -123,9 +127,14 @@ class DrmDisplayCompositor {
+   mutable uint64_t dump_frames_composited_;
+   mutable uint64_t dump_last_timestamp_ns_;
+   VSyncWorker vsync_worker_;
++  // Frame-flattening VSYNC is only useful with a real DRM writeback path.
++  // The Exynos4 FIMD/DSI display has no writeback connector. Do not start a
++  // separate 60Hz DRM_WAIT_VBLANK worker that can never flatten a scene.
++  bool flattening_available_ = false;
+   int64_t flatten_countdown_;
+   std::unique_ptr<Planner> planner_;
+   int writeback_fence_;
++  std::atomic<uint32_t> failed_actual_atomic_commits_{0};
+ };
+ }  // namespace android
+ 
+diff --git a/include/drmhwcomposer.h b/include/drmhwcomposer.h
+index 69313d9c67acfec1afa791c30030b615ff751dd0..294463fa60e1a8bcac20b7bf40d3054c6d2ca360 100644
+--- a/include/drmhwcomposer.h
++++ b/include/drmhwcomposer.h
+@@ -131,6 +131,9 @@ struct DrmHwcLayer {
+   buffer_handle_t sf_handle = NULL;
+   int gralloc_buffer_usage = 0;
+   DrmHwcBuffer buffer;
++  // Set by HwcDisplay::CreateComposition, never inferred from size or alpha.
++  // A GPU-composited client target must not be mistaken for three DEVICE layers.
++  bool is_client_target = false;
+   DrmHwcNativeHandle handle;
+   uint32_t transform;
+   DrmHwcBlending blending = DrmHwcBlending::kNone;
+@@ -141,7 +144,7 @@ struct DrmHwcLayer {
+   UniqueFd acquire_fence;
+   OutputFd release_fence;
+ 
+-  int ImportBuffer(Importer *importer);
++  int ImportBuffer(Importer *importer, bool retain_handle = true);
+   int InitFromDrmHwcLayer(DrmHwcLayer *layer, Importer *importer);
+ 
+   void SetTransform(int32_t sf_transform);
+diff --git a/include/drmhwctwo.h b/include/drmhwctwo.h
+index babe00067861e4c6915b7e35aa9c79994a42d481..56a43b97e3ba76bf65420945a28b24def0637633 100644
+--- a/include/drmhwctwo.h
++++ b/include/drmhwctwo.h
+@@ -21,9 +21,12 @@
+ #include "vsyncworker.h"
+ 
+ #include <hardware/hwcomposer2.h>
++#include <cutils/native_handle.h>
+ 
+ #include <array>
+ #include <map>
++#include <memory>
++#include <set>
+ 
+ namespace android {
+ 
+@@ -62,8 +65,14 @@ class DrmHwcTwo : public hwc2_device_t {
+     buffer_handle_t buffer() {
+       return buffer_;
+     }
+-    void set_buffer(buffer_handle_t buffer) {
+-      buffer_ = buffer;
++    bool set_buffer(buffer_handle_t buffer) {
++      std::unique_ptr<native_handle_t, NativeHandleCloser> copy(
++          buffer ? native_handle_clone(buffer) : nullptr);
++      if (buffer && !copy)
++        return false;
++      owned_buffer_ = std::move(copy);
++      buffer_ = owned_buffer_.get();
++      return true;
+     }
+ 
+     int take_acquire_fence() {
+@@ -79,6 +88,15 @@ class DrmHwcTwo : public hwc2_device_t {
+     int take_release_fence() {
+       return release_fence_.Release();
+     }
++    void set_committed_release_fence(int fence_fd) {
++      release_fence_.Set(fence_fd);
++    }
++    bool has_new_buffer_for_frame() const {
++      return buffer_pending_;
++    }
++    void mark_buffer_presented() {
++      buffer_pending_ = false;
++    }
+     void manage_release_fence() {
+       release_fence_.Set(release_fence_raw_);
+       release_fence_raw_ = -1;
+@@ -90,8 +108,65 @@ class DrmHwcTwo : public hwc2_device_t {
+     hwc_rect_t display_frame() {
+       return display_frame_;
+     }
++    hwc_frect_t source_crop() {
++      return source_crop_;
++    }
+ 
+-    void PopulateDrmLayer(DrmHwcLayer *layer);
++    // A physically opaque, untransformed full-screen base can be scanned out
++    // on the Tab3 FIMD primary win2 below a premultiplied GPU overlay on win3.
++    // This does NOT permit arbitrary alpha/rotation/cropping to bypass GPU.
++    bool is_fullscreen_opaque_primary(const hwc_rect_t &screen) const {
++      const int width = screen.right - screen.left;
++      const int height = screen.bottom - screen.top;
++      return sf_type_ == HWC2::Composition::Device &&
++             blending_ == HWC2::BlendMode::None && alpha_ == 1.0f &&
++             transform_ == HWC2::Transform::None &&
++             display_frame_.left == screen.left &&
++             display_frame_.top == screen.top &&
++             display_frame_.right == screen.right &&
++             display_frame_.bottom == screen.bottom &&
++             source_crop_.right - source_crop_.left == width &&
++             source_crop_.bottom - source_crop_.top == height;
++    }
++
++    // Fail-closed SM-T311 FIMD three-plane eligibility. KMS TEST_ONLY will
++    // additionally validate plane-specific fourcc, alignment and DMA bounds.
++    // A middle layer must be opaque (WIN2 ignores pixel alpha) but must
++    // leave some of the full-screen bottom hardware underlay visible.
++    bool t311_safe_partial_opaque_middle(const hwc_rect_t &screen) const {
++      const int width = display_frame_.right - display_frame_.left;
++      const int height = display_frame_.bottom - display_frame_.top;
++      return sf_type_ == HWC2::Composition::Device && buffer_ != nullptr &&
++             blending_ == HWC2::BlendMode::None && alpha_ == 1.0f &&
++             transform_ == HWC2::Transform::None &&
++             width > 0 && height > 0 && display_frame_.left >= screen.left &&
++             display_frame_.top >= screen.top &&
++             display_frame_.right <= screen.right &&
++             display_frame_.bottom <= screen.bottom &&
++             (width < screen.right - screen.left ||
++              height < screen.bottom - screen.top) &&
++             source_crop_.right - source_crop_.left == width &&
++             source_crop_.bottom - source_crop_.top == height;
++    }
++
++    bool t311_safe_top_overlay(const hwc_rect_t &screen) const {
++      const int width = display_frame_.right - display_frame_.left;
++      const int height = display_frame_.bottom - display_frame_.top;
++      return sf_type_ == HWC2::Composition::Device && buffer_ != nullptr &&
++             (blending_ == HWC2::BlendMode::None ||
++              blending_ == HWC2::BlendMode::Premultiplied) &&
++             alpha_ >= 0.0f && alpha_ <= 1.0f &&
++             transform_ == HWC2::Transform::None &&
++             width > 0 && height > 0 && display_frame_.left >= screen.left &&
++             display_frame_.top >= screen.top &&
++             display_frame_.right <= screen.right &&
++             display_frame_.bottom <= screen.bottom &&
++             source_crop_.right - source_crop_.left == width &&
++             source_crop_.bottom - source_crop_.top == height;
++    }
++
++    // Validation must not consume the acquire fence required by Present.
++    int PopulateDrmLayer(DrmHwcLayer *layer, bool validation_only);
+ 
+     // Layer hooks
+     HWC2::Error SetCursorPosition(int32_t x, int32_t y);
+@@ -110,6 +185,15 @@ class DrmHwcTwo : public hwc2_device_t {
+     HWC2::Error SetLayerZOrder(uint32_t z);
+ 
+    private:
++    struct NativeHandleCloser {
++      void operator()(native_handle_t *handle) const {
++        if (handle) {
++          native_handle_close(handle);
++          native_handle_delete(handle);
++        }
++      }
++    };
++
+     // sf_type_ stores the initial type given to us by surfaceflinger,
+     // validated_type_ stores the type after running ValidateDisplay
+     HWC2::Composition sf_type_ = HWC2::Composition::Invalid;
+@@ -117,8 +201,10 @@ class DrmHwcTwo : public hwc2_device_t {
+ 
+     HWC2::BlendMode blending_ = HWC2::BlendMode::None;
+     buffer_handle_t buffer_ = NULL;
++    std::unique_ptr<native_handle_t, NativeHandleCloser> owned_buffer_;
+     UniqueFd acquire_fence_;
+     int release_fence_raw_ = -1;
++    bool buffer_pending_ = false;
+     UniqueFd release_fence_;
+     hwc_rect_t display_frame_;
+     float alpha_ = 1.0f;
+@@ -152,6 +238,9 @@ class DrmHwcTwo : public hwc2_device_t {
+     void ClearDisplay();
+ 
+     std::string Dump();
++    void InvalidateValidatedAtomicTest() {
++      validated_atomic_test_pending_ = false;
++    }
+ 
+     // HWC Hooks
+     HWC2::Error AcceptDisplayChanges();
+@@ -199,9 +288,10 @@ class DrmHwcTwo : public hwc2_device_t {
+     }
+ 
+    private:
+-    HWC2::Error CreateComposition(bool test);
++    HWC2::Error CreateComposition(bool test, bool skip_precommit_test = false);
+     void AddFenceToPresentFence(int fd);
+     bool HardwareSupportsLayerType(HWC2::Composition comp_type);
++    bool ClientTargetHasPixelAlpha();
+     uint32_t CalcPixOps(std::map<uint32_t, DrmHwcTwo::HwcLayer *> &z_map,
+                         size_t first_z, size_t size);
+     void MarkValidated(std::map<uint32_t, DrmHwcTwo::HwcLayer *> &z_map,
+@@ -225,6 +315,9 @@ class DrmHwcTwo : public hwc2_device_t {
+     HWC2::DisplayType type_;
+     uint32_t layer_idx_ = 0;
+     std::map<hwc2_layer_t, HwcLayer> layers_;
++    // Only HWC2 DEVICE buffers actually presented in a prior successful
++    // blocking KMS commit can be associated with its replacement fence.
++    std::set<hwc2_layer_t> previous_device_layers_;
+     HwcLayer client_layer_;
+     UniqueFd present_fence_;
+     int32_t color_mode_;
+@@ -232,20 +325,44 @@ class DrmHwcTwo : public hwc2_device_t {
+     android_color_transform_t color_transform_hint_;
+ 
+     uint32_t frame_no_ = 0;
++    bool validated_atomic_test_pending_ = false;
++    // A validated win2 base + win3 client target must be rechecked at Present:
++    // SurfaceFlinger can replace the client DMA-BUF after ValidateDisplay.
++    bool validated_mixed_primary_ = false;
++    bool atomic_reuse_enabled_ = false;
++    // SM-T311: the kernel checks plane validity in the actual atomic commit.
++    // With successful ValidateDisplay, skip the second TEST_ONLY ioctl on
++    // PresentDisplay. Opt-in until the on-device frame pacing is verified.
++    bool single_atomic_present_enabled_ = false;
++    uint32_t skipped_precommit_tests_ = 0;
+     /* Statistics */
+     struct Stats {
+       Stats minus(Stats b) {
+         return {total_frames_ - b.total_frames_,
+                 total_pixops_ - b.total_pixops_, gpu_pixops_ - b.gpu_pixops_,
+                 failed_kms_validate_ - b.failed_kms_validate_,
+-                failed_kms_present_ - b.failed_kms_present_};
++                validate_plane_client_fallback_ - b.validate_plane_client_fallback_,
++                validate_deferred_client_target_ - b.validate_deferred_client_target_,
++                failed_kms_present_ - b.failed_kms_present_,
++                present_import_errors_ - b.present_import_errors_,
++                present_setlayers_errors_ - b.present_setlayers_errors_,
++                present_plan_errors_ - b.present_plan_errors_,
++                present_apply_errors_ - b.present_apply_errors_,
++                present_empty_ - b.present_empty_};
+       }
+ 
+       uint32_t total_frames_ = 0;
+       uint64_t total_pixops_ = 0;
+       uint64_t gpu_pixops_ = 0;
+       uint32_t failed_kms_validate_ = 0;
++      uint32_t validate_plane_client_fallback_ = 0;
++      uint32_t validate_deferred_client_target_ = 0;
+       uint32_t failed_kms_present_ = 0;
++      uint32_t present_import_errors_ = 0;
++      uint32_t present_setlayers_errors_ = 0;
++      uint32_t present_plan_errors_ = 0;
++      uint32_t present_apply_errors_ = 0;
++      uint32_t present_empty_ = 0;
+     } total_stats_, prev_stats_;
+     std::string DumpDelta(DrmHwcTwo::HwcDisplay::Stats delta);
+   };
+@@ -307,6 +424,7 @@ class DrmHwcTwo : public hwc2_device_t {
+     if (!layer)
+       return static_cast<int32_t>(HWC2::Error::BadLayer);
+ 
++    display->InvalidateValidatedAtomicTest();
+     return static_cast<int32_t>((layer->*func)(std::forward<Args>(args)...));
+   }
+ 
+diff --git a/include/drmmode.h b/include/drmmode.h
+index 4cc06b1dabb5755451e93895c3a06f93b6bd0539..88befac9256bf223236513fba52ff3eec9aed95d 100644
+--- a/include/drmmode.h
++++ b/include/drmmode.h
+@@ -48,6 +48,7 @@ class DrmMode {
+   uint32_t v_total() const;
+   uint32_t v_scan() const;
+   float v_refresh() const;
++  float hwc_reported_v_refresh() const;
+ 
+   uint32_t flags() const;
+   uint32_t type() const;
+diff --git a/include/drmproperty.h b/include/drmproperty.h
+index 2d92ca1094d2e7d55616c29f8c7717338ea7bb7c..c7d67e33bb46073c9fa0ce5c9c31afe9e7cb9e7c 100644
+--- a/include/drmproperty.h
++++ b/include/drmproperty.h
+@@ -40,7 +40,7 @@ class DrmProperty {
+   DrmProperty &operator=(const DrmProperty &) = delete;
+ 
+   void Init(drmModePropertyPtr p, uint64_t value);
+-  std::tuple<uint64_t, int> GetEnumValueWithName(std::string name) const;
++  std::tuple<uint64_t, int> GetEnumValueWithName(const std::string &name) const;
+ 
+   uint32_t id() const;
+   std::string name() const;
+diff --git a/include/platform.h b/include/platform.h
+index 6775e2902fdd42111ecf6070b4117fe36bca50b0..a3b36d5a7cfce29c273a6d6eb971db3f4ba84788 100644
+--- a/include/platform.h
++++ b/include/platform.h
+@@ -91,6 +91,17 @@ class Planner {
+       int ret = -ENOENT;
+       while (plane) {
+         ret = ValidatePlane(plane, layer.second);
++        if (!ret && !composition->empty() &&
++            plane->zpos_property().is_immutable() &&
++            composition->back().plane()->zpos_property().is_immutable()) {
++          int current_ret, previous_ret;
++          uint64_t current_z, previous_z;
++          std::tie(current_ret, current_z) = plane->zpos_property().value();
++          std::tie(previous_ret, previous_z) =
++              composition->back().plane()->zpos_property().value();
++          if (!current_ret && !previous_ret && current_z <= previous_z)
++            ret = -EINVAL;
++        }
+         if (!ret)
+           break;
+         if (!plane->zpos_property().is_immutable())
+@@ -123,7 +134,7 @@ class Planner {
+   std::tuple<int, std::vector<DrmCompositionPlane>> ProvisionPlanes(
+       std::map<size_t, DrmHwcLayer *> &layers, DrmCrtc *crtc,
+       std::vector<DrmPlane *> *primary_planes,
+-      std::vector<DrmPlane *> *overlay_planes);
++      std::vector<DrmPlane *> *overlay_planes, const DrmMode *display_mode);
+ 
+   template <typename T, typename... A>
+   void AddStage(A &&... args) {
+diff --git a/include/t311_zaware_policy.h b/include/t311_zaware_policy.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f5cbdc09c7ea9aae0c0ae8463c51f3aa1de023e6
+--- /dev/null
++++ b/include/t311_zaware_policy.h
+@@ -0,0 +1,27 @@
++// SPDX-License-Identifier: Apache-2.0
++// Source-only SM-T311 immutable FIMD z-aware underlay policy.
++// This structure is independent of Android to permit host-side exhaustive tests.
++#ifndef T311_ZAWARE_POLICY_H_
++#define T311_ZAWARE_POLICY_H_
++namespace android {
++struct T311ZawareCase {
++  bool is_lt013g;
++  bool opt_in;
++  bool three_device_layers;
++  bool supported_win1_overlay;
++  bool supported_win2_primary;
++  bool supported_win3_overlay;
++  bool bottom_fullscreen_opaque;
++  bool middle_partial_opaque;
++  bool top_non_scaling_buffer;
++  bool all_unprotected;
++};
++inline bool T311AllowWin1Win2Win3(const T311ZawareCase &p) {
++  return p.is_lt013g && p.opt_in && p.three_device_layers &&
++         p.supported_win1_overlay && p.supported_win2_primary &&
++         p.supported_win3_overlay && p.bottom_fullscreen_opaque &&
++         p.middle_partial_opaque && p.top_non_scaling_buffer &&
++         p.all_unprotected;
++}
++}  // namespace android
++#endif  // T311_ZAWARE_POLICY_H_
+diff --git a/platform/platform.cpp b/platform/platform.cpp
+index b7a47c7ddf72af2ea3f8783f8324e1b0c6c08244..4792af4429937d463ae0d15b843b2d3098a82574 100644
+--- a/platform/platform.cpp
++++ b/platform/platform.cpp
+@@ -18,7 +18,11 @@
+ 
+ #include "platform.h"
+ #include "drmdevice.h"
++#include "t311_zaware_policy.h"
+ 
++#include <cutils/properties.h>
++#include <drm/drm_fourcc.h>
++#include <cstring>
+ #include <log/log.h>
+ 
+ namespace android {
+@@ -51,6 +55,32 @@ int Planner::PlanStage::ValidatePlane(DrmPlane *plane, DrmHwcLayer *layer) {
+     return -EINVAL;
+   }
+ 
++  // The SM-T311 FIMD driver advertises pixel blending on PRIMARY win2,
++  // but its stock-compatible scanout path unconditionally converts ARGB and
++  // ABGR buffers into XRGB/XBGR (including opaque global alpha).
++  // KMS atomic TEST can pass while this plane visually hides lower layers.
++  // Refuse semi-transparent hardware layers on win2; a fully CLIENT scene
++  // is explicitly normalized to kNone by CreateComposition().
++  static const bool t311_opaque_primary = [] {
++    char device[PROPERTY_VALUE_MAX];
++    property_get("ro.product.device", device, "");
++    return strcmp(device, "lt013g") == 0;
++  }();
++  if (t311_opaque_primary && plane->type() == DRM_PLANE_TYPE_PRIMARY &&
++      plane->zpos_property().is_immutable() && layer->buffer &&
++      (layer->buffer->format == DRM_FORMAT_ARGB8888 ||
++       layer->buffer->format == DRM_FORMAT_ABGR8888)) {
++    int err;
++    uint64_t phys_zpos;
++    std::tie(err, phys_zpos) = plane->zpos_property().value();
++    if (!err && phys_zpos == 2 &&
++        (layer->blending != DrmHwcBlending::kNone ||
++         layer->alpha != 0xffff)) {
++      ALOGW("SM-T311: reject translucent layer on opaque-only FIMD win2");
++      return -EINVAL;
++    }
++  }
++
+   if (plane->blend_property().id() == 0) {
+     if ((layer->blending != DrmHwcBlending::kNone) &&
+         (layer->blending != DrmHwcBlending::kPreMult)) {
+@@ -83,7 +113,7 @@ int Planner::PlanStage::ValidatePlane(DrmPlane *plane, DrmHwcLayer *layer) {
+ std::tuple<int, std::vector<DrmCompositionPlane>> Planner::ProvisionPlanes(
+     std::map<size_t, DrmHwcLayer *> &layers, DrmCrtc *crtc,
+     std::vector<DrmPlane *> *primary_planes,
+-    std::vector<DrmPlane *> *overlay_planes) {
++    std::vector<DrmPlane *> *overlay_planes, const DrmMode *display_mode) {
+   std::vector<DrmCompositionPlane> composition;
+   std::vector<DrmPlane *> planes = GetUsablePlanes(crtc, primary_planes,
+                                                    overlay_planes);
+@@ -92,11 +122,131 @@ std::tuple<int, std::vector<DrmCompositionPlane>> Planner::ProvisionPlanes(
+     return std::make_tuple(-ENODEV, std::vector<DrmCompositionPlane>());
+   }
+ 
++  // Opt-in only, with a shape already vetted by HwcDisplay::ValidateDisplay:
++  // lower WIN1, opaque middle WIN2, premult-capable upper WIN3. Never use
++  // WIN0 (no alpha) or cursor WIN4. Preserve ordinary PRIMARY-first order
++  // for every other scene and whenever any physical plane is missing.
++  char board[PROPERTY_VALUE_MAX] = {};
++  char enabled[PROPERTY_VALUE_MAX] = {};
++  property_get("ro.product.device", board, "");
++  property_get("persist.vendor.t311.hwc_win1_3plane", enabled, "0");
++  DrmPlane *win1 = nullptr, *win2 = nullptr, *win3 = nullptr;
++  for (DrmPlane *plane : planes) {
++    if (!plane->zpos_property().id() ||
++        !plane->zpos_property().is_immutable())
++      continue;
++    int rc = 0;
++    uint64_t z = 0;
++    std::tie(rc, z) = plane->zpos_property().value();
++    if (rc)
++      continue;
++    if (z == 1 && plane->type() == DRM_PLANE_TYPE_OVERLAY)
++      win1 = plane;
++    if (z == 2 && plane->type() == DRM_PLANE_TYPE_PRIMARY)
++      win2 = plane;
++    if (z == 3 && plane->type() == DRM_PLANE_TYPE_OVERLAY)
++      win3 = plane;
++  }
++  // Independent second-stage validation. Previous G1592 forwarded literal
++  // `true` for scene eligibility, incorrectly trusting ValidateDisplay; its
++  // input may actually contain a GPU CLIENT target and two DEVICE layers.
++  // In that case, never reorder physical windows based on mere layer count.
++  bool bottom_fullscreen_opaque = false;
++  bool middle_partial_opaque = false;
++  bool top_non_scaling_buffer = false;
++  bool all_unprotected = false;
++  if (layers.size() == 3 && layers.count(0) && layers.count(1) &&
++      layers.count(2) && layers.at(0) && layers.at(1) && layers.at(2)) {
++    const DrmHwcLayer &bottom = *layers.at(0);
++    const DrmHwcLayer &middle = *layers.at(1);
++    const DrmHwcLayer &top = *layers.at(2);
++    const hwc_rect_t &screen = bottom.display_frame;
++    const int width = screen.right - screen.left;
++    const int height = screen.bottom - screen.top;
++    const auto suitable_buffer = [](const DrmHwcLayer &layer) {
++      if (layer.is_client_target || layer.protected_usage() || !layer.buffer ||
++          (layer.buffer->usage & GRALLOC_USAGE_PROTECTED) ||
++          layer.buffer->width == 0 || layer.buffer->height == 0)
++        return false;
++      const uint32_t format = layer.buffer->format;
++      const uint32_t bytes_per_pixel =
++          format == DRM_FORMAT_RGB565 || format == DRM_FORMAT_BGR565 ? 2 :
++          format == DRM_FORMAT_XRGB8888 || format == DRM_FORMAT_XBGR8888 ||
++          format == DRM_FORMAT_ARGB8888 || format == DRM_FORMAT_ABGR8888 ? 4 : 0;
++      return bytes_per_pixel &&
++          static_cast<uint64_t>(layer.buffer->pitches[0]) >=
++              static_cast<uint64_t>(layer.buffer->width) * bytes_per_pixel;
++    };
++    const auto no_rotation_or_scaling = [&screen](const DrmHwcLayer &layer) {
++      const hwc_rect_t &f = layer.display_frame;
++      const int w = f.right - f.left;
++      const int h = f.bottom - f.top;
++      return layer.transform == DrmHwcTransform::kIdentity && w > 0 &&
++             h > 0 && f.left >= screen.left && f.top >= screen.top &&
++             f.right <= screen.right && f.bottom <= screen.bottom &&
++             layer.source_crop.left == 0.0f &&
++             layer.source_crop.top == 0.0f &&
++             layer.source_crop.right == static_cast<float>(w) &&
++             layer.source_crop.bottom == static_cast<float>(h) &&
++             layer.buffer->width >= static_cast<uint32_t>(w) &&
++             layer.buffer->height >= static_cast<uint32_t>(h);
++    };
++    const auto opaque_format = [](uint32_t fmt) {
++      return fmt == DRM_FORMAT_XRGB8888 || fmt == DRM_FORMAT_XBGR8888 ||
++             fmt == DRM_FORMAT_RGB565 || fmt == DRM_FORMAT_BGR565;
++    };
++    const auto top_format = [&](uint32_t fmt) {
++      return opaque_format(fmt) || fmt == DRM_FORMAT_ARGB8888 ||
++             fmt == DRM_FORMAT_ABGR8888;
++    };
++    all_unprotected = suitable_buffer(bottom) && suitable_buffer(middle) &&
++                      suitable_buffer(top);
++    if (all_unprotected && display_mode && screen.left == 0 &&
++        screen.top == 0 && width > 0 && height > 0 &&
++        static_cast<uint32_t>(width) == display_mode->h_display() &&
++        static_cast<uint32_t>(height) == display_mode->v_display()) {
++      bottom_fullscreen_opaque = opaque_format(bottom.buffer->format) &&
++          bottom.blending == DrmHwcBlending::kNone &&
++          bottom.alpha == 0xffff &&
++          no_rotation_or_scaling(bottom);
++      middle_partial_opaque = opaque_format(middle.buffer->format) &&
++          middle.blending == DrmHwcBlending::kNone &&
++          middle.alpha == 0xffff &&
++          no_rotation_or_scaling(middle) &&
++          (middle.display_frame.left > screen.left ||
++           middle.display_frame.top > screen.top ||
++           middle.display_frame.right < screen.right ||
++           middle.display_frame.bottom < screen.bottom);
++      top_non_scaling_buffer = top_format(top.buffer->format) &&
++          (top.blending == DrmHwcBlending::kNone ||
++           top.blending == DrmHwcBlending::kPreMult) &&
++          no_rotation_or_scaling(top);
++    }
++  }
++  const T311ZawareCase policy = {
++      strcmp(board, "lt013g") == 0,
++      strcmp(enabled, "1") == 0,
++      layers.size() == 3,
++      win1 != nullptr, win2 != nullptr, win3 != nullptr,
++      bottom_fullscreen_opaque, middle_partial_opaque,
++      top_non_scaling_buffer, all_unprotected,
++  };
++  if (T311AllowWin1Win2Win3(policy)) {
++    // ValidateDisplay already rejected scaling/translucent WIN2/protected
++    // layers. This ordering is only exposed for a matching three-layer
++    // KMS TEST_ONLY; fallback retains stock ordering and original behavior.
++    planes = {win1, win2, win3};
++  }
++
+   // Go through the provisioning stages and provision planes
+   for (auto &i : stages_) {
+     int ret = i->ProvisionPlanes(&composition, layers, crtc, &planes);
+     if (ret) {
+-      ALOGE("Failed provision stage with ret %d", ret);
++      // Normal lack of DRM planes means CLIENT fallback, not a device fault.
++      if (ret == -ENOSPC)
++        ALOGV("DRM planes exhausted; CLIENT fallback");
++      else
++        ALOGE("Failed provision stage with ret %d", ret);
+       return std::make_tuple(ret, std::vector<DrmCompositionPlane>());
+     }
+   }
+@@ -138,11 +288,13 @@ int PlanStageGreedy::ProvisionPlanes(
+   for (auto i = layers.begin(); i != layers.end(); i = layers.erase(i)) {
+     int ret = Emplace(composition, planes, DrmCompositionPlane::Type::kLayer,
+                       crtc, std::make_pair(i->first, i->second));
+-    // We don't have any planes left
+-    if (ret == -ENOENT)
+-      break;
+-    else if (ret) {
+-      ALOGE("Failed to emplace layer %zu, dropping it", i->first);
++    if (ret == -ENOENT) {
++      ALOGV("No compatible DRM plane for layer z=%zu; CLIENT fallback",
++            i->first);
++      return -ENOSPC;
++    }
++    if (ret) {
++      ALOGE("Failed to emplace layer %zu, ret=%d", i->first, ret);
+       return ret;
+     }
+   }
+diff --git a/platform/platformdrmgeneric.cpp b/platform/platformdrmgeneric.cpp
+index 1aa81601be09baa4971044e42cf2df4dce843034..e977200995da91181decf872e682383b08be1073 100644
+--- a/platform/platformdrmgeneric.cpp
++++ b/platform/platformdrmgeneric.cpp
+@@ -22,6 +22,7 @@
+ 
+ #include <xf86drm.h>
+ #include <xf86drmMode.h>
++#include <sys/stat.h>
+ 
+ #include <cutils/properties.h>
+ #include <gralloc_handle.h>
+@@ -52,6 +53,17 @@ DrmGenericImporter::DrmGenericImporter(DrmDevice *drm)
+ }
+ 
+ DrmGenericImporter::~DrmGenericImporter() {
++  // Drop cache-owned FB and GEM references when the importer is destroyed.
++  // DrmDevice owns the file descriptor and outlives the importer.
++  for (const auto &entry : fb_references_) {
++    drmModeRmFB(drm_->fd(), entry.second.id);
++    ReleaseHandle(entry.first.gem);
++  }
++}
++
++DrmGenericImporter::FbKey DrmGenericImporter::KeyFor(const hwc_drm_bo_t &bo) {
++  return {bo.gem_handles[0], bo.width, bo.height, bo.format,
++          bo.pitches[0], bo.offsets[0], bo.with_modifiers, bo.modifiers[0]};
+ }
+ 
+ int DrmGenericImporter::Init() {
+@@ -136,26 +148,72 @@ int DrmGenericImporter::ImportBuffer(buffer_handle_t handle, hwc_drm_bo_t *bo) {
+   memset(bo, 0, sizeof(hwc_drm_bo_t));
+ 
+   int ret = ConvertBoInfo(handle, bo);
+-  if (ret)
+-    return ret;
+-
+-  ret = drmPrimeFDToHandle(drm_->fd(), bo->prime_fds[0], &bo->gem_handles[0]);
+   if (ret) {
+-    ALOGE("failed to import prime fd %d ret=%d", bo->prime_fds[0], ret);
++    const auto *gh = gralloc_handle(handle);
++    ALOGE("ImportBuffer ConvertBoInfo ret=%d null=%d fmt=%u width=%u height=%u stride=%u fd=%d",
++          ret, static_cast<int>(gh == nullptr), gh ? gh->format : 0,
++          gh ? gh->width : 0, gh ? gh->height : 0,
++          gh ? gh->stride : 0, gh ? gh->prime_fd : -1);
+     return ret;
+   }
+ 
++  // The importer can be called from the HAL thread while an older
++  // composition is retired by the DRM compositor worker.
++  std::lock_guard<std::mutex> guard(import_lock_);
++
++  // Linux dma_buf_getfile() uses a monotonically unique inode for each
++  // exported DMA-BUF. The retained FB owns a GEM reference, so that cached
++  // handle remains valid while we reuse it. This avoids repeating the
++  // PRIME_FD_TO_HANDLE ioctl for the same buffer in subsequent frames.
++  struct stat fd_stat = {};
++  const bool have_identity =
++      fstat(bo->prime_fds[0], &fd_stat) == 0 && fd_stat.st_ino != 0;
++  if (have_identity) {
++    for (const auto &entry : fb_references_) {
++      if (entry.second.dma_buf_device ==
++              static_cast<uint64_t>(fd_stat.st_dev) &&
++          entry.second.dma_buf_inode ==
++              static_cast<uint64_t>(fd_stat.st_ino)) {
++        bo->gem_handles[0] = entry.first.gem;
++        break;
++      }
++    }
++  }
++  if (!bo->gem_handles[0]) {
++    ret = drmPrimeFDToHandle(drm_->fd(), bo->prime_fds[0],
++                             &bo->gem_handles[0]);
++    if (ret) {
++      ALOGE("failed to import prime fd %d ret=%d", bo->prime_fds[0], ret);
++      return ret;
++    }
++  }
++
++  // Own one user reference before handling any subsequent failure.
++  ImportHandle(bo->gem_handles[0]);
++
+   for (int i = 1; i < HWC_DRM_BO_MAX_PLANES; i++) {
+     int fd = bo->prime_fds[i];
+     if (fd != 0) {
+       if (fd != bo->prime_fds[0]) {
+         ALOGE("Multiplanar FBs are not supported by this version of composer");
++        ReleaseHandle(bo->gem_handles[0]);
+         return -ENOTSUP;
+       }
+       bo->gem_handles[i] = bo->gem_handles[0];
+     }
+   }
+ 
++  const FbKey key = KeyFor(*bo);
++  auto cached = fb_references_.find(key);
++  if (cached != fb_references_.end()) {
++    // Cancel eviction if the next frame reuses an idle framebuffer.
++    if (cached->second.users == 0)
++      idle_fb_lru_.erase(cached->second.idle_pos);
++    bo->fb_id = cached->second.id;
++    ++cached->second.users;
++    return 0;
++  }
++
+   if (!bo->with_modifiers)
+     ret = drmModeAddFB2(drm_->fd(), bo->width, bo->height, bo->format,
+                         bo->gem_handles, bo->pitches, bo->offsets, &bo->fb_id,
+@@ -169,18 +227,45 @@ int DrmGenericImporter::ImportBuffer(buffer_handle_t handle, hwc_drm_bo_t *bo) {
+ 
+   if (ret) {
+     ALOGE("could not create drm fb %d", ret);
++    ReleaseHandle(bo->gem_handles[0]);
+     return ret;
+   }
+ 
++  // The normal per-import GEM ref belongs to the current composition.
++  // A second ref pins the KMS FB across subsequent frame submissions.
+   ImportHandle(bo->gem_handles[0]);
+-
+-  return ret;
++  fb_references_.emplace(
++      key, CachedFb{bo->fb_id, 1U, {},
++                    have_identity ? static_cast<uint64_t>(fd_stat.st_dev) : 0,
++                    have_identity ? static_cast<uint64_t>(fd_stat.st_ino) : 0});
++  return 0;
+ }
+ 
+ int DrmGenericImporter::ReleaseBuffer(hwc_drm_bo_t *bo) {
+-  if (bo->fb_id)
+-    if (drmModeRmFB(drm_->fd(), bo->fb_id))
+-      ALOGE("Failed to rm fb");
++  std::lock_guard<std::mutex> guard(import_lock_);
++  if (bo->fb_id) {
++    auto cached = fb_references_.find(KeyFor(*bo));
++    if (cached != fb_references_.end() &&
++        cached->second.id == bo->fb_id) {
++      if (--cached->second.users == 0) {
++        // One entry per inactive FB; do not grow cache without bound.
++        idle_fb_lru_.push_back(cached->first);
++        cached->second.idle_pos = std::prev(idle_fb_lru_.end());
++        if (idle_fb_lru_.size() > kMaxIdleFramebuffers) {
++          auto expired = fb_references_.find(idle_fb_lru_.front());
++          idle_fb_lru_.pop_front();
++          if (expired != fb_references_.end()) {
++            if (drmModeRmFB(drm_->fd(), expired->second.id))
++              ALOGE("Failed to retire idle fb");
++            ReleaseHandle(expired->first.gem);  // cache's own GEM ref
++            fb_references_.erase(expired);
++          }
++        }
++      }
++    } else if (drmModeRmFB(drm_->fd(), bo->fb_id)) {
++      ALOGE("Failed to rm uncached fb");
++    }
++  }
+ 
+   for (int i = 0; i < HWC_DRM_BO_MAX_PLANES; i++) {
+     if (!bo->gem_handles[i])
+diff --git a/platform/platformdrmgeneric.h b/platform/platformdrmgeneric.h
+index f9d923ff840e1b2d19d2cb7d5ad43659c95e5f8f..0bea609ce08346182fcb715acab7fb561c75ffae 100644
+--- a/platform/platformdrmgeneric.h
++++ b/platform/platformdrmgeneric.h
+@@ -21,7 +21,10 @@
+ #include "platform.h"
+ 
+ #include <hardware/gralloc.h>
++#include <list>
+ #include <map>
++#include <mutex>
++#include <tuple>
+ 
+ #include <drm/drm_fourcc.h>
+ 
+@@ -56,7 +59,39 @@ class DrmGenericImporter : public Importer {
+   const gralloc_module_t *gralloc_;
+   bool exclude_non_hwfb_;
+ 
++  // The same DMA-BUF can be simultaneously used by an active scanout
++  // composition and the next one. Share its KMS FB until the last owner
++  // retires it, instead of issuing duplicate DRM_MODE_ADDFB2/RMFB ioctls.
++  struct FbKey {
++    uint32_t gem, width, height, format, pitch, offset;
++    bool modifiers_enabled;
++    uint64_t modifier;
++
++    bool operator<(const FbKey &rhs) const {
++      return std::tie(gem, width, height, format, pitch, offset,
++                      modifiers_enabled, modifier) <
++             std::tie(rhs.gem, rhs.width, rhs.height, rhs.format,
++                      rhs.pitch, rhs.offset, rhs.modifiers_enabled,
++                      rhs.modifier);
++    }
++  };
++  static FbKey KeyFor(const hwc_drm_bo_t &bo);
++
+   int CloseHandle(uint32_t gem_handle);
++  // Keep a few recently retired scanout FBs ready for the next frame.
++  // The cache owns one GEM reference per entry while it remains resident;
++  // active users have independent references, as before.
++  struct CachedFb {
++    uint32_t id;
++    unsigned int users;
++    std::list<FbKey>::iterator idle_pos;
++    uint64_t dma_buf_device;
++    uint64_t dma_buf_inode;
++  };
++  static constexpr size_t kMaxIdleFramebuffers = 6;
++  std::mutex import_lock_;
++  std::map<FbKey, CachedFb> fb_references_;
++  std::list<FbKey> idle_fb_lru_;
+   std::map<uint32_t, int> gem_refcount_;
+ };
+ }  // namespace android
+diff --git a/tests/g1592_t311_zaware_policy_test.cpp b/tests/g1592_t311_zaware_policy_test.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..74f1d72d18047e9693d0a7ebda275aea52287818
+--- /dev/null
++++ b/tests/g1592_t311_zaware_policy_test.cpp
+@@ -0,0 +1,26 @@
++// SM-T311 host unit regression of the board-guarded 3-FIMD-plane opt-in.
++#include "t311_zaware_policy.h"
++#include <assert.h>
++#include <stdio.h>
++
++int main() {
++  int accepted = 0;
++  for (int mask = 0; mask < 1024; ++mask) {
++    android::T311ZawareCase c = {
++        !!(mask & (1 << 0)), !!(mask & (1 << 1)),
++        !!(mask & (1 << 2)), !!(mask & (1 << 3)),
++        !!(mask & (1 << 4)), !!(mask & (1 << 5)),
++        !!(mask & (1 << 6)), !!(mask & (1 << 7)),
++        !!(mask & (1 << 8)), !!(mask & (1 << 9))};
++    const bool result = android::T311AllowWin1Win2Win3(c);
++    assert(result == (mask == 1023));
++    if (result) ++accepted;
++  }
++  assert(accepted == 1);
++  // The existing runtime property defaults to 0 even when device and
++  // all capabilities pass: accepted case must be opt-in.
++  android::T311ZawareCase off = {
++      true, false, true, true, true, true, true, true, true, true};
++  assert(!android::T311AllowWin1Win2Win3(off));
++  puts("G1592_SM_T311_WIN1_WIN2_WIN3_STRICT_1024_NEGATIVE_PLUS_OPTIN_TEST_PASS");
++}
+diff --git a/utils/hwcutils.cpp b/utils/hwcutils.cpp
+index 87e3c42ed1115ec2099d9b58de61c8b0df4b5935..83789dfc827c1e494b18d91b67cbf1d588e91c3e 100644
+--- a/utils/hwcutils.cpp
++++ b/utils/hwcutils.cpp
+@@ -107,22 +107,24 @@ void DrmHwcNativeHandle::Clear() {
+   }
+ }
+ 
+-int DrmHwcLayer::ImportBuffer(Importer *importer) {
++int DrmHwcLayer::ImportBuffer(Importer *importer, bool retain_handle) {
+   int ret = buffer.ImportBuffer(sf_handle, importer);
+   if (ret)
+     return ret;
+ 
+   const hwc_drm_bo *bo = buffer.operator->();
+ 
+-  unsigned int layer_count;
+-  for (layer_count = 0; layer_count < HWC_DRM_BO_MAX_PLANES; ++layer_count)
+-    if (bo->gem_handles[layer_count] == 0)
+-      break;
++  if (retain_handle) {
++    unsigned int layer_count;
++    for (layer_count = 0; layer_count < HWC_DRM_BO_MAX_PLANES; ++layer_count)
++      if (bo->gem_handles[layer_count] == 0)
++        break;
+ 
+-  ret = handle.CopyBufferHandle(sf_handle, bo->width, bo->height, layer_count,
+-                                bo->hal_format, bo->usage, bo->pixel_stride);
+-  if (ret)
+-    return ret;
++    ret = handle.CopyBufferHandle(sf_handle, bo->width, bo->height, layer_count,
++                                  bo->hal_format, bo->usage, bo->pixel_stride);
++    if (ret)
++      return ret;
++  }
+ 
+   gralloc_buffer_usage = bo->usage;
+ 

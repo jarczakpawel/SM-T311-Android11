@@ -1,0 +1,84 @@
+cc_binary {
+    name: "lt013g-gps-legacy-launcher-v195",
+    stem: "lt013g-gps-legacy-launcher-v195",
+    srcs: ["legacy_launcher.cpp"],
+    compile_multilib: "32",
+    vendor: true,
+    init_rc: ["init.lt013g.gps-legacy.rc"],
+    shared_libs: ["liblog"],
+    cppflags: ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+}
+
+cc_library_shared {
+    name: "gps.default.lt013g.v195",
+    stem: "gps.default",
+    srcs: ["gps_proxy.c"],
+    compile_multilib: "32",
+    vendor: true,
+    relative_install_path: "hw",
+    shared_libs: ["libhardware", "liblog"],
+    cflags: ["-std=c11", "-Wall", "-Wextra", "-Werror"],
+}
+
+prebuilt_etc {
+    name: "lt013g-gps-legacy-rootfs-v195",
+    src: "legacy-rootfs-mutable.tar",
+    vendor: true,
+    sub_dir: "lt013g-gps-legacy",
+    filename: "rootfs-mutable.tar",
+}
+
+
+// SM-T311 v290: API25 preload bridge with no Android-11 system linkage.
+//
+// The DSO intentionally has no system DT_NEEDED and no symbol-version
+// requirements.  libc is already present through the API25 mksh host and the
+// exact API25 libdl is preloaded immediately before this library.  Undefined
+// POSIX/dlopen symbols are therefore resolved by the Android 7.1.2 linker.
+cc_library_shared {
+    name: "liblt013g-gps-bridge-v290",
+    stem: "liblt013g-gps-bridge-v290",
+    srcs: ["legacy_gps_server.c"],
+    compile_multilib: "32",
+    vendor: true,
+    stl: "none",
+    system_shared_libs: [],
+    allow_undefined_symbols: true,
+    nocrt: true,
+    cflags: [
+        "-std=gnu11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-fno-stack-protector",
+        "-U_FORTIFY_SOURCE",
+        "-D_FORTIFY_SOURCE=0",
+        "-U__ANDROID_API__",
+        "-D__ANDROID_API__=25",
+        "-DLT013G_PRELOAD_BRIDGE=1",
+    ],
+    sanitize: { never: true },
+    pack_relocations: false,
+    ldflags: [
+        "-Wl,--hash-style=both",
+        "-Wl,--build-id=none",
+    ],
+}
+
+prebuilt_etc {
+    name: "lt013g-gps-legacy-bridge-embedded",
+    src: ":liblt013g-gps-bridge-v290",
+    vendor: true,
+    sub_dir: "lt013g-gps-legacy/immutable/system/lib",
+    filename: "liblt013g-gps-bridge-v290.so",
+}
+
+cc_test {
+    name: "lt013g-g620-nmea-frame-test",
+    srcs: [":lt013g-g620-nmea-test-source"],
+    vendor: true,
+    gtest: false,
+    compile_multilib: "32",
+    cflags: ["-std=gnu11", "-Wall", "-Wextra", "-Werror"],
+}

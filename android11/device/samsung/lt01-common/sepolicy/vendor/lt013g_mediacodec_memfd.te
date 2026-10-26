@@ -1,0 +1,13 @@
+# G591: Fix Codec2 V4L2 H.264 encoder FMQ creation on Linux 7.3 memfd.
+#
+# Physical Android11/G582 (2026-10-20) AVC:
+# denied { write } for name="memfd:MessageQueue" dev=tmpfs
+# scontext=u:r:mediacodec:s0 tcontext=u:object_r:tmpfs:s0 tclass=file
+# followed by ftruncate(MessageQueue, 200704) EACCES, FMQ mmap EBADF,
+# and repeated SIGABRT at libfmq::check() in c2.v4l2.avc.encoder.
+#
+# Label ONLY memfd/tmpfs files created by the mediacodec domain.
+# This is the same Android 11 pattern as existing mediaswcodec_tmpfs.
+# Do not allow writing arbitrary tmpfs or disable SELinux.
+type mediacodec_tmpfs, file_type, mlstrustedobject;
+tmpfs_domain(mediacodec)

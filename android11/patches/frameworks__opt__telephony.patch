@@ -1,0 +1,525 @@
+diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
+index 3ef440f133b064e83842c2598b33ae8a4fef7c44..7f97559690fcbfb6e3a01ab5caa1c55ac2ec191a 100644
+--- a/src/java/com/android/internal/telephony/RIL.java
++++ b/src/java/com/android/internal/telephony/RIL.java
+@@ -807,6 +807,19 @@ public class RIL extends BaseCommands implements CommandsInterface {
+                 radioProxy.supplyIccPinForApp(rr.mSerial,
+                         convertNullToEmptyString(pin),
+                         convertNullToEmptyString(aid));
++                if ("lt013g".equals(android.os.Build.DEVICE)
++                        && mRadioVersion.less(RADIO_HAL_VERSION_1_2)) {
++                    final int serial = rr.mSerial;
++                    mRilHandler.postDelayed(() -> {
++                        synchronized (mRequestList) {
++                            RILRequest pending = mRequestList.get(serial);
++                            if (pending == null || pending.mRequest != RIL_REQUEST_ENTER_SIM_PIN) {
++                                return;
++                            }
++                        }
++                        getIccCardStatus(null);
++                    }, 12_000L);
++                }
+             } catch (RemoteException | RuntimeException e) {
+                 handleRadioProxyExceptionForRR(rr, "supplyIccPinForApp", e);
+             }
+@@ -4973,6 +4986,20 @@ public class RIL extends BaseCommands implements CommandsInterface {
+             Message result) {
+         IRadio radioProxy = getRadioProxy(result);
+         if (radioProxy != null) {
++            // SM-T311 and other legacy radios only expose HAL 1.0/1.1. An
++            // RILRequest must NOT be allocated when this call is unsupported:
++            // the old branch logged "ignored" after obtainRequest(), leaving
++            // a request/wakelock outstanding until its 60-second timeout.
++            if (mRadioVersion.less(RADIO_HAL_VERSION_1_2)) {
++                riljLog("setLinkCapacityReportingCriteria: unsupported for radio HAL "
++                        + mRadioVersion);
++                if (result != null) {
++                    AsyncResult.forMessage(result, null,
++                            CommandException.fromRilErrno(REQUEST_NOT_SUPPORTED));
++                    result.sendToTarget();
++                }
++                return;
++            }
+             RILRequest rr = obtainRequest(RIL_REQUEST_SET_LINK_CAPACITY_REPORTING_CRITERIA, result,
+                     mRILDefaultWorkSource);
+             if (RILJ_LOGD) {
+@@ -5436,6 +5463,83 @@ public class RIL extends BaseCommands implements CommandsInterface {
+         }
+     }
+ 
++    /**
++     * The legacy XMM6262 radio on SM-T311 sometimes never returns its
++     * ENTER_SIM_PIN response. However, GET_SIM_STATUS already reports a
++     * PRESENT UICC with the GSM application READY and PIN1 verified ~5 s
++     * after the user's real PIN. Resolve only that in-flight request (once),
++     * and only on that *fresh* positive HAL status. Do not send or retry PIN.
++     */
++    void completeLt013gPinFromVerifiedStatus(
++            com.android.internal.telephony.uicc.IccCardStatus cardStatus) {
++        if (!"lt013g".equals(android.os.Build.DEVICE)
++                || !mRadioVersion.less(RADIO_HAL_VERSION_1_2)
++                || cardStatus == null
++                || cardStatus.mCardState
++                    != com.android.internal.telephony.uicc.IccCardStatus.CardState
++                            .CARDSTATE_PRESENT
++                || cardStatus.mApplications == null) {
++            return;
++        }
++
++        int index = cardStatus.mGsmUmtsSubscriptionAppIndex;
++        if (index < 0 || index >= cardStatus.mApplications.length) return;
++        com.android.internal.telephony.uicc.IccCardApplicationStatus app =
++                cardStatus.mApplications[index];
++        if (app == null
++                || app.app_state
++                    != com.android.internal.telephony.uicc.IccCardApplicationStatus.AppState
++                            .APPSTATE_READY
++                || app.pin1
++                    != com.android.internal.telephony.uicc.IccCardStatus.PinState
++                            .PINSTATE_ENABLED_VERIFIED) {
++            return;
++        }
++
++        // Bounded to the immediate PIN submission, not a stale READY from
++        // an earlier card session. No PUK, PIN2 or facility-lock operations.
++        RILRequest completed = null;
++        int matchedIndex = -1;
++        final long now = SystemClock.elapsedRealtime();
++        synchronized (mRequestList) {
++            for (int i = 0; i < mRequestList.size(); i++) {
++                RILRequest request = mRequestList.valueAt(i);
++                if (request.mRequest == RIL_REQUEST_ENTER_SIM_PIN
++                        && now - request.mStartTimeMs >= 0
++                        && now - request.mStartTimeMs < 30_000L) {
++                    if (completed != null) {
++                        // Two concurrent PIN requests are ambiguous. Let the
++                        // native RIL deliver their individual responses;
++                        // never synthesize success for an arbitrary serial.
++                        return;
++                    }
++                    completed = request;
++                    matchedIndex = i;
++                }
++            }
++            if (matchedIndex >= 0) {
++                mRequestList.removeAt(matchedIndex);
++            }
++        }
++        if (completed == null) return;
++
++        riljLog(completed.serialString()
++                + "< ENTER_SIM_PIN: verified by fresh UICC READY (XMM6262)");
++        addToRilHistogram(completed);
++        if (completed.mResult != null) {
++            AsyncResult.forMessage(completed.mResult, new int[] {-1}, null);
++            completed.mResult.sendToTarget();
++        }
++        android.hardware.radio.V1_0.RadioResponseInfo info =
++                new android.hardware.radio.V1_0.RadioResponseInfo();
++        info.serial = completed.mSerial;
++        info.type = android.hardware.radio.V1_0.RadioResponseType.SOLICITED;
++        info.error = android.hardware.radio.V1_0.RadioError.NONE;
++        processResponseCleanUp(completed, info, new int[] {-1});
++        // If the native RIL later sends GENERIC_FAILURE for this serial,
++        // processResponse() ignores it as an already-completed request.
++    }
++
+     /**
+      * This is a helper function to be called when a RadioResponse callback is called.
+      * It takes care of acks, wakelocks, and finds and returns RILRequest corresponding to the
+diff --git a/src/java/com/android/internal/telephony/RadioResponse.java b/src/java/com/android/internal/telephony/RadioResponse.java
+index 0c9a215f5ff45c33d62ccba41a59b03fa1a313ca..7215d1e1781b1f3b51dafcd0a0d85a0216468361 100644
+--- a/src/java/com/android/internal/telephony/RadioResponse.java
++++ b/src/java/com/android/internal/telephony/RadioResponse.java
+@@ -1806,6 +1806,9 @@ public class RadioResponse extends IRadioResponse.Stub {
+                 sendMessageResponse(rr.mResult, iccCardStatus);
+             }
+             mRil.processResponseDone(rr, responseInfo, iccCardStatus);
++            if (responseInfo.error == RadioError.NONE) {
++                mRil.completeLt013gPinFromVerifiedStatus(iccCardStatus);
++            }
+         }
+     }
+ 
+diff --git a/src/java/com/android/internal/telephony/dataconnection/CarrierApnPriority.java b/src/java/com/android/internal/telephony/dataconnection/CarrierApnPriority.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..22eaee316e38554debfa7b9844e81d7e6083aef8
+--- /dev/null
++++ b/src/java/com/android/internal/telephony/dataconnection/CarrierApnPriority.java
+@@ -0,0 +1,65 @@
++/*
++ * Copyright (C) 2026 SM-T311 Android 11 project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ */
++package com.android.internal.telephony.dataconnection;
++
++import java.text.Normalizer;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Locale;
++import java.util.function.Function;
++
++/**
++ * Locale-independent and operator-independent APN ordering hint.
++ *
++ * Only moves APNs already admitted by the Android MCC/MNC, MVNO, APN-type,
++ * network-type, and APN-set gates. Does not select an APN by numerical MCC/MNC
++ * alone, does not replace a user's preferred APN, does not delete fallback
++ * APNs and does not change the SIM or radio firmware.
++ */
++final class CarrierApnPriority {
++    private CarrierApnPriority() {}
++
++    private static String fold(String text) {
++        return text == null ? "" : Normalizer.normalize(text.trim(), Normalizer.Form.NFKC)
++                .toLowerCase(Locale.ROOT);
++    }
++
++    static boolean matchesBrand(String entryName, String simSpn) {
++        final String spn = fold(simSpn);
++        final String name = fold(entryName);
++        if (spn.length() < 2 || name.length() < spn.length() || !name.startsWith(spn)) {
++            return false;
++        }
++        // Do not match "Claro" against a different provider "ClaroNet";
++        // allow suffixes such as "Claro Internet", "Plus-MMS", "O2 (data)".
++        if (name.length() == spn.length()) return true;
++        final char boundary = name.charAt(spn.length());
++        return Character.isWhitespace(boundary) || boundary == '-' || boundary == '('
++                || boundary == '[' || boundary == '/' || boundary == ':';
++    }
++
++    static <T> boolean moveBrandMatchesFirst(List<T> apns, String simSpn,
++            Function<T, String> entryName) {
++        if (apns == null || apns.size() < 2 || fold(simSpn).length() < 2) {
++            return false;
++        }
++        final ArrayList<T> matched = new ArrayList<>();
++        final ArrayList<T> other = new ArrayList<>();
++        for (T apn : apns) {
++            (matchesBrand(entryName.apply(apn), simSpn) ? matched : other).add(apn);
++        }
++        if (matched.isEmpty() || other.isEmpty()) return false;
++        // Stable partition: preserve the relative order and stock failovers
++        // inside both groups, never persist an APN preference before success.
++        apns.clear();
++        apns.addAll(matched);
++        apns.addAll(other);
++        return true;
++    }
++}
+diff --git a/src/java/com/android/internal/telephony/dataconnection/CarrierConfigReadinessRetry.java b/src/java/com/android/internal/telephony/dataconnection/CarrierConfigReadinessRetry.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf2f1eec105a55dcf367fc704644b2f9e495dbf4
+--- /dev/null
++++ b/src/java/com/android/internal/telephony/dataconnection/CarrierConfigReadinessRetry.java
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (C) 2026 SM-T311 Android 11 project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ */
++package com.android.internal.telephony.dataconnection;
++
++/**
++ * Fail-bounded carrier config event reconciliation for every MCC/MNC.
++ * Never marks a carrier identified and never synthesizes APNs or RIL replies.
++ * The loader's real applied flag is always checked by DcTracker first.
++ */
++final class CarrierConfigReadinessRetry {
++    static final long RETRY_DELAY_MS = 2000L;
++    static final int MAX_ATTEMPTS = 15;
++
++    private CarrierConfigReadinessRetry() {}
++
++    static boolean shouldSchedule(boolean simLoaded, boolean configReady, int attempts) {
++        return simLoaded && !configReady && attempts >= 0 && attempts < MAX_ATTEMPTS;
++    }
++}
+diff --git a/src/java/com/android/internal/telephony/dataconnection/DataConnection.java b/src/java/com/android/internal/telephony/dataconnection/DataConnection.java
+index 1e20197532af99f5c2e0f48a81bb8a1de858b92c..2ed69cf4bd58bd449e3700551e1da879f53416eb 100644
+--- a/src/java/com/android/internal/telephony/dataconnection/DataConnection.java
++++ b/src/java/com/android/internal/telephony/dataconnection/DataConnection.java
+@@ -980,6 +980,23 @@ public class DataConnection extends StateMachine {
+                 log("onSetupConnectionCompleted stale cp.tag=" + cp.mTag + ", mtag=" + mTag);
+             }
+             result = SetupResult.ERROR_STALE;
++        } else if (resultCode == DataServiceCallback.RESULT_ERROR_ILLEGAL_STATE
++                && "lt013g".equals(android.os.Build.DEVICE)
++                && response != null
++                && response.getCause() == DataFailCause.NAS_SIGNALLING
++                && mPhone.getServiceState() != null
++                && mPhone.getServiceState().getDataRegState()
++                        == ServiceState.STATE_IN_SERVICE) {
++            // The XMM6262 legacy RIL can return a GENERIC_FAILURE plus a
++            // precise PDP NAS_SIGNALLING cause while the radio is registered
++            // and online. CellularDataService maps GENERIC_FAILURE to
++            // RESULT_ERROR_ILLEGAL_STATE, which would otherwise become
++            // RADIO_NOT_AVAILABLE (a permanent APN failure). Preserve the
++            // modem cause instead, allowing Android's normal bounded APN
++            // retry handling. Never restart/reset the radio here.
++            log("lt013g: preserving transient NAS_SIGNALLING PDP failure");
++            result = SetupResult.ERROR_DATA_SERVICE_SPECIFIC_ERROR;
++            result.mFailCause = DataFailCause.NAS_SIGNALLING;
+         } else if (resultCode == DataServiceCallback.RESULT_ERROR_ILLEGAL_STATE) {
+             result = SetupResult.ERROR_RADIO_NOT_AVAILABLE;
+             result.mFailCause = DataFailCause.RADIO_NOT_AVAILABLE;
+@@ -1493,6 +1510,36 @@ public class DataConnection extends StateMachine {
+         return InetAddresses.isNumericAddress(address);
+     }
+ 
++    /*
++     * SM-T311's stock XMM6262 RIL reports a /32 cellular address and a
++     * distinct nonzero IPv4 PDP gateway. A /32 gives netd no connected route
++     * to that gateway, so networkAddRouteParcel(default via gateway) fails
++     * with ENETUNREACH (observed on real Android11 G379).
++     *
++     * Add ONLY a directly-connected host route to that exact gateway. AOSP
++     * ConnectivityService installs non-gateway routes before gateway routes.
++     * No global /32 rewrite, no APN/radio restart, no route on other models.
++     */
++    private static void addLt013gPdpGatewayHostRoute(
++            DataCallResponse response, LinkProperties linkProperties,
++            InetAddress gateway) {
++        if (!"lt013g".equals(android.os.Build.DEVICE)
++                || !"rmnet1".equals(response.getInterfaceName())
++                || !(gateway instanceof java.net.Inet4Address)
++                || gateway.isAnyLocalAddress()
++                || response.getAddresses().size() != 1) {
++            return;
++        }
++        LinkAddress pdp = response.getAddresses().get(0);
++        if (!(pdp.getAddress() instanceof java.net.Inet4Address)
++                || pdp.getPrefixLength() != 32
++                || pdp.getAddress().equals(gateway)) {
++            return;
++        }
++        linkProperties.addRoute(
++                RouteInfo.makeHostRoute(gateway, response.getInterfaceName()));
++    }
++
+     private SetupResult setLinkProperties(DataCallResponse response,
+             LinkProperties linkProperties) {
+         // Check if system property dns usable
+@@ -1586,6 +1633,9 @@ public class DataConnection extends StateMachine {
+                         }
+                         interfaceMtu = mtu;
+                     }
++                    // Ensure the /32 XMM6262 PDP next hop is reachable
++                    // before ConnectivityService installs its default route.
++                    addLt013gPdpGatewayHostRoute(response, linkProperties, gateway);
+                     // Allow 0.0.0.0 or :: as a gateway;
+                     // this indicates a point-to-point interface.
+                     linkProperties.addRoute(new RouteInfo(null, gateway, null,
+diff --git a/src/java/com/android/internal/telephony/dataconnection/DcTracker.java b/src/java/com/android/internal/telephony/dataconnection/DcTracker.java
+index 8b3b608f7452a251886fd2fe0255b72bde709585..06675a2494438a1c92323bb041a2fd1bdbf1eb0c 100644
+--- a/src/java/com/android/internal/telephony/dataconnection/DcTracker.java
++++ b/src/java/com/android/internal/telephony/dataconnection/DcTracker.java
+@@ -105,6 +105,7 @@ import com.android.internal.telephony.Phone;
+ import com.android.internal.telephony.PhoneConstants;
+ import com.android.internal.telephony.PhoneFactory;
+ import com.android.internal.telephony.PhoneSwitcher;
++import com.android.internal.telephony.uicc.IccRecords;
+ import com.android.internal.telephony.RILConstants;
+ import com.android.internal.telephony.SettingsObserver;
+ import com.android.internal.telephony.SubscriptionInfoUpdater;
+@@ -624,6 +625,8 @@ public class DcTracker extends Handler {
+             new ConcurrentHashMap<>();
+ 
+     private boolean mConfigReady = false;
++    // Generic bounded retry for CarrierConfig broadcasts racing SIM_LOADED.
++    private int mCarrierConfigRetryCount = 0;
+ 
+     /**
+      * Handles changes to the APN db.
+@@ -2397,14 +2400,28 @@ public class DcTracker extends Handler {
+         return false;
+     }
+ 
++    private void scheduleCarrierConfigReadinessRetry() {
++        if (CarrierConfigReadinessRetry.shouldSchedule(
++                mSimState == TelephonyManager.SIM_STATE_LOADED,
++                mConfigReady, mCarrierConfigRetryCount)
++                && !hasMessages(DctConstants.EVENT_CARRIER_CONFIG_CHANGED)) {
++            ++mCarrierConfigRetryCount;
++            sendEmptyMessageDelayed(DctConstants.EVENT_CARRIER_CONFIG_CHANGED,
++                    CarrierConfigReadinessRetry.RETRY_DELAY_MS);
++        }
++    }
++
+     private void onCarrierConfigChanged() {
+         if (DBG) log("onCarrierConfigChanged");
+ 
+         if (!isCarrierConfigApplied()) {
+             log("onCarrierConfigChanged: Carrier config is not ready yet.");
++            scheduleCarrierConfigReadinessRetry();
+             return;
+         }
+ 
++        mCarrierConfigRetryCount = 0;
++        removeMessages(DctConstants.EVENT_CARRIER_CONFIG_CHANGED);
+         readConfiguration();
+ 
+         if (mSimState == TelephonyManager.SIM_STATE_LOADED) {
+@@ -2422,6 +2439,8 @@ public class DcTracker extends Handler {
+     private void onSimAbsent() {
+         if (DBG) log("onSimAbsent");
+ 
++        mCarrierConfigRetryCount = 0;
++        removeMessages(DctConstants.EVENT_CARRIER_CONFIG_CHANGED);
+         mConfigReady = false;
+         cleanUpAllConnectionsInternal(true, Phone.REASON_SIM_NOT_READY);
+         mAllApnSettings.clear();
+@@ -2450,6 +2469,11 @@ public class DcTracker extends Handler {
+                 setupDataOnAllConnectableApns(Phone.REASON_SIM_LOADED, RetryFailures.ALWAYS);
+             } else {
+                 log("onSimStateUpdated: config not ready yet.");
++                // On some legacy radio startups SIM_LOADED precedes the
++                // default CarrierConfigLoader's actual applied/broadcast event.
++                // A delayed recheck heals a missed broadcast without relying
++                // on any operator-specific MCC/MNC, APN or SIM credential.
++                scheduleCarrierConfigReadinessRetry();
+             }
+         }
+     }
+@@ -3523,6 +3547,21 @@ public class DcTracker extends Handler {
+             }
+         }
+ 
++        // Network operators may share the same MCC/MNC with several MVNOs.
++        // Without an explicit preference, stock Android takes their DB order,
++        // sometimes selecting another brand's APN (e.g. GaduAIR on Plus SIM).
++        // Prefer matching the SIM-provided SPN *among already valid entries*,
++        // keeping all other APNs as fallbacks, independent of locale/country.
++        // Never override an explicit user-selected APN or write APN preferences.
++        if (mPreferredApn == null) {
++            final IccRecords simRecords = mPhone.getIccRecords();
++            final String simSpn = simRecords == null ? null
++                    : simRecords.getServiceProviderName();
++            if (CarrierApnPriority.moveBrandMatchesFirst(apnList, simSpn,
++                    ApnSetting::getEntryName)) {
++                log("buildWaitingApns: prioritized SIM brand without dropping failovers");
++            }
++        }
+         if (DBG) log("buildWaitingApns: " + apnList.size() + " APNs in the list: " + apnList);
+         return apnList;
+     }
+diff --git a/src/java/com/android/internal/telephony/uicc/SIMRecords.java b/src/java/com/android/internal/telephony/uicc/SIMRecords.java
+index 69bba2e1a70d1a355aa39b9bb3846d807ac83418..2bed407dab7f5b08e7392ef29e0b635d9154296b 100644
+--- a/src/java/com/android/internal/telephony/uicc/SIMRecords.java
++++ b/src/java/com/android/internal/telephony/uicc/SIMRecords.java
+@@ -179,6 +179,11 @@ public class SIMRecords extends IccRecords {
+     private static final int EVENT_GET_FPLMN_DONE = 41 + SIM_RECORD_EVENT_BASE;
+     private static final int EVENT_GET_FPLMN_SIZE_DONE = 42 + SIM_RECORD_EVENT_BASE;
+     private static final int EVENT_SET_FPLMN_DONE = 43 + SIM_RECORD_EVENT_BASE;
++    private static final int EVENT_LT013G_RETRY_GET_IMSI = 44 + SIM_RECORD_EVENT_BASE;
++    private static final int LT013G_IMSI_MAX_RETRIES = 2;
++    private int mLt013gImsiRetries;
++    // One mRecordsToLoad slot is owned by a scheduled (not yet fired) retry.
++    private boolean mLt013gImsiRetryScheduled;
+     // ***** Constructor
+ 
+     public SIMRecords(UiccCardApplication app, Context c, CommandsInterface ci) {
+@@ -217,6 +222,17 @@ public class SIMRecords extends IccRecords {
+ 
+     protected void resetRecords() {
+         mImsi = null;
++        // A scheduled retry owns one pending record. Cancel BOTH its message
++        // and its reservation if the SIM app is reset/removed before it runs.
++        // An already dispatched GET_IMSI remains balanced by its own response.
++        removeMessages(EVENT_LT013G_RETRY_GET_IMSI);
++        if (mLt013gImsiRetryScheduled) {
++            mLt013gImsiRetryScheduled = false;
++            if (mRecordsToLoad > 0) {
++                --mRecordsToLoad;
++            }
++        }
++        mLt013gImsiRetries = 0;
+         mMsisdn = null;
+         mVoiceMailNum = null;
+         mMncLength = UNINITIALIZED;
+@@ -633,12 +649,75 @@ public class SIMRecords extends IccRecords {
+                     isRecordLoadResponse = true;
+                     ar = (AsyncResult) msg.obj;
+ 
+-                    if (ar.exception != null) {
+-                        loge("Exception querying IMSI, Exception:" + ar.exception);
++                    if (ar.exception != null || !(ar.result instanceof String)
++                            || TextUtils.isEmpty((String) ar.result)) {
++                        loge("Exception querying IMSI (result unavailable)");
++                        if ("lt013g".equals(android.os.Build.DEVICE)
++                                && mRecordsRequested
++                                && !mLt013gImsiRetryScheduled
++                                && mLt013gImsiRetries < LT013G_IMSI_MAX_RETRIES) {
++                            // Reserve one outstanding record before the finally-block
++                            // decrements the failed request. This prevents an early
++                            // SIM_LOADED notification with missing operator/APN.
++                            final int nextRetry = mLt013gImsiRetries + 1;
++                            final long delayMs = 10_000L * nextRetry;
++                            if (sendEmptyMessageDelayed(EVENT_LT013G_RETRY_GET_IMSI,
++                                    delayMs)) {
++                                ++mRecordsToLoad;
++                                mLt013gImsiRetries = nextRetry;
++                                mLt013gImsiRetryScheduled = true;
++                                log("lt013g: retrying IMSI read (attempt "
++                                        + mLt013gImsiRetries + "/"
++                                        + LT013G_IMSI_MAX_RETRIES + ") in " + delayMs + " ms");
++                            } else {
++                                loge("lt013g: could not schedule IMSI retry");
++                            }
++                        }
+                         break;
+                     }
+ 
+                     setImsi((String) ar.result);
++                    if (mLt013gImsiRetryScheduled) {
++                        // A valid IMSI from another in-flight request wins.
++                        // Cancel the timer and drop its extra reservation now,
++                        // rather than waiting 10-20s to fire SIM_LOADED.
++                        removeMessages(EVENT_LT013G_RETRY_GET_IMSI);
++                        mLt013gImsiRetryScheduled = false;
++                        if (mRecordsToLoad > 0) {
++                            --mRecordsToLoad;
++                        }
++                    }
++                    if (mLt013gImsiRetries > 0) {
++                        log("lt013g: IMSI read recovered without logging subscriber data");
++                    }
++                    break;
++
++                case EVENT_LT013G_RETRY_GET_IMSI:
++                    // A reset/dispose may have cancelled and balanced this
++                    // reservation. Never consume the count a second time.
++                    if (!mLt013gImsiRetryScheduled) break;
++                    mLt013gImsiRetryScheduled = false;
++                    // Read-only subscriber identity request; never submit PIN,
++                    // toggle radio, restart modem or alter any SIM file.
++                    if (mRecordsRequested && getIMSI() == null) {
++                        try {
++                            mCi.getIMSIForApp(mParentApp.getAid(),
++                                    obtainMessage(EVENT_GET_IMSI_DONE));
++                        } catch (RuntimeException exc) {
++                            // No async reply will follow if dispatch throws.
++                            // Release our reserved record before the outer
++                            // handler catches/logs the failure.
++                            onRecordLoaded();
++                            throw exc;
++                        }
++                    } else if (mRecordsRequested) {
++                        // Another request supplied IMSI first. Release our
++                        // reservation and let SIM_LOADED fire when complete.
++                        onRecordLoaded();
++                    } else if (mRecordsToLoad > 0) {
++                        // Stale event from an invalidated card session.
++                        --mRecordsToLoad;
++                    }
+                     break;
+ 
+                 case EVENT_GET_MBI_DONE:

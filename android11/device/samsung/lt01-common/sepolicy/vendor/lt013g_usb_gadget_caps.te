@@ -1,0 +1,21 @@
+# Physical G298 boot AVC: ConfigFS/FunctionFS traversal by legacy
+# USB gadget HAL requires dac_read_search. Android 11's platform
+# neverallow excludes all but the existing audited SM-T311 DAC exception.
+# Reuse the device exception only for this HAL, and grant only the
+# single required capability (not dac_override).
+typeattribute hal_usb_gadget_default lt013g_radio_dac_override_allowed;
+allow hal_usb_gadget_default self:capability dac_read_search;
+
+allow hal_usb_gadget_default configfs:lnk_file getattr;
+allow hal_usb_gadget_default functionfs:dir { watch watch_reads };
+
+# G468: USB gadget HAL can only inspect the SM-T311 USB state and submit
+# guarded, kernel-verified OTG arm/stop requests. Not raw PMIC registers.
+allow hal_usb_gadget_default sysfs_lt013g_otg_diag:file r_file_perms;
+allow hal_usb_gadget_default sysfs_lt013g_otg_control:file { getattr open write };
+# G731: control is read before optional 'on' write; previously Android
+# HAL got AVC {read} on generic sysfs and poisoned OTG with STOP reason6.
+# Tight per-file genfs labels above; no global sysfs allowances.
+allow hal_usb_gadget_default sysfs_lt013g_otg_control:file read;
+
+allow hal_usb_gadget_default sysfs_lt013g_modem_state:file r_file_perms;

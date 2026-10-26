@@ -1,0 +1,9 @@
+# G1141: The previous sys.boot_completed/USB bootstrap action wrote
+# "change" to /sys/class/udc/12480000.usb/uevent.
+# Physically measured at boot: init -> sysfs:file write DENIED by SELinux
+# Enforcing; gadget was already configured and ADB worked. Thus the action
+# never performed a kernel uevent and was a harmless failed operation.
+# Keep the existing verified vendor.smt311.usb.bootstrap logic in its own
+# source service; do not grant broad init sysfs write permissions, force
+# reenumeration, or modify ADB/MTP/OTG/SELinux behavior to silence a log.
+# Deliberately no init actions in this file.

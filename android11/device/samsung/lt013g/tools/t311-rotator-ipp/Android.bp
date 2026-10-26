@@ -1,0 +1,28 @@
+cc_binary {
+    name: "t311_rotator_ipp_probe_offline",
+    vendor: true,
+    srcs: ["main.c"],
+    shared_libs: ["libdrm"],
+    include_dirs: ["external/libdrm"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c11", "-O2"],
+}
+
+cc_binary {
+    name: "t311_rotator_ipp_dma_offline",
+    vendor: true,
+    srcs: ["rotate.c"],
+    shared_libs: ["libdrm"],
+    static_libs: ["libexynos_g2d_t311_offline"],
+    include_dirs: ["external/libdrm", "external/libdrm/exynos"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c11", "-O2"],
+}
+
+cc_binary {
+    name: "t311_rotator_nv12_offline",
+    vendor: true,
+    srcs: ["rotate_nv12.c"],
+    shared_libs: ["libdrm"],
+    static_libs: ["libexynos_g2d_t311_offline"],
+    include_dirs: ["external/libdrm", "external/libdrm/exynos"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c11", "-O2"],
+}

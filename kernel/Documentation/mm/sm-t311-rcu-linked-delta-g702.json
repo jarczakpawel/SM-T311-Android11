@@ -1,0 +1,171 @@
+{
+  "stage": "G702",
+  "hardware": "Samsung SM-T311 Cortex-A9 ARMv7",
+  "comparison": "G686 full ARM32 EXP vs G700 full ARM32 RCU OFF DEBUG_FS",
+  "build_hashes": {
+    "experiment_vmlinux": "6674571cbe202e69692a9b9279e6eb2b629b108d390719fb8296fd2e79f44ed4",
+    "release_vmlinux": "027fa9b9cce7faf3b67b35a2bc256f0f34f078b47b75be0e3e5d42caa353715f",
+    "release_boot": "aec9655acc727ab01d0bde3711414f9606c58c5fdcafb6ae5c52a2d3346edc7f"
+  },
+  "global_symbols": 26742,
+  "sized_global_symbols": 26547,
+  "symbols_without_explicit_size": 195,
+  "source_fuse_diff": "",
+  "changed_symbol_sizes": [
+    {
+      "name": "__alloc_frozen_pages_noprof",
+      "type": "T",
+      "experiment_bytes": 5764,
+      "release_bytes": 5236
+    },
+    {
+      "name": "alloc_contig_frozen_range_noprof",
+      "type": "T",
+      "experiment_bytes": 2056,
+      "release_bytes": 2052
+    },
+    {
+      "name": "filemap_read",
+      "type": "T",
+      "experiment_bytes": 1256,
+      "release_bytes": 1236
+    },
+    {
+      "name": "filemap_read_accessed",
+      "type": "T",
+      "experiment_bytes": 180,
+      "release_bytes": 108
+    },
+    {
+      "name": "filemap_read_rcu",
+      "type": "T",
+      "experiment_bytes": 1640,
+      "release_bytes": 8
+    },
+    {
+      "name": "free_pages_prepare",
+      "type": "T",
+      "experiment_bytes": 1284,
+      "release_bytes": 1184
+    },
+    {
+      "name": "free_unref_folios",
+      "type": "T",
+      "experiment_bytes": 2112,
+      "release_bytes": 2036
+    },
+    {
+      "name": "fuse_conn_init",
+      "type": "T",
+      "experiment_bytes": 620,
+      "release_bytes": 596
+    },
+    {
+      "name": "fuse_copy_folio",
+      "type": "T",
+      "experiment_bytes": 1944,
+      "release_bytes": 1928
+    },
+    {
+      "name": "fuse_ctl_add_conn",
+      "type": "T",
+      "experiment_bytes": 460,
+      "release_bytes": 420
+    },
+    {
+      "name": "fuse_direct_io",
+      "type": "T",
+      "experiment_bytes": 2340,
+      "release_bytes": 2344
+    },
+    {
+      "name": "fuse_file_io_open",
+      "type": "T",
+      "experiment_bytes": 432,
+      "release_bytes": 384
+    },
+    {
+      "name": "kallsyms_names",
+      "type": "D",
+      "experiment_bytes": 602070,
+      "release_bytes": 601928
+    },
+    {
+      "name": "kallsyms_offsets",
+      "type": "D",
+      "experiment_bytes": 193416,
+      "release_bytes": 193368
+    },
+    {
+      "name": "mmap_region",
+      "type": "T",
+      "experiment_bytes": 400,
+      "release_bytes": 356
+    },
+    {
+      "name": "pageflag_names",
+      "type": "D",
+      "experiment_bytes": 184,
+      "release_bytes": 176
+    },
+    {
+      "name": "rcu_free_sync",
+      "type": "T",
+      "experiment_bytes": 96,
+      "release_bytes": 4
+    },
+    {
+      "name": "setup_per_cpu_pageset",
+      "type": "T",
+      "experiment_bytes": 296,
+      "release_bytes": 112
+    }
+  ],
+  "fuse_changed_sizes": [
+    {
+      "name": "fuse_conn_init",
+      "type": "T",
+      "experiment_bytes": 620,
+      "release_bytes": 596
+    },
+    {
+      "name": "fuse_copy_folio",
+      "type": "T",
+      "experiment_bytes": 1944,
+      "release_bytes": 1928
+    },
+    {
+      "name": "fuse_ctl_add_conn",
+      "type": "T",
+      "experiment_bytes": 460,
+      "release_bytes": 420
+    },
+    {
+      "name": "fuse_direct_io",
+      "type": "T",
+      "experiment_bytes": 2340,
+      "release_bytes": 2344
+    },
+    {
+      "name": "fuse_file_io_open",
+      "type": "T",
+      "experiment_bytes": 432,
+      "release_bytes": 384
+    }
+  ],
+  "checks": {
+    "same_26742_global_defined_names": true,
+    "all_global_symbol_types_identical": true,
+    "same_26547_sized_global_symbols": true,
+    "exactly_18_known_size_deltas": true,
+    "five_FUSE_functions_differ_in_linked_code_size": true,
+    "fs_fuse_source_unchanged_since_G650": true,
+    "G700_host_image_unchanged": true,
+    "G700_host_kernel_unchanged": true
+  },
+  "static_name_compatibility_only": true,
+  "full_module_ABI_or_runtime_compatibility_proven": false,
+  "physical_fuse_tested_on_G700": false,
+  "physical_p9_p10_verified": false,
+  "flash_authorized": false
+}

@@ -1,0 +1,31 @@
+C SMT311+NoRCUGraceLastFree
+
+(*
+ * G658 NEGATIVE CONTROL: missing RCU grace wait before reusing old folio
+ * memory after slot removal. This is NOT the production G650 free path.
+ *)
+
+{
+x=1;
+y=x;
+z=2;
+}
+
+P0(int *x, int *z, int **y)
+{
+	int *r0;
+	int r1;
+
+	rcu_read_lock();
+	r0 = rcu_dereference(*y);
+	r1 = READ_ONCE(*r0);
+	rcu_read_unlock();
+}
+
+P1(int *x, int *z, int **y)
+{
+	rcu_assign_pointer(*y, z);
+	WRITE_ONCE(*x, 2);
+}
+
+exists (0:r0=x /\ 0:r1=2)

@@ -1,0 +1,131 @@
+{
+  "stage": "G711",
+  "checks": {
+    "G710_prior_22_gates_pass": true,
+    "MIGRATION_compiled_both_profiles": true,
+    "preflight_refcount_gate_present": true,
+    "ref_freeze_precedes_XArray_replacement": true,
+    "XArray_replaced_before_old_ref_unfreeze": true,
+    "migration_flag_copy_invoked": true,
+    "ordinary_flags_copied": true,
+    "rcu_marker_not_explicitly_copied": true,
+    "migration_old_source_put": true,
+    "migration_source_mapping_cleared": true,
+    "allocator_only_defers_tagged": true,
+    "allocator_unmarked_normal_free": true,
+    "XArray_rcu_raw_read_test_and_reload": true,
+    "normal_refcounted_fallback": true,
+    "large_folio_split_clones_flag": true,
+    "activation_still_failclosed": true,
+    "release_G700_exp_disabled": true,
+    "post_migration_untagged_destination_ABA_in_model": true,
+    "retained_tag_with_grace_no_ABA_in_model": true,
+    "reference_backed_path_no_ABA_in_model": true,
+    "invalid_tag_without_grace_allows_ABA": true,
+    "all_252_order_preserving_interleavings_enumerated": true,
+    "all_source_mutation_guards_pass": true,
+    "pinned_G700_full_BOOT_unmodified": true
+  },
+  "source_mutations_detected": {
+    "remove_migration_ref_freeze": true,
+    "skip_migration_XArray_replace": true,
+    "omit_migration_flag_copy": true,
+    "remove_source_put": true,
+    "remove_allocator_defer": true,
+    "permit_unsafe_activation": true
+  },
+  "models": {
+    "as_built_destination_untagged": {
+      "combinations": 252,
+      "complete": 252,
+      "accepted_ABA": 1,
+      "raw_mismatch_or_freed": 20,
+      "copied": 1,
+      "witness": [
+        "R.enter",
+        "R.load",
+        "W.remove",
+        "W.retire",
+        "W.reuse",
+        "W.insert",
+        "W.mark",
+        "R.flag",
+        "R.reload_copy",
+        "R.exit"
+      ],
+      "raw_witness": [
+        "R.enter",
+        "R.load",
+        "W.remove",
+        "W.retire",
+        "R.flag",
+        "R.reload_copy",
+        "R.exit",
+        "W.reuse",
+        "W.insert",
+        "W.mark"
+      ]
+    },
+    "hypothetical_destination_tagged": {
+      "combinations": 252,
+      "complete": 42,
+      "accepted_ABA": 0,
+      "raw_mismatch_or_freed": 0,
+      "copied": 3,
+      "witness": null,
+      "raw_witness": null
+    },
+    "normal_reference_counted": {
+      "combinations": 252,
+      "complete": 206,
+      "accepted_ABA": 0,
+      "raw_mismatch_or_freed": 0,
+      "copied": 3,
+      "witness": null,
+      "raw_witness": null
+    },
+    "hypothetical_tag_without_grace": {
+      "combinations": 252,
+      "complete": 252,
+      "accepted_ABA": 10,
+      "raw_mismatch_or_freed": 10,
+      "copied": 16,
+      "witness": [
+        "R.enter",
+        "R.load",
+        "R.flag",
+        "W.remove",
+        "W.retire",
+        "W.reuse",
+        "W.insert",
+        "R.reload_copy",
+        "R.exit",
+        "W.mark"
+      ],
+      "raw_witness": [
+        "R.enter",
+        "R.load",
+        "W.remove",
+        "W.retire",
+        "W.reuse",
+        "R.flag",
+        "R.reload_copy",
+        "R.exit",
+        "W.insert",
+        "W.mark"
+      ]
+    }
+  },
+  "new_observation": "Tagged migrated source can be followed by an untagged destination; a later lifetime of that destination can exhibit the already-known old-untagged same-PFN ABA abstract race.",
+  "not_proven": [
+    "Correctness of copying PG_rcu_free as a patch",
+    "Linux memory ordering and every filesystem migration callback",
+    "Migration publication ordering to readers",
+    "ARMv7 cache/HighMem/lockdep",
+    "Real-time performance and physical kernel success"
+  ],
+  "safe_decision": "Keep G700 RCU OFF and G692 staged activation fail-closed",
+  "RCU_no_ref_ON_approved": false,
+  "new_runtime_C_changes": false,
+  "physical_flash_performed": false
+}

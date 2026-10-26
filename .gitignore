@@ -1,0 +1,14 @@
+# Binaries are GitHub Release assets, not Git history.
+images/*.zip
+images/*.img
+images/*.bundle
+*.log
+__pycache__/
+*.pyc
+# Proprietary vendor/modem/GNSS and local Mesa ARM32 outputs are NOT public source.
+android11/vendor/proprietary/
+android11/device/samsung/lt013g/radio/prebuilt/
+android11/device/samsung/lt013g/gps-v195/immutable/
+android11/device/samsung/lt013g/gps-v195/legacy-rootfs*.tar
+android11/device/samsung/lt01-common/prebuilt/pjarczak/mesa26-2625/
+android11/device/samsung/lt01-common/mesa26-g816/experimental-g1749/*.so

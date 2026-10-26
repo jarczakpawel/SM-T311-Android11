@@ -1,0 +1,20 @@
+{
+  "stage": "G717",
+  "status": "STAGED_DATA_LOCAL_TMP_ONLY_NOT_INSTALLED",
+  "source": "gps-v195/gps_proxy.c",
+  "module": "gps.default.lt013g.v195",
+  "android_build": "lineage_lt013g-userdebug",
+  "result": "ELF32 ARM",
+  "module_size_bytes": 36032,
+  "candidate_sha256": "c85b7b9e28f6bc8ac35d94d9b56011efde66b7d555dab1e7f7e3a5d90e7215a8",
+  "current_vendor_hal_sha256": "102b7ea8f6536baa6a7db7fc8a946f5d29f49e387519bc7d8580489a2f671df2",
+  "inactive_device_path": "/data/local/tmp/g717-gps-candidate.so",
+  "installed_vendor_hal_path": "/vendor/lib/hw/gps.default.so",
+  "source_early_generation_guard": true,
+  "source_late_generation_guard_preserved": true,
+  "host_compiled_c_cases_passed": 5,
+  "physical_vendor_hal_replaced": false,
+  "gps_services_restarted": false,
+  "GNSS_TTFF_or_FIX_improved_proven": false,
+  "safe_flash_or_install_approved": false
+}

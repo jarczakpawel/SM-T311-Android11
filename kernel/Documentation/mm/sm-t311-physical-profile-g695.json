@@ -1,0 +1,35 @@
+{
+  "stage": "G695",
+  "observation_date": "2026-10-21",
+  "device": "SM-T311",
+  "source": "direct passive ADB: zcat /proc/config.gz; cat /proc/version; uname -r",
+  "physical_kernelrelease": "7.3.0-pjarczak",
+  "physical_uts_version": "#9 SMP PREEMPT Tue Oct 20 18:36:31 CEST 2026",
+  "physical_compiler": "arm-linux-gnueabihf-gcc (Debian 16.2.0-3) 16.2.0",
+  "physical_config_lines": 6794,
+  "physical_uncompressed_config_bytes": 183367,
+  "physical_uncompressed_config_sha256": "ef893db0ed858fc5a03b4ca3d25a820c55bd599dc53f4fafc116de150408d496",
+  "independent_host_experiment_config_sha256": "e6ead0004554ea21cd6d00e10debb66cb751cea16a0b58581090adc0f419a60f",
+  "physical_config_to_host_experiment_diff_count": 3,
+  "physical_config_differences_from_host_experiment": [
+    {"line": 14, "host": "CONFIG_RUSTC_VERSION=109701", "physical": "CONFIG_RUSTC_VERSION=109500"},
+    {"line": 15, "host": "CONFIG_RUSTC_LLVM_VERSION=220108", "physical": "CONFIG_RUSTC_LLVM_VERSION=210108"},
+    {"line": 16, "host": "CONFIG_RUSTC_LLVM_MAJOR_VERSION=22", "physical": "CONFIG_RUSTC_LLVM_MAJOR_VERSION=21"}
+  ],
+  "enabled": [
+    "CONFIG_SM_T311_RCU_HOT4K_EXPERIMENT=y",
+    "CONFIG_PAGE_RCU_FREE=y",
+    "CONFIG_DEBUG_FS=y",
+    "CONFIG_PREEMPT_RCU=y",
+    "CONFIG_ARCH_EXYNOS4=y",
+    "CONFIG_HIGHMEM=y"
+  ],
+  "safe_interpretation": [
+    "Physical BOOT G650 has optional RCU experiment compiled into it; contrary to the standalone release-OFF host profile.",
+    "Compiled-in does not establish that live debugfs runtime static key has been turned ON.",
+    "Runtime key itself could not be read as uid=2000 shell due inaccessible debugfs; RCU vmstat counters zero do not independently prove the key state.",
+    "Reconstructed exact physical config SHA256 is reproducible by replacing the three saved Rust metadata fields in the full host experimental .config.",
+    "Baseline objects built from G650 source in exact byte-identical host experimental config, which differs from installed /proc/config.gz in just those three Rust metadata entries.",
+    "No physical BOOT dumped, no flash, no backup and no reboot."
+  ]
+}

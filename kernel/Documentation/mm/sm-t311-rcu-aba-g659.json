@@ -1,0 +1,40 @@
+{
+  "label": "G659 diagnostic, NOT lifetime proof",
+  "models": {
+    "SMT311+XALockUnmarkedABA": {
+      "observation": "Sometimes",
+      "positive": 2,
+      "negative": 49
+    },
+    "SMT311+XALockGraceABA": {
+      "observation": "Sometimes",
+      "positive": 1,
+      "negative": 27
+    },
+    "SMT311+XALockOldNewGenNoGrace": {
+      "observation": "Sometimes",
+      "positive": 2,
+      "negative": 76
+    },
+    "SMT311+XALockOldNewGenGrace": {
+      "observation": "Sometimes",
+      "positive": 1,
+      "negative": 41
+    }
+  },
+  "source_checks": {
+    "readside_lockless_xas_load": true,
+    "flag_check_before_slot_reload": true,
+    "reread_slot_checks_pointer_only": true,
+    "slot_reload_reads_current_slot": true,
+    "writer_replacement_uses_xa_lock": true,
+    "tagged_free_uses_rcu_defer": true,
+    "reader_has_rcu_lock": true
+  },
+  "limitations": [
+    "Slot value 1 abstracts a reused pointer; allocator, XArray internals and folio allocation identity are not modeled.",
+    "An allowed observation is not proof of UAF or corrupted data.",
+    "synchronize_rcu() results must not be interpreted as failure of real RCU.",
+    "S1 ACTIVE; S2/S3 BLOCKED; RCU no-ref OFF."
+  ]
+}

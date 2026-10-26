@@ -1,0 +1,9 @@
+// Isolated offscreen bounded GLES2 diagnostic, not part of PRODUCT_PACKAGES.
+// No modifications to panel, FIMD, kernel, GPU DVFS or HWC.
+cc_binary {
+    name: "t311_gpu_soak_readonly",
+    srcs: ["main.c"],
+    shared_libs: ["libEGL", "libGLESv2", "liblog"],
+    compile_multilib: "32",
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c11", "-O2"],
+}

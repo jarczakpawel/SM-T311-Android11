@@ -1,0 +1,82 @@
+exit_code=0
+G714_RESOURCE_BEGIN
+KERNEL=7.3.0-pjarczak
+BOOT_COMPLETED=1
+ADB_UID=2000
+CPU_ONLINE=0-1
+CPU_scaling_governor=schedutil
+CPU_scaling_cur_freq=1400000
+CPU_scaling_min_freq=200000
+CPU_cpuinfo_max_freq=1400000
+ZRAM_disksize=UNAVAILABLE
+ZRAM_comp_algorithm=UNAVAILABLE
+ZRAM_mm_stat=UNAVAILABLE
+MEMORY_BEGIN
+MemTotal:        1483332 kB
+MemFree:          298136 kB
+MemAvailable:     893736 kB
+Cached:           610756 kB
+HighTotal:        670720 kB
+HighFree:           1156 kB
+LowTotal:         812612 kB
+LowFree:          296980 kB
+SwapTotal:        786428 kB
+SwapFree:         786428 kB
+AnonPages:        345048 kB
+MEMORY_END
+VMSTAT_BEGIN
+pgsteal_direct 0
+pgscan_direct 0
+pswpin 0
+pswpout 0
+allocstall_normal 0
+allocstall_high 0
+allocstall_movable 0
+pgmajfault 4449
+oom_kill 0
+compact_stall 0
+VMSTAT_END
+BATTERY_BEGIN
+  USB powered: true
+  status: 5
+  health: 2
+  present: true
+  level: 100
+  temperature: 284
+BATTERY_END
+START_UPTIME=48144.66
+CPU_TIS_START
+200000 2618582
+300000 91380
+400000 70166
+500000 64825
+600000 49685
+700000 45783
+800000 22347
+900000 22166
+1000000 18534
+1100000 14489
+1200000 12107
+1300000 10800
+1400000 1773520
+1500000 0
+CPU_TIS_START_END
+END_UPTIME=48148.73
+CPU_TIS_END
+200000 2618832
+300000 91390
+400000 70169
+500000 64829
+600000 49689
+700000 45785
+800000 22348
+900000 22166
+1000000 18535
+1100000 14490
+1200000 12108
+1300000 10801
+1400000 1773649
+1500000 0
+CPU_TIS_END_END
+G714_RESOURCE_END
+

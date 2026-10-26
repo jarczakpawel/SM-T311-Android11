@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="config_hspa_data_distinguishable">true</bool>
+    <bool name="config_showMin3G">false</bool>
+    <bool name="config_limitSquareImageWallpaperSurface">true</bool>
+    <!-- No SF background-blur capability: avoid invisible depth springs. -->
+    <bool name="config_skipUnsupportedWindowBlurAnimations">true</bool>
+    <!-- Android11 View.setClipToOutline always damages parent, even for same value. -->
+    <bool name="config_skipRedundantShadeOutlineDamage">true</bool>
+    <!-- Mali-400: avoid redundant redraw for unchanged notification background geometry. -->
+    <bool name="config_skipUnchangedNotificationBackgroundGeometryDamage">true</bool>
+    <!-- G820: 670x1072 Main@L4 encodes but stalls physical MFC/FIMC playback.
+         640x1024 Main@L4 was decoded through Gallery/Codec2 to EOS. -->
+    <integer name="config_screenRecorderMaxDimension">1024</integer>
+    <integer name="config_screenRecorderMaxFramerate">30</integer>
+    <!-- OEM parity: location belongs in the first row of quick controls. -->
+    <string name="quick_settings_tiles_default" translatable="false">wifi,bt,location,dnd,flashlight,rotation,battery,cell,airplane,cast,screenrecord</string>
+</resources>

@@ -1,0 +1,120 @@
+diff --git a/libs/nativedisplay/surfacetexture/ImageConsumer.cpp b/libs/nativedisplay/surfacetexture/ImageConsumer.cpp
+index 16afc68b3dfdcce169471b154666fdb5600d5783..71927f5ee4c9e41eb47bd218e1d7c2d8b1a96e2f 100644
+--- a/libs/nativedisplay/surfacetexture/ImageConsumer.cpp
++++ b/libs/nativedisplay/surfacetexture/ImageConsumer.cpp
+@@ -67,7 +67,7 @@ sp<GraphicBuffer> ImageConsumer::dequeueBuffer(int* outSlotid, android_dataspace
+         // accessing the buffer before the outstanding accesses have completed.
+         int releaseFenceId = -1;
+         EGLDisplay display = EGL_NO_DISPLAY;
+-        err = createFence(st.mUseFenceSync, &mImageSlots[slot].eglFence(), &display,
++        err = createFence(st.mUseFenceSync, &mImageSlots[st.mCurrentTexture].eglFence(), &display,
+                           &releaseFenceId, fencePassThroughHandle);
+         if (OK != err) {
+             st.releaseBufferLocked(slot, st.mSlots[slot].mGraphicBuffer, EGL_NO_DISPLAY,
+diff --git a/libs/ui/GraphicBufferAllocator.cpp b/libs/ui/GraphicBufferAllocator.cpp
+index 943d13ec6803553e2e4481c690bb830c1a62c16c..23771178d037dff61fb2e0303b329060125a0354 100644
+--- a/libs/ui/GraphicBufferAllocator.cpp
++++ b/libs/ui/GraphicBufferAllocator.cpp
+@@ -48,23 +48,14 @@ KeyedVector<buffer_handle_t,
+     GraphicBufferAllocator::alloc_rec_t> GraphicBufferAllocator::sAllocList;
+ 
+ GraphicBufferAllocator::GraphicBufferAllocator() : mMapper(GraphicBufferMapper::getInstance()) {
+-    mAllocator = std::make_unique<const Gralloc4Allocator>(
+-            reinterpret_cast<const Gralloc4Mapper&>(mMapper.getGrallocMapper()));
+-    if (mAllocator->isLoaded()) {
+-        return;
+-    }
+-    mAllocator = std::make_unique<const Gralloc3Allocator>(
+-            reinterpret_cast<const Gralloc3Mapper&>(mMapper.getGrallocMapper()));
+-    if (mAllocator->isLoaded()) {
+-        return;
+-    }
+     mAllocator = std::make_unique<const Gralloc2Allocator>(
+             reinterpret_cast<const Gralloc2Mapper&>(mMapper.getGrallocMapper()));
+     if (mAllocator->isLoaded()) {
++        ALOGI("SMT311_Q29K_GRALLOC2_ALLOCATOR_DIRECT");
+         return;
+     }
+ 
+-    LOG_ALWAYS_FATAL("gralloc-allocator is missing");
++    LOG_ALWAYS_FATAL("gralloc2-allocator is missing");
+ }
+ 
+ GraphicBufferAllocator::~GraphicBufferAllocator() {}
+diff --git a/libs/ui/GraphicBufferMapper.cpp b/libs/ui/GraphicBufferMapper.cpp
+index d20bd7a899acdae85c6eba3a152f40db099412ac..fc1ed5cb6e87985d87f8f59174314d2447515212 100644
+--- a/libs/ui/GraphicBufferMapper.cpp
++++ b/libs/ui/GraphicBufferMapper.cpp
+@@ -47,28 +47,17 @@ ANDROID_SINGLETON_STATIC_INSTANCE( GraphicBufferMapper )
+ 
+ void GraphicBufferMapper::preloadHal() {
+     Gralloc2Mapper::preload();
+-    Gralloc3Mapper::preload();
+-    Gralloc4Mapper::preload();
+ }
+ 
+ GraphicBufferMapper::GraphicBufferMapper() {
+-    mMapper = std::make_unique<const Gralloc4Mapper>();
+-    if (mMapper->isLoaded()) {
+-        mMapperVersion = Version::GRALLOC_4;
+-        return;
+-    }
+-    mMapper = std::make_unique<const Gralloc3Mapper>();
+-    if (mMapper->isLoaded()) {
+-        mMapperVersion = Version::GRALLOC_3;
+-        return;
+-    }
+     mMapper = std::make_unique<const Gralloc2Mapper>();
+     if (mMapper->isLoaded()) {
+         mMapperVersion = Version::GRALLOC_2;
++        ALOGI("SMT311_Q29K_GRALLOC2_MAPPER_DIRECT");
+         return;
+     }
+ 
+-    LOG_ALWAYS_FATAL("gralloc-mapper is missing");
++    LOG_ALWAYS_FATAL("gralloc2-mapper is missing");
+ }
+ 
+ void GraphicBufferMapper::dumpBuffer(buffer_handle_t bufferHandle, std::string& result,
+diff --git a/opengl/libs/EGL/egl_platform_entries.cpp b/opengl/libs/EGL/egl_platform_entries.cpp
+index b68a7cd8a3e6bf2a2bdb77838af08497bf58c9eb..9ef96ed2c4147de2bff5fe36473e26c296e20637 100644
+--- a/opengl/libs/EGL/egl_platform_entries.cpp
++++ b/opengl/libs/EGL/egl_platform_entries.cpp
+@@ -36,6 +36,7 @@
+ #include <cutils/compiler.h>
+ #include <log/log.h>
+ 
++#include <array>
+ #include <condition_variable>
+ #include <deque>
+ #include <mutex>
+@@ -1436,7 +1437,13 @@ EGLBoolean eglSwapBuffersWithDamageKHRImpl(EGLDisplay dpy, EGLSurface draw,
+         return s->cnx->egl.eglSwapBuffers(dp->disp.dpy, s->surface);
+     }
+ 
+-    std::vector<android_native_rect_t> androidRects((size_t)n_rects);
++    std::array<android_native_rect_t, 4> inlineRects;
++    std::vector<android_native_rect_t> overflowRects;
++    android_native_rect_t* androidRects = inlineRects.data();
++    if (n_rects > static_cast<EGLint>(inlineRects.size())) {
++        overflowRects.resize(static_cast<size_t>(n_rects));
++        androidRects = overflowRects.data();
++    }
+     for (int r = 0; r < n_rects; ++r) {
+         int offset = r * 4;
+         int x = rects[offset];
+@@ -1448,11 +1455,11 @@ EGLBoolean eglSwapBuffersWithDamageKHRImpl(EGLDisplay dpy, EGLSurface draw,
+         androidRect.top = y + height;
+         androidRect.right = x + width;
+         androidRect.bottom = y;
+-        androidRects.push_back(androidRect);
++        androidRects[r] = androidRect;
+     }
+     if (!s->cnx->useAngle) {
+-        native_window_set_surface_damage(s->getNativeWindow(), androidRects.data(),
+-                                         androidRects.size());
++        native_window_set_surface_damage(s->getNativeWindow(), androidRects,
++                                         static_cast<size_t>(n_rects));
+     }
+ 
+     if (s->cnx->egl.eglSwapBuffersWithDamageKHR) {

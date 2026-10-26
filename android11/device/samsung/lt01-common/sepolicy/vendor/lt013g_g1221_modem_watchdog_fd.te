@@ -1,0 +1,17 @@
+# G1221 — strictly scoped fix for PHYSICAL Enforcing AVC on Android 11:
+# avc: denied { use } comm="cmd" path="pipe:[...]" tclass=fd
+# scontext=u:r:system_server:s0 tcontext=u:r:lt013g_modem_watchdog:s0
+# permissive=0, observed 2026-10-25 04:52:24 on installed G1211.
+#
+# Vendor watchdog calls "settings get global airplane_mode_on" in a
+# fail-closed no_active_modem_session(); Binder SettingsProvider may return
+# data using a pipe FD originally created by the watchdog. Only allow the
+# system_server endpoint to USE that specifically labeled FD.
+#
+# Not a binder grant, not SELinux permissive, not generic sysfs access,
+# and never allow watchdog to restart modem unless its existing explicit
+# SIM/airplane/data/healthy/once-per-boot/PID guards all pass.
+#
+# This new rule is HOST SOURCE ONLY until a separately qualified signed
+# ROM and physical system_server/telephony regression testing.
+allow system_server lt013g_modem_watchdog:fd use;

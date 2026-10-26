@@ -1,0 +1,7 @@
+# G713 - SM-T311 Android11 G700 ARM32 reference-backed release gate
+
+- New reproducible kernel check `make -C tools/testing/selftests/smt311 check-release-rcu-off` runs host `rcu_reference_binary_contract_g713.py` against existing G686 EXP / G700 OFF ARM32 linked ELF plus source. **23/23 positive and 8/8 mutation rejection checks PASS.** No boot rebuild.
+- G700 `filemap_read_rcu` linked to 8-byte `mov r0,#0; bx lr`, and `filemap_read` and `shmem_file_read_iter` do not branch to it. Buffered file reads call `filemap_get_pages` -> `filemap_get_read_batch` using `folio_try_get`, `xas_reload`, `folio_put` and final referenced copy. Existing G694 analysis shows no **new** filemap_read speedup over physical G650 baseline; shmem stub-call removal was earlier G688.
+- No Android changes or MM runtime C changes. Experiment RCU no-ref ON remains forbidden due S1-S3 PFN ABA/ARMv7 proof gaps. Physical G650 still boots; existing host-only G700 full 8MiB BOOT sha256 `aec9655acc727ab01d0bde3711414f9606c58c5fdcafb6ae5c52a2d3346edc7f` remains not installed.
+- ADB shell uid2000 cannot read physical BOOT p9/RECOVERY p10 mode 0600; TWRP remote recovery unverified. Do not flash unattended.
+- S0 PASS, S1 ACTIVE, S2-S6 BLOCKED, S7 PARTIAL, S8 ACTIVE. NEXT G714 passive source-grounded device performance/safety prioritization, not redundant RCU proof claims. Every next report/handoff: four sections and full S0-S8; user pushes GitHub.

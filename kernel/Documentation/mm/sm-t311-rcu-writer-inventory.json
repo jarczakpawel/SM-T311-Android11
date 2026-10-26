@@ -1,0 +1,290 @@
+{
+  "device": "Samsung SM-T311 ARMv7 Cortex-A9",
+  "kernel_runtime_source_anchor": "a2fca4558",
+  "source_site_count": 23,
+  "inventory": [
+    {
+      "id": "hot_flag_writer",
+      "file": "mm/filemap.c",
+      "line_numbers": [
+        2889
+      ],
+      "source_anchor": "if (folio_test_set_rcu_free(folio))",
+      "effect": "tagging under referenced HOT read",
+      "still_unproven": "verify reader/writer flag->slot ordering under LKMM",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "xarray_remove_single",
+      "file": "mm/filemap.c",
+      "line_numbers": [
+        132
+      ],
+      "source_anchor": "static void page_cache_delete(",
+      "effect": "removal with inode-exit flag clearing",
+      "still_unproven": "prove inode eviction cannot overlap an RCU reader",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "xarray_remove_batch",
+      "file": "mm/filemap.c",
+      "line_numbers": [
+        285
+      ],
+      "source_anchor": "static void page_cache_delete_batch(",
+      "effect": "bulk removal clears mapping on folios",
+      "still_unproven": "prove no late reference-free reader after delete",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "pagecache_replace",
+      "file": "mm/filemap.c",
+      "line_numbers": [
+        820
+      ],
+      "source_anchor": "void replace_page_cache_folio(",
+      "effect": "old mapped folio replaced by new folio",
+      "still_unproven": "old tagged folio must defer its allocator reuse",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "filemap_add",
+      "file": "mm/filemap.c",
+      "line_numbers": [
+        857
+      ],
+      "source_anchor": "noinline int __filemap_add_folio(",
+      "effect": "slot insertion and generation",
+      "still_unproven": "audit ABA for unmarked old slot donor",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "migration_base",
+      "file": "mm/migrate.c",
+      "line_numbers": [
+        583
+      ],
+      "source_anchor": "static int __folio_migrate_mapping(",
+      "effect": "folio_ref_freeze and xas_store newfolio",
+      "still_unproven": "verify old tag lifetime and new generation ordering",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "migration_huge",
+      "file": "mm/migrate.c",
+      "line_numbers": [
+        739
+      ],
+      "source_anchor": "int migrate_huge_page_move_mapping(",
+      "effect": "huge migration slot replacement",
+      "still_unproven": "does board allow this fast read (order0 only)?",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "truncate_final",
+      "file": "mm/truncate.c",
+      "line_numbers": [
+        498
+      ],
+      "source_anchor": "void truncate_inode_pages_final(",
+      "effect": "inode eviction and final truncate",
+      "still_unproven": "prove mapping_exiting writer synchronization",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "truncate_exceptional",
+      "file": "mm/truncate.c",
+      "line_numbers": [
+        44,
+        109
+      ],
+      "source_anchor": "xas_store(&xas, NULL);",
+      "effect": "eviction path exceptional XArray entry deletion",
+      "still_unproven": "check whether page rather than exceptional entry removed",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "khugepaged_collapse",
+      "file": "mm/khugepaged.c",
+      "line_numbers": [
+        2616
+      ],
+      "source_anchor": "xas_store(&xas, new_folio);",
+      "effect": "collapsed file pages to huge folio",
+      "still_unproven": "ensure old tagged page final free grace interval",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "huge_folio_split",
+      "file": "mm/huge_memory.c",
+      "line_numbers": [
+        4146
+      ],
+      "source_anchor": "static int __folio_split(",
+      "effect": "split and page-cache range indexing",
+      "still_unproven": "board excludes large folio fast read; check old/new flags",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "shmem_remove",
+      "file": "mm/shmem.c",
+      "line_numbers": [
+        954
+      ],
+      "source_anchor": "static void shmem_delete_from_page_cache(",
+      "effect": "tmpfs removal",
+      "still_unproven": "board excludes shmem fastpath, but page allocator logic global",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "last_free_defer",
+      "file": "mm/page_alloc.c",
+      "line_numbers": [
+        1576
+      ],
+      "source_anchor": "rcu_free_defer(folio);",
+      "effect": "last reference drops deferred into per-CPU queue",
+      "still_unproven": "prove no allocator reuse before grace period",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "read_lookup",
+      "file": "mm/filemap.c",
+      "line_numbers": [
+        2998
+      ],
+      "source_anchor": "static struct folio *filemap_read_rcu_lookup(",
+      "effect": "reader xarray load->flag->size->reload",
+      "still_unproven": "ARMv7 barrier and same-address reuse",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "read_copy",
+      "file": "mm/filemap.c",
+      "line_numbers": [
+        3072
+      ],
+      "source_anchor": "static size_t filemap_read_rcu_copy(",
+      "effect": "user copy with kmap_local_page",
+      "still_unproven": "HighMem alias/folio lifetime and faults",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "fuse_pipe_folio_steal_guard",
+      "file": "fs/fuse/dev.c",
+      "line_numbers": [
+        1158
+      ],
+      "source_anchor": "if (folio_test_rcu_free(newfolio))",
+      "effect": "FUSE rejects stealing a tagged folio from pipe",
+      "still_unproven": "prove no tagged folio becomes reused pipe-owned storage while reference-free reader exists",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "hwpoison_free_grace",
+      "file": "mm/memory-failure.c",
+      "line_numbers": [
+        215
+      ],
+      "source_anchor": "if (release && folio_test_rcu_free(page_folio(page)))",
+      "effect": "hwpoison free explicitly waits for RCU readers",
+      "still_unproven": "validate special free branch ordering and poisoned folio lifetime",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "hwpoison_unmap_grace",
+      "file": "mm/memory-failure.c",
+      "line_numbers": [
+        2636
+      ],
+      "source_anchor": "if (!res && folio_test_rcu_free(folio))",
+      "effect": "memory failure waits for RCU before unmapping",
+      "still_unproven": "validate post-poison read-side safety and all early returns",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "hwpoison_flush_deferred",
+      "file": "mm/memory-failure.c",
+      "line_numbers": [
+        1580
+      ],
+      "source_anchor": "rcu_free_sync();",
+      "effect": "memory_failure drains special deferred folios",
+      "still_unproven": "check absence of order0 non-deferred buddy reuse while old reader active",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "large_split_tag_inheritance",
+      "file": "mm/huge_memory.c",
+      "line_numbers": [
+        3746
+      ],
+      "source_anchor": "__PG_RCU_FREE |",
+      "effect": "split propagates RCU-free pageflag to daughter folios",
+      "still_unproven": "board order0 RCU reader may see split outputs; proof needs page head and tail lifetime",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "large_split_flag_publish_barrier",
+      "file": "mm/huge_memory.c",
+      "line_numbers": [
+        3762
+      ],
+      "source_anchor": "/* Page flags must be visible before we make the page non-compound. */",
+      "effect": "barrier protects flag visibility on split",
+      "still_unproven": "prove barrier pairing with RCU reader and per-page head rewrite",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "shmem_fastpath_board_exclusion",
+      "file": "mm/shmem.c",
+      "line_numbers": [
+        2917,
+        3324
+      ],
+      "source_anchor": "retval = 0;",
+      "effect": "board bypasses no-ref fastpath in shmem",
+      "still_unproven": "verify compile guards and generic free still handles marked non-shmem pages",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    },
+    {
+      "id": "folio_last_free_eligibility",
+      "file": "mm/page_alloc.c",
+      "line_numbers": [
+        1571
+      ],
+      "source_anchor": "if (unlikely(folio_test_rcu_free(folio)) &&",
+      "effect": "allocator free decides on page flag before returning to buddy",
+      "still_unproven": "review hwpoison special case and grace queue correctness",
+      "status": "LOCATED_NOT_FORMALLY_PROVED"
+    }
+  ],
+  "structural_requirements": {
+    "reader_slot_revalidation": true,
+    "reader_armv7_barrier": true,
+    "hot_mark_under_normal_held_ref": true,
+    "inode_exit_clears_tag": true,
+    "migrate_refcount_freeze": true,
+    "migrate_writes_new_xarray_slot": true,
+    "allocator_deferred_grace": true,
+    "highmem_excluded_from_rcu_fastpath": true,
+    "board_rcu_default_false": true,
+    "fuse_rejects_tagged_stolen_folio": true,
+    "hwpoison_free_waits_grace": true,
+    "hwpoison_unmap_waits_grace": true,
+    "hwpoison_deferred_drain": true,
+    "folio_split_copies_rcu_tag": true,
+    "folio_split_has_publish_wmb": true,
+    "board_shmem_fast_rcu_excluded": true,
+    "armv7_size_is_seqcounted": true
+  },
+  "decision": "S1 REMAINS ACTIVE; S2 LKMM AND HIGHMEM SAFETY BLOCKED",
+  "warning": "This is a path locator and source invariant scan, NOT a closed-world proof. Search can miss dynamically dispatched or architecture-dependent pagecache writers. Must conduct manual source review and formal memory-model test.",
+  "priority_questions": [
+    "Unmarked old folio can be recycled and a new marked folio reinserted at same physical address before stale reader sees flag: does the actual XArray/barrier sequence exclude dangerous outcomes?",
+    "Is the page's mapping pointer dereference always safe during concurrent truncate/migration with PREEMPT_RCU on 32-bit Cortex-A9?",
+    "Can migration/collapse or inode eviction clear PG_rcu_free before every eligible lockless reader leaves its grace period?",
+    "Can kmap_local_page and cache flush be correctly used on HighMem without referenced folio lifetime?",
+    "Can existing Normal zone memory policy preserve correctness without throttling its actual benefit under pressure?"
+  ]
+}

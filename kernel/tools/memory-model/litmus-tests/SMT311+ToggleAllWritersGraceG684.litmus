@@ -1,0 +1,39 @@
+C SMT311+ToggleAllWritersGraceG684
+(*
+ * W started mapping creation and observed ref-free OFF, then a control
+ * thread enables it and a reader starts. W can publish a writable VMA
+ * without its own GP; toggler's GP does not necessarily synchronize W's
+ * VMA publication. Scalar key/count/published model only.
+ *)
+{
+active=0;
+writable=0;
+published=0;
+}
+P0(int *active, int *writable, int *published)
+{
+ int r0;
+ r0=READ_ONCE(*active);
+ WRITE_ONCE(*writable,1);
+ synchronize_rcu();
+ WRITE_ONCE(*published,1);
+}
+P1(int *active, int *writable, int *published)
+{
+ WRITE_ONCE(*active,1);
+ synchronize_rcu();
+}
+P2(int *active, int *writable, int *published)
+{
+ int r1;
+ int r2=2;
+ int r3=2;
+ r1=READ_ONCE(*active);
+ if (r1 == 1) {
+   rcu_read_lock();
+   r2=READ_ONCE(*writable);
+   r3=READ_ONCE(*published);
+   rcu_read_unlock();
+ }
+}
+exists (0:r0=0 /\ 2:r1=1 /\ 2:r2=0 /\ 2:r3=1)

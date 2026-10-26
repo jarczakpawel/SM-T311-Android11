@@ -1,0 +1,96 @@
+{
+  "stage": "G686",
+  "result": "HOST FULL LINK PASS, NOT PHYSICALLY BOOT-TESTED",
+  "last_runtime_source_commit": "7d567ea29",
+  "tracked_experiment_config_fragment": "arch/arm/configs/sm_t311_rcu_experiment_g686.fragment",
+  "tracked_fragment_sha256": "24412fbc13ac59148932e2628f97cb2eaabf2e0c5f3dc87890bf0cb2172146e1",
+  "runtime_source_objects_fresh_in_linked_image": {
+    "mm/filemap.o": true,
+    "mm/page_alloc.o": true,
+    "mm/shmem.o": true,
+    "mm/vma.o": true
+  },
+  "booted_physical_kernel_source": "a2fca4558",
+  "kernel_release": "7.3.0-pjarczak",
+  "config_checks": {
+    "experiment_truly_enabled": true,
+    "exact_release_no_plus": true,
+    "exact_UTS_RELEASE": true,
+    "all_linked_core_symbols": true,
+    "exact_four_staged_runtime_paths": true
+  },
+  "changed_input_negative_controls": {
+    "accidental_plus_suffix": [
+      "exact_release_no_plus"
+    ],
+    "UTS_unpinned": [
+      "exact_UTS_RELEASE"
+    ],
+    "experiment_compiled_off": [
+      "experiment_truly_enabled"
+    ],
+    "page_rcu_free_disabled": [
+      "experiment_truly_enabled"
+    ],
+    "unlinked_filemap_fastpath": [
+      "all_linked_core_symbols"
+    ],
+    "fifth_accidental_runtime_path": [
+      "exact_four_staged_runtime_paths"
+    ],
+    "lost_mmap_gp_linked_symbol": [
+      "all_linked_core_symbols"
+    ]
+  },
+  "exact_staged_runtime_paths_NOT_INSTALLED": [
+    "mm/filemap.c",
+    "mm/page_alloc.c",
+    "mm/shmem.c",
+    "mm/vma.c"
+  ],
+  "non_runtime_source_tree_differences": [
+    "arch/arm/configs/sm_t311_rcu_experiment_g686.fragment",
+    "arch/arm/configs/sm_t311_rcu_off_keep_debugfs_g700.fragment"
+  ],
+  "linked_symbols_verified": [
+    "filemap_read_rcu",
+    "lockless_read_set",
+    "lockless_read_key",
+    "mmap_region",
+    "synchronize_rcu"
+  ],
+  "output_artifacts": {
+    "vmlinux": {
+      "bytes": 25128244,
+      "sha256": "6674571cbe202e69692a9b9279e6eb2b629b108d390719fb8296fd2e79f44ed4",
+      "format": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/vmlinux: ELF 32-bit LSB executable, ARM, EABI5 version 1 (SYSV), statically linked, BuildID[sha1]=017704598dc5caab405ad5e7e683550cbf156426, not stripped"
+    },
+    "arch/arm/boot/zImage": {
+      "bytes": 6384904,
+      "sha256": "5d72282b95b43ef9309a0d4b1eaf4077f15118daece95882f784f1d0d36a82dd",
+      "format": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/arch/arm/boot/zImage: Linux kernel ARM boot executable zImage (kernel >=v4.15) (little-endian)"
+    },
+    "mm/filemap.o": {
+      "bytes": 80592,
+      "sha256": "848e2a06c18620cdcf381ff1f8468a416bb15fc844be245247e0268e03e8a1d9",
+      "format": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/mm/filemap.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped"
+    },
+    "mm/page_alloc.o": {
+      "bytes": 80220,
+      "sha256": "2c8cd516d5c81a843b783c7ae097af518c9034304a63d738d164ace6d8fa2873",
+      "format": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/mm/page_alloc.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped"
+    },
+    "mm/vma.o": {
+      "bytes": 33632,
+      "sha256": "44b34ee4375bb401fe3084ec633c064dd968f63503ff43c05e8abfef9bf19870",
+      "format": "/home/debian/Projekty/samsung/linux-7.3-port/build/g686-reproducible-exp-on/mm/vma.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), not stripped"
+    }
+  },
+  "command": "bash tools/testing/selftests/smt311/build_verify_no_flash_g686.sh",
+  "warnings": [
+    "LOCALVERSION= must be supplied even with CONFIG_LOCALVERSION_AUTO=n, otherwise Kbuild appends a + when source Git is not an exact annotated kernel version tag.",
+    "This image was only built on host. It is NOT a Samsung BOOT image, TWRP OTA or a physical boot test.",
+    "RCU reader/writer correctness, global mmap_lock lockdep, PFN/ABA and ARMv7 cache coherence remain unproven. Do NOT flash G686 as RCU ON.",
+    "The staged experiment's ext4 shared-maywrite mmap grace cost still occurs even with runtime key OFF."
+  ]
+}

@@ -1,0 +1,10 @@
+cc_binary {
+    name: "t311-mfc-mmap-q11",
+    srcs: ["t311_mfc_mmap_q11.c"],
+    vendor: true,
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}

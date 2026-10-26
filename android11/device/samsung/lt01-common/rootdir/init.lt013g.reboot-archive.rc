@@ -1,0 +1,10 @@
+service vendor.t311_reboot_archive /system/bin/sh /data/local/tmp/G472-boot-archive.sh
+    class late_start
+    user shell
+    group shell log cache
+    seclabel u:r:shell:s0
+    disabled
+    oneshot
+
+on property:sys.boot_completed=1
+    start vendor.t311_reboot_archive

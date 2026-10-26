@@ -1,0 +1,8 @@
+# SM-T311 A1 - only nodes the lt013g Power HAL actually opens/writes.
+allow hal_power_default sysfs_devices_system_cpu:dir r_dir_perms;
+allow hal_power_default sysfs_devices_system_cpu:file rw_file_perms;
+allow hal_power_default sysfs_lt013g_gpu:dir r_dir_perms;
+allow hal_power_default sysfs_lt013g_gpu:file rw_file_perms;
+allow hal_power_default sysfs:lnk_file read;
+allow hal_power_default sysfs_lt013g_devfreq:dir r_dir_perms;
+allow hal_power_default sysfs_lt013g_devfreq:file rw_file_perms;

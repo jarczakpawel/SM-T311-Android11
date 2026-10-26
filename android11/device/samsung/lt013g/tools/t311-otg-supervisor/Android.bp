@@ -1,0 +1,14 @@
+// Deliberately NOT listed in PRODUCT_PACKAGES: separate offline development.
+cc_binary {
+    name: "t311_otg_supervisor_offline",
+    srcs: ["main.cpp"],
+    vendor: true,
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c++17"],
+    shared_libs: [
+        "libbase",
+        "libhidlbase",
+        "liblog",
+        "libutils",
+        "android.hardware.usb.gadget@1.0",
+    ],
+}

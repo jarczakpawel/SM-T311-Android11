@@ -1,0 +1,8 @@
+android_app {
+    name: "T311Camera2Smoke",
+    srcs: ["src/**/*.java"],
+    manifest: "AndroidManifest.xml",
+    sdk_version: "current",
+    min_sdk_version: "30",
+    product_specific: true,
+}

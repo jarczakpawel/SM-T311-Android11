@@ -1,0 +1,14 @@
+--- a/src/loader/loader.c
++++ b/src/loader/loader.c
+@@ -44,6 +44,11 @@
+ #ifdef MAJOR_IN_SYSMACROS
+ #include <sys/sysmacros.h>
+ #endif
++/* The Android 11 Bionic sysroot provides these as function-like macros,
++ * but the Meson cross-probe may fail to discover them. */
++#if defined(__ANDROID__) && !defined(MAJOR_IN_SYSMACROS)
++#include <sys/sysmacros.h>
++#endif
+ #include <GL/gl.h>
+ #include "mesa_interface.h"
+ #include "loader.h"

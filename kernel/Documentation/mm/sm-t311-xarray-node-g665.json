@@ -1,0 +1,52 @@
+{
+  "stage": "G665",
+  "audit": "SOURCE RETIREMENT PATHS ONLY",
+  "positive_checks": {
+    "reader_rcu_initial_xas_load": true,
+    "reader_rejects_retry_at_initial_load": true,
+    "reader_uses_cached_slot_reload": true,
+    "reload_uses_cached_xa_node": true,
+    "reload_reads_node_slot": true,
+    "load_traverses_root": true,
+    "retry_resets_state": true,
+    "shrink_replaces_root": true,
+    "shrink_nonchild_slot_gets_retry": true,
+    "shrink_retires_old_node": true,
+    "delete_node_clears_parent_slot": true,
+    "delete_node_retires_old_node": true,
+    "free_subtree_overwrites_live_slot_with_retry": true,
+    "free_subtree_retires_nodes": true,
+    "node_free_marks_retirement": true,
+    "node_free_deferred_by_call_rcu": true,
+    "xas_set_restores_root_walk": true,
+    "existing_retry_regression": true,
+    "existing_shrink_regression": true,
+    "test_xarray_checks_stale_slot_retry": true
+  },
+  "positive_pass": 20,
+  "rejected_negative_mutations": {
+    "shrink_retry_removed": [
+      "shrink_nonchild_slot_gets_retry"
+    ],
+    "subtree_retry_removed": [
+      "free_subtree_overwrites_live_slot_with_retry"
+    ],
+    "node_grace_removed": [
+      "node_free_deferred_by_call_rcu"
+    ],
+    "parent_slot_clear_removed": [
+      "delete_node_clears_parent_slot"
+    ],
+    "cached_reader_reload_removed": [
+      "reader_uses_cached_slot_reload"
+    ]
+  },
+  "test_xarray_host_runtime": "BLOCKED: liburcu development headers absent",
+  "remaining": [
+    "RCU protection covers node memory lifetime, but not root membership.",
+    "The inspected shrink and subtree cleanup paths replace non-child old slots with retry markers.",
+    "A null slot after final deletion is not a positive folio equality match.",
+    "Unmodeled XArray paths, allocator generation ABA, weak memory, and writer races remain open.",
+    "S1 ACTIVE S2/S3 BLOCKED; physical reference-free RCU must stay OFF."
+  ]
+}

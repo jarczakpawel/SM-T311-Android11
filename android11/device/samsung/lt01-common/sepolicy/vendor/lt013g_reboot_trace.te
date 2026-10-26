@@ -1,0 +1,6 @@
+allow init cache_file:dir { search write add_name };
+allow init lt013g_reboot_trace_cache_file:dir { create open read search write add_name getattr setattr relabelto };
+allow init lt013g_reboot_trace_cache_file:file { create open write append getattr };
+allow shell lt013g_reboot_trace_cache_file:dir { open read search getattr };
+allow shell lt013g_reboot_trace_cache_file:file { open read getattr };
+allow shell cache_file:dir search;

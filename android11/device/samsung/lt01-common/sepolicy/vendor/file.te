@@ -1,0 +1,43 @@
+# SM-T311 A1 - device-specific GPU devfreq sysfs subtree.
+type sysfs_lt013g_gpu, fs_type, sysfs_type;
+type sysfs_lt013g_devfreq, fs_type, sysfs_type;
+
+type lt013g_lirc_device, dev_type;
+type sysfs_lt013g_graphics_uevent, fs_type, sysfs_type;
+type lt013g_gps_serial_device, dev_type;
+type lt013g_efs_block_device, dev_type;
+type sysfs_lt013g_gps_power, fs_type, sysfs_type;
+type proc_lt013g_softlockup_panic, fs_type, proc_type;
+
+# SM-T311: label only real IIO sensor data attributes, not arbitrary sysfs.
+type sysfs_lt013g_legacy_iio, fs_type, sysfs_type;
+
+# Distinct data type for private GPS config, logs and FIFO, NOT executable rootfs.
+type lt013g_gps_scratch_data_file, file_type, data_file_type;
+
+type sysfs_lt013g_modem_state, fs_type, sysfs_type;
+type lt013g_modem_watchdog_cache_file, file_type, data_file_type;
+
+# G468: precise read-only status and guarded OTG authorization attributes.
+type sysfs_lt013g_otg_diag, fs_type, sysfs_type;
+type sysfs_lt013g_otg_control, fs_type, sysfs_type;
+
+type lt013g_reboot_trace_cache_file, file_type, data_file_type;
+
+# G831: dedicated system DMA heap device, not generic /dev/system.
+type smt311_system_dma_heap_device, dev_type;
+
+# G831: DMA-BUF system heap allocation, only known trusted media/GPU services.
+# Do not add appdomain access or generic device permissions. DAC is handled
+# separately by ueventd.rc. Test real allocation before extending clients.
+allow mediacodec smt311_system_dma_heap_device:chr_file rw_file_perms;
+allow hal_graphics_allocator smt311_system_dma_heap_device:chr_file rw_file_perms;
+allow hal_graphics_composer smt311_system_dma_heap_device:chr_file rw_file_perms;
+allow hal_codec2_server smt311_system_dma_heap_device:chr_file rw_file_perms;
+allow hal_camera smt311_system_dma_heap_device:chr_file rw_file_perms;
+allow cameraserver smt311_system_dma_heap_device:chr_file rw_file_perms;
+allow surfaceflinger smt311_system_dma_heap_device:chr_file rw_file_perms;
+
+# G833: legacy V4L2 Codec2 probes unified cgroup root from Android11.
+# Grant directory traversal ONLY (no read/write on cgroup controllers).
+allow mediacodec cgroup_bpf:dir search;

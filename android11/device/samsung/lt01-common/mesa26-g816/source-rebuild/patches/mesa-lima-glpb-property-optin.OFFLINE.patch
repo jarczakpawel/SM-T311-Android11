@@ -1,0 +1,34 @@
+--- a/src/gallium/drivers/lima/lima_screen.c
++++ b/src/gallium/drivers/lima/lima_screen.c
+@@ -23,6 +23,9 @@
+  */
+ 
+ #include <string.h>
++#if defined(__ANDROID__)
++#include <sys/system_properties.h>
++#endif
+ 
+ #include "util/ralloc.h"
+ #include "util/u_debug.h"
+@@ -653,11 +656,19 @@
+    screen->base.is_format_supported = lima_screen_is_format_supported;
+    screen->base.query_dmabuf_modifiers = lima_screen_query_dmabuf_modifiers;
+    screen->base.is_dmabuf_modifier_supported = lima_screen_is_dmabuf_modifier_supported;
+-   screen->base.get_disk_shader_cache = lima_get_disk_shader_cache;
++   bool enable_shader_cache = true;
++#if defined(__ANDROID__)
++   char optin[PROP_VALUE_MAX] = {0};
++   enable_shader_cache = __system_property_get("debug.t311.mesa_glpb", optin) > 0 &&
++                         strcmp(optin, "1") == 0;
++#endif
++   if (enable_shader_cache) {
++      screen->base.get_disk_shader_cache = lima_get_disk_shader_cache;
++      lima_disk_cache_init(screen);
++   }
+ 
+    lima_resource_screen_init(screen);
+    lima_fence_screen_init(screen);
+-   lima_disk_cache_init(screen);
+ 
+    lima_init_shader_caps(&screen->base);
+    lima_init_screen_caps(&screen->base);

@@ -1,0 +1,30 @@
+{
+  "stage": "G704",
+  "checks": {
+    "G703_previous_binary_audit_complete": true,
+    "FUSE_diagnostic_exactly_six_experiment_guards": true,
+    "FUSE_counter_all_references_known_in_four_files": true,
+    "FUSE_counter_init_increment_and_read_covered": true,
+    "G700_FUSE_optional_diagnostic_absent_by_config": true,
+    "both_FUSE_passthrough_DEBUGFS_builtin": true,
+    "both_kernels_accept_modules_without_modversions": true,
+    "fuse_conn_init_kernel_export_present_both": true,
+    "no_modules_built_in_either_host_profile": true,
+    "FUSE_module_features_cuse_and_virtiofs_disabled": true,
+    "FUSE_sources_unchanged_from_G650": true,
+    "G700_existing_full_BOOT_unchanged": true
+  },
+  "diagnostic": "passthrough_successful_opens",
+  "decision": "KEEP_G700_DIAGNOSTIC_DISABLED",
+  "rationale": "Optional per-successful-passthrough-open atomic64 counter is not required by FUSE; avoid added ARMv7 work, struct-layout differences, and Kconfig complexity in the RCU-off release",
+  "kernel_export_fuse_conn_init": true,
+  "external_modules_compatible_proven": false,
+  "host_profile_module_files": {
+    "G686": 0,
+    "G700": 0
+  },
+  "G700_boot_sha256": "aec9655acc727ab01d0bde3711414f9606c58c5fdcafb6ae5c52a2d3346edc7f",
+  "G700_boot_installed": false,
+  "physical_boot_and_recovery_current_sha_verified": false,
+  "flash_authorized": false
+}

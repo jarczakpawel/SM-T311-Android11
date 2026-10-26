@@ -1,0 +1,11 @@
+cc_binary {
+    name: "t311_io64_chunk",
+    srcs: ["copy.c", "sha256_local.c"],
+    static_executable: true,
+    installable: false,
+    static_libs: ["libc"],
+    stl: "none",
+    compile_multilib: "32",
+    cflags: ["-Wall", "-Wextra", "-Werror", "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE64_SOURCE"],
+    strip: { none: true },
+}

@@ -1,0 +1,2 @@
+/system/bin/smt311-usb-v115 u:object_r:lt013g_usb_bootstrap_exec:s0
+/data/smt311-v115(/.*)? u:object_r:lt013g_usb_bootstrap_data_file:s0

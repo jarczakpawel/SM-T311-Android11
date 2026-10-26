@@ -1,0 +1,83 @@
+{
+  "stage": "G682",
+  "kind": "actual LKMM herd7 plus source-anchored gate",
+  "source_guards": {
+    "writable_count_global_file_mapping": true,
+    "new_writer_lock_per_mm_not_file": true,
+    "writable_count_atomic_increment_unless_negative": true,
+    "writer_positive_count_before_grace": true,
+    "writer_gp_independent_of_counter_prior_value": true,
+    "writer_gp_before_vma_publish": true,
+    "writer_counter_unwound_after_vma_attempt": true,
+    "reader_rcu_lock_before_count_check": true,
+    "reader_copies_while_rcu_protected": true,
+    "reader_no_mmap_lock": true,
+    "eligibility_bit_persistent_after_mark": true,
+    "fork_duplicates_counted_parent": true,
+    "shared_maywrite_includes_maywrite_not_only_write": true
+  },
+  "source_guards_pass": 13,
+  "source_mutants_rejected": {
+    "skip_gp_for_existing_count": [
+      "writer_gp_independent_of_counter_prior_value"
+    ],
+    "omit_gp": [
+      "writer_positive_count_before_grace",
+      "writer_gp_independent_of_counter_prior_value",
+      "writer_gp_before_vma_publish"
+    ],
+    "substitute_memory_barrier": [
+      "writer_positive_count_before_grace",
+      "writer_gp_independent_of_counter_prior_value",
+      "writer_gp_before_vma_publish"
+    ],
+    "move_reader_count_check_before_rcu": [
+      "reader_rcu_lock_before_count_check",
+      "reader_copies_while_rcu_protected"
+    ],
+    "remove_writer_writable_counter": [
+      "writer_positive_count_before_grace",
+      "writer_counter_unwound_after_vma_attempt"
+    ],
+    "omit_filemap_rcu_eligibility_bit": [
+      "eligibility_bit_persistent_after_mark"
+    ]
+  },
+  "herd7_models": {
+    "one_writer_skips_gp": {
+      "litmus": "tools/memory-model/litmus-tests/SMT311+MmapTwoWritersSkipGraceG682.litmus",
+      "observation": "Observation SMT311+MmapTwoWritersSkipGraceG682 Sometimes 1 5",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 5,
+      "source_sha256": "b3aa24972f99323c7695eaec65f43cd06e51d829431105b1514445df6899ea0f",
+      "normalized_herd7_sha256": "9ab70f3722ac19f68010626759fffc8c228a1dcfdd2e68a862a74a2bb87989b6"
+    },
+    "both_writers_wait_for_gp": {
+      "litmus": "tools/memory-model/litmus-tests/SMT311+MmapTwoWritersEachGraceG682.litmus",
+      "observation": "Observation SMT311+MmapTwoWritersEachGraceG682 Never 0 5",
+      "outcome": "Never",
+      "positive": 0,
+      "negative": 5,
+      "source_sha256": "0615033f83ef6b1d75e633e5a7258992df203c44bd43d58a9d03f5d730f1c430",
+      "normalized_herd7_sha256": "83ca81b5b73708cf3d42cdb3aa35411fb5603fbe93e3b505cfac19cfe8666fe0"
+    },
+    "only_memory_barrier": {
+      "litmus": "tools/memory-model/litmus-tests/SMT311+MmapTwoWritersOnlyBarrierG682.litmus",
+      "observation": "Observation SMT311+MmapTwoWritersOnlyBarrierG682 Sometimes 1 5",
+      "outcome": "Sometimes",
+      "positive": 1,
+      "negative": 5,
+      "source_sha256": "cc90b31a577b89490f25a90b2b45160266813c1d684a01c8ce54e1bc53187323",
+      "normalized_herd7_sha256": "7dd128facc6b72267a4f7eebcb2610aa791d6b2877e657cef71173d27382f17c"
+    }
+  },
+  "conclusion": "A positive i_mmap_writable value can represent a reservation from a different concurrent mmap that has not yet waited its GP or published its VMA. Do not skip GP merely because previous count is nonzero.",
+  "constraints": [
+    "Current G680 GP per new shared-writable mmap is retained.",
+    "The writers are separate mm_struct mmap locks; count is per file mapping.",
+    "This abstract two-writer LKMM diagnostic is not full VMA/allocator modeling or hardware ARMv7 validation.",
+    "Global mmap_lock/RCU lockdep graph and measured GP latency remain unproven.",
+    "No executable source change in G682; G674/G676/G680 remain STAGED NOT INSTALLED and no-ref RCU is OFF."
+  ]
+}

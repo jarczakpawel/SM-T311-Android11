@@ -1,0 +1,9 @@
+cc_binary {
+    name: "t311_fstab_probe",
+    srcs: ["main.cpp"],
+    static_libs: ["libfstab"],
+    shared_libs: ["libbase", "liblog"],
+    compile_multilib: "32",
+    stl: "libc++",
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
