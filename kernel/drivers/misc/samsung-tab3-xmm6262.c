@@ -15,6 +15,7 @@
 #include <linux/export.h>
 #include <linux/gpio/consumer.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/interrupt.h>
 #include <linux/fs.h>
@@ -1287,6 +1288,8 @@ static int tab3_xmm6262_reverse_bias_restore(struct tab3_xmm6262 *xmm)
 static int tab3_xmm6262_power_on(struct tab3_xmm6262 *xmm)
 {
 	int ret;
+	int cp_on_level;
+	u64 rise_start_ns, rise_wait_ns, fall_start_ns, fall_wait_ns;
 
 	/*
 	 * Samsung CBD directly owns OHCI/EHCI around MODEM_ON.
@@ -1317,14 +1320,40 @@ static int tab3_xmm6262_power_on(struct tab3_xmm6262 *xmm)
 	gpiod_set_value_cansleep(xmm->cp_on, 1);
 	(void)readl_relaxed(xmm->gpio1_base + TAB3_GPL2_DAT);
 	tab3_xmm6262_diag_capture_cp_on_wave(xmm, TAB3_XMM_CPON_AFTER_HIGH);
+	rise_start_ns = ktime_get_ns();
+	ret = read_poll_timeout(gpiod_get_value_cansleep, cp_on_level,
+			cp_on_level != 0, 0, 200, false, xmm->cp_on);
+	if (!ret && cp_on_level < 0)
+		ret = cp_on_level;
+	if (ret) {
+		dev_err(xmm->dev, "CP_ON_RISE_TIMEOUT gpio=%d error=%d\n",
+			cp_on_level, ret);
+		gpiod_set_value_cansleep(xmm->cp_on, 0);
+		return ret;
+	}
+	rise_wait_ns = ktime_get_ns() - rise_start_ns;
 	udelay(60);
 	tab3_xmm6262_diag_capture_cp_on_wave(xmm, TAB3_XMM_CPON_AFTER_60US);
 	gpiod_set_value_cansleep(xmm->cp_on, 0);
 	(void)readl_relaxed(xmm->gpio1_base + TAB3_GPL2_DAT);
 	tab3_xmm6262_diag_capture_cp_on_wave(xmm, TAB3_XMM_CPON_AFTER_LOW);
+	fall_start_ns = ktime_get_ns();
+	ret = read_poll_timeout(gpiod_get_value_cansleep, cp_on_level,
+			cp_on_level <= 0, 0, 200, false, xmm->cp_on);
+	if (!ret && cp_on_level < 0)
+		ret = cp_on_level;
+	if (ret) {
+		dev_err(xmm->dev, "CP_ON_FALL_TIMEOUT gpio=%d error=%d\n",
+			cp_on_level, ret);
+		return ret;
+	}
+	fall_wait_ns = ktime_get_ns() - fall_start_ns;
 	msleep(20);
 	tab3_xmm6262_diag_capture_cp_on_wave(xmm, TAB3_XMM_CPON_AFTER_20MS);
 	tab3_xmm6262_diag_capture(xmm, TAB3_XMM_DIAG_CP_ON_PULSE_DONE);
+	dev_info(xmm->dev, "CP_ON_GPIO_SYNC rise_ns=%llu fall_ns=%llu pulse_us=60\n",
+		 (unsigned long long)rise_wait_ns,
+		 (unsigned long long)fall_wait_ns);
 
 	/* Stock publishes BOOTING before restoring the IRQ GPIO directions. */
 	xmm->state = TAB3_XMM_BOOTING;
