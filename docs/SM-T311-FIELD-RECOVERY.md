@@ -38,7 +38,8 @@ The known-working reference uses bootloader `T311XXSBQB2` and baseband `T311XXUB
 
 | Reference | Value |
 | --- | --- |
-| RADIO block node | `/dev/block/by-name/RADIO` -> `/dev/block/mmcblk0p13` |
+| RADIO block node in Android | `/dev/block/by-name/RADIO` -> `/dev/block/mmcblk0p13` |
+| RADIO block node in TWRP 3.1.1 | `/dev/block/platform/dw_mmc/by-name/RADIO` -> `/dev/block/mmcblk0p13` |
 | Size | `20971520` bytes |
 | Reference SHA-256 | `e0fc3aa24bb85daf34517f1072df84ab8ecf27a2f807bf8c61b9974156578b9c` |
 | Original known-working BOOT SHA-256 | `acc2a0579e0f4975da3b569941534f5b572ad9a7ae2bf4409fd88b5f633dd565` |
@@ -50,16 +51,16 @@ If an experienced user elects to compare RADIO images, first verify model, path 
 ```sh
 adb reboot recovery
 adb wait-for-recovery
-adb shell readlink -f /dev/block/by-name/RADIO
-adb shell blockdev --getsize64 /dev/block/by-name/RADIO
-adb shell 'dd if=/dev/block/by-name/RADIO of=/tmp/RADIO-original.img bs=1048576'
-adb shell sha256sum /dev/block/by-name/RADIO
+adb shell readlink -f /dev/block/platform/dw_mmc/by-name/RADIO
+adb shell blockdev --getsize64 /dev/block/platform/dw_mmc/by-name/RADIO
+adb shell 'dd if=/dev/block/platform/dw_mmc/by-name/RADIO of=/tmp/RADIO-original.img bs=1048576'
+adb shell sha256sum /dev/block/platform/dw_mmc/by-name/RADIO
 adb pull /tmp/RADIO-original.img
 wc -c RADIO-original.img
 sha256sum RADIO-original.img
 ```
 
-**Stop** unless the block node is `mmcblk0p13`, both sizes are exactly 20 MiB and the backup checksum matches the original partition. A vetted, raw, 20 MiB RADIO image is written from TWRP only after checking its SHA-256 and saving the backup. **Do not** use `dd` on the Android-sparse `system.img`; it requires the OTA's sparse-aware installer. If RADIO replacement does not restore modem enumeration, restore the device's own backup rather than replacing EFS/NV from a donor.
+**Stop** unless the block node resolves to `mmcblk0p13`, both sizes are exactly 20 MiB and the backup checksum matches the original partition. A vetted, raw, 20 MiB RADIO image is written from TWRP only after checking its SHA-256 and saving the backup. **Do not** use `dd` on the Android-sparse `system.img`; it requires the OTA's sparse-aware installer. If RADIO replacement does not restore modem enumeration, restore the device's own backup rather than replacing EFS/NV from a donor.
 
 ## XMM6262 test kernel and log collection
 
@@ -82,3 +83,17 @@ adb shell 'for d in /sys/bus/usb/devices/*; do [ -f "$d/idVendor" ] && echo "$d 
 ```
 
 Look for HSIC BOOTROM `058b:0041`, runtime `1519:0020` and `ril.cbd.boot_done=1`. Logs may contain device identifiers. Do not publish them without review.
+
+
+## BOOT-only test installation (no Android rebuild)
+
+The experimental XMM6262 CP_ON GPIO readback kernel was rebuilt from the Linux 7.3.0 source and packed with the **unchanged ramdisk** from the published working BOOT image. No SYSTEM, RADIO, USERDATA or EFS update is required to try it.
+
+- Reference BOOT SHA-256: `acc2a0579e0f4975da3b569941534f5b572ad9a7ae2bf4409fd88b5f633dd565`
+- Experimental BOOT SHA-256: `09f43deb8f04aaa9a4a3546203d835611a1100df0fb3b2e1933f224b8e9bb307`
+- BOOT node in TWRP 3.1.1: `/dev/block/platform/dw_mmc/by-name/BOOT` -> `/dev/block/mmcblk0p9`
+- BOOT size: `8388608` bytes
+
+In TWRP, confirm the BOOT block path, size and original checksum before writing. Back up the original BOOT to the computer and confirm its SHA-256. Then upload the 8 MiB experimental image to `/tmp` and use `dd` against the **verified** BOOT block node. Read back the entire block and verify its checksum before rebooting. To leave this TWRP version for Android, use `adb shell twrp reboot`, not plain `adb reboot` (the latter may leave the recovery boot flag set). For the complete test procedure, see the README shipped with the experimental BOOT archive.
+
+On one working SM-T311, the experimental BOOT reached Android `sys.boot_completed=1`, XMM6262 `ONLINE`, `ril.cbd.boot_done=1`, runtime HSIC `1519:0020` and connected Wi-Fi. It measured `CP_ON_GPIO_SYNC rise_ns=4375 fall_ns=2459 pulse_us=60`. This **does not** demonstrate that the change resolves the other tablet's failure.
