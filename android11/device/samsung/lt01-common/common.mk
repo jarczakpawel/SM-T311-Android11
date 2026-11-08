@@ -212,6 +212,9 @@ PRODUCT_COPY_FILES += \
 PRODUCT_PACKAGES += \
     smt311_wpa_supplicant_known_good
 
+PRODUCT_COPY_FILES += \
+    device/samsung/lt01-common/wifi/wpa_supplicant.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant.conf
+
 # END SM-T311 A3 KNOWN-GOOD RECONCILIATION
 
 # BEGIN SM-T311 HOTFIX26 MODERN V4L2 CODEC2
