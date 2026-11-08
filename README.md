@@ -82,6 +82,8 @@
 
 **Installation:** Download `SM-T311-G1788-G1786-FINAL-CLEAN-ANDROID11-TWRP-OTA.zip` from [GitHub Releases](https://github.com/jarczakpawel/SM-T311-Android11/releases/tag/v1) and install it using TWRP. **SM-T311 only.** The `system.img` file uses Android sparse format; do not write it directly with `dd`. Checksums: [`images/SHA256SUMS.txt`](images/SHA256SUMS.txt).
 
+**SM-T311 clean-install fixes and modem diagnostics:** [`docs/SM-T311-FIELD-RECOVERY.md`](docs/SM-T311-FIELD-RECOVERY.md). Includes Wi-Fi first-boot configuration, GPS initialization, safe RADIO backup and XMM6262 CP_ON testing.
+
 **Building:** See [`docs/BUILD.md`](docs/BUILD.md). The Android patches reproduce the final Git source trees. Compatible proprietary vendor files and locally built ARM32 Mesa libraries are required.
 
 **Note:** Unofficial community build, **not an official Samsung or LineageOS release**. Built as `userdebug` and signed with AOSP test keys. Kernel: GPL-2.0; other components retain their respective licenses. Redistribution rights for proprietary libraries and firmware must be reviewed separately.

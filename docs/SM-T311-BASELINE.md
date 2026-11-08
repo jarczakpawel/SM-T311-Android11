@@ -54,3 +54,11 @@ The absence of the CP at HSIC/BOOTROM enumeration occurs before
 RIL registration, and is not by itself evidence of an SELinux problem.
 A different RADIO partition SHA alone does not establish which
 internal firmware section differs.
+
+## Field recovery and modem timing
+
+For the original v1 OTA, missing Wi-Fi runtime configuration can also be
+initialized manually without a full Android rebuild. See
+[SM-T311 field recovery](SM-T311-FIELD-RECOVERY.md) for commands, RADIO backup
+and the XMM6262 diagnostic-kernel scope. The Wi-Fi template is included in
+source for the next rebuilt SYSTEM; a kernel-only image cannot deploy it.
